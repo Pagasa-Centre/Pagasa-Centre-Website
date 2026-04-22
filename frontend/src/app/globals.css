@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+@theme inline {
+  /* Brand primary */
+  --color-primary: #3ea463;
+  --color-primary-dark: #2a7a4c;
+  --color-primary-light: #61c27c;
+
+  /* Neutral scale */
+  --color-neutral-800: #0e0e0e;
+  --color-neutral-700: #2e2e2e;
+  --color-neutral-600: #5a5a5a;
+  --color-neutral-500: #8e8e8e;
+  --color-neutral-400: #bbb;
+  --color-neutral-300: #dcdcdc;
+  --color-neutral-200: #f9f9f9;
+  --color-neutral-100: #ffffff;
+
+  /* Semantic aliases — avoid "dark" as it's reserved by Tailwind's dark-mode variant */
+  --color-ink: #0e0e0e;
+  --color-ink-secondary: #2e2e2e;
+  --color-surface: #f9f9f9;
+  --color-background: #ffffff;
+  --color-foreground: #0e0e0e;
+
+  --font-sans: var(--font-geist-sans);
+}
+
+:root {
+  --background: #ffffff;
+  --foreground: #0e0e0e;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
