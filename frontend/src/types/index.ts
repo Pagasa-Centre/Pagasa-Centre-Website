@@ -31,6 +31,23 @@ export interface Leader {
   imageUrl?: string;
 }
 
+export interface Belief {
+  number: number;
+  title: string;
+  description: string;
+  scripture: string;
+}
+
+export interface LocationDetail {
+  id: string;
+  name: string;
+  venue?: string;
+  address: string;
+  schedule: string;
+  phone?: string;
+  email?: string;
+}
+
 // Future: returned from Go API once auth is added
 export interface User {
   id: string;
