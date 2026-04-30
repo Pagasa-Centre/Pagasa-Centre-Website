@@ -38,6 +38,17 @@ export interface Belief {
   scripture: string;
 }
 
+export interface Event {
+  id: string;
+  title: string;
+  date: string;
+  time: string;
+  description?: string;
+  location?: string;
+  cta?: { label: string; href: string };
+  imageUrl?: string;
+}
+
 export interface LocationDetail {
   id: string;
   name: string;
