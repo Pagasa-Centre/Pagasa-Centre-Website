@@ -1,48 +1,5 @@
 import Link from "next/link";
-import type { Ministry } from "@/types";
-
-const ministries: Ministry[] = [
-  {
-    id: "sunday-celebration",
-    name: "Sunday Cell Celebration",
-    day: "Sunday",
-    time: "2:00 PM",
-    description:
-      "Join us every Sunday at 2PM for the uplifting Pag-Asa Centre Celebration!",
-  },
-  {
-    id: "production-team",
-    name: "Production Team",
-    day: "Sunday",
-    time: "2:00 PM",
-    description:
-      "Handles transporting, assembling, and storing church assets to make every service run smoothly.",
-  },
-  {
-    id: "childrens-ministry",
-    name: "Children's Ministry",
-    day: "Sunday",
-    time: "3:00 PM",
-    description:
-      "Nurturing the spiritual growth and helping the next generation discover the love of Jesus Christ.",
-  },
-  {
-    id: "media-ministry",
-    name: "Media Ministry",
-    day: "Sunday",
-    time: "2:00 PM",
-    description:
-      "We focus on using media to spread the word of God and reach communities beyond our walls.",
-  },
-  {
-    id: "wildsons",
-    name: "Wildsons",
-    day: "Friday",
-    time: "6:30 PM",
-    description:
-      "To all youth, join us every Friday at 6:30 PM for Wildsons — a space built for the next generation.",
-  },
-];
+import { featuredMinistries } from "@/lib/ministries";
 
 function CalendarIcon() {
   return (
@@ -80,7 +37,7 @@ export default function Ministries() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {ministries.map((m) => (
+          {featuredMinistries.map((m) => (
             <div
               key={m.id}
               className="bg-white rounded-xl shadow-sm border border-neutral-300 overflow-hidden hover:shadow-md hover:border-primary/30 transition-all group"
