@@ -8,9 +8,9 @@ const geist = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "Pag-Asa Centre",
+  title: "Home - Pagasa Centre",
   description:
-    "A non-denominational, registered UK charity church established in 2007. Join us for worship, fellowship, and community.",
+    "Pag-Asa Centre is a nondenominational, charity church that has been established by God in the year 2008. As a church, we have a passion for God's presence, a deep craving to reach the lost, possess sincere integrity, have spirit-filled faith, down to earth humility and brokenness.",
 };
 
 export default function RootLayout({

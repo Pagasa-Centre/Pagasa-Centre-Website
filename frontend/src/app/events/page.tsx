@@ -6,9 +6,9 @@ import EventsHero from "@/components/events/EventsHero";
 import EventsGrid from "@/components/events/EventsGrid";
 
 export const metadata: Metadata = {
-  title: "Events | Pag-Asa Centre",
+  title: "Events - Pagasa Centre",
   description:
-    "Stay connected with upcoming Pag-Asa Centre events — conferences, anniversaries, summer camp, and more.",
+    "Stay up to date with Pagasa Centre's upcoming church events designed to encourage faith and fellowship.",
 };
 
 export default function EventsPage() {

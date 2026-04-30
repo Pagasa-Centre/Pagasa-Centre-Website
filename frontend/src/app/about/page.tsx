@@ -11,9 +11,9 @@ import StatementOfFaith from "@/components/about/StatementOfFaith";
 import AboutLocations from "@/components/about/AboutLocations";
 
 export const metadata: Metadata = {
-  title: "About Us | Pag-Asa Centre",
+  title: "About Us - Pagasa Centre",
   description:
-    "Pag-Asa Centre is a non-denominational, UK-registered charity church established in 2007. Learn about our story, the G12 vision, our pastors, and our statement of faith.",
+    "Join us on our journey as we help one another and make a difference in our local communities. Come as you are, and let us help you discover your purpose and experience the transformative power of faith.",
 };
 
 export default function AboutPage() {

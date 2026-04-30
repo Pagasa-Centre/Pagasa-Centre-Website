@@ -8,9 +8,8 @@ import MinistriesGrid from "@/components/schedule/MinistriesGrid";
 import GreatCommissionCTA from "@/components/schedule/GreatCommissionCTA";
 
 export const metadata: Metadata = {
-  title: "Schedule | Pag-Asa Centre",
-  description:
-    "Pag-Asa Centre weekly services and ministry schedule. Find a place to belong, grow, and serve.",
+  title: "Schedule - Pagasa Centre",
+  description: "Check out our schedule!",
 };
 
 export default function SchedulePage() {
