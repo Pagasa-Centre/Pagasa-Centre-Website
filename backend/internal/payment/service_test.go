@@ -63,7 +63,7 @@ func TestWebhookCapacityRace(t *testing.T) {
 				CellLeaderName: "Pastor", IsMainContact: true,
 				Attendance: registration.AttendanceDTO{
 					Type:              registration.AttendanceFullWeek,
-					ShirtSize:         "M",
+					ShirtSize:         "adult_m",
 					AccommodationCode: "lodge",
 				},
 			}},
@@ -157,7 +157,7 @@ func TestWebhookIdempotent(t *testing.T) {
 			FirstName: "Idem", LastName: "Test", Gender: "male", Age: 25,
 			CellLeaderName: "Pastor", IsMainContact: true,
 			Attendance: registration.AttendanceDTO{
-				Type: registration.AttendanceFullWeek, ShirtSize: "M",
+				Type: registration.AttendanceFullWeek, ShirtSize: "adult_m",
 				AccommodationCode: "tent",
 			},
 		}},

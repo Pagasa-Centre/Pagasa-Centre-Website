@@ -80,8 +80,11 @@ func validateFullWeek(prefix string, a AttendanceDTO, fields map[string]string) 
 	if strings.TrimSpace(a.AccommodationCode) == "" {
 		fields[prefix+".accommodation_code"] = "is required for full week attendance"
 	}
-	if strings.TrimSpace(a.ShirtSize) == "" {
+	switch {
+	case strings.TrimSpace(a.ShirtSize) == "":
 		fields[prefix+".shirt_size"] = "is required for full week attendance"
+	case !IsRealShirtSize(a.ShirtSize):
+		fields[prefix+".shirt_size"] = "must be one of the catalogued shirt sizes (see GET /api/shirt-sizes)"
 	}
 }
 
@@ -97,11 +100,18 @@ func validateDayPass(prefix string, a AttendanceDTO, fields map[string]string) {
 	}
 	switch a.TshirtOption {
 	case TshirtOptionTeamActivities, TshirtOptionTshirtOnly:
-		if strings.TrimSpace(a.ShirtSize) == "" {
+		switch {
+		case strings.TrimSpace(a.ShirtSize) == "":
 			fields[prefix+".shirt_size"] = "is required when purchasing a t-shirt"
+		case !IsRealShirtSize(a.ShirtSize):
+			fields[prefix+".shirt_size"] = "must be one of the catalogued shirt sizes (see GET /api/shirt-sizes)"
 		}
 	case TshirtOptionNone:
-		// ok
+		// Day-pass holders not buying a t-shirt should submit "n/a" (or leave
+		// the field empty). Anything else is suspicious — reject it.
+		if s := strings.TrimSpace(a.ShirtSize); s != "" && !strings.EqualFold(s, ShirtSizeNotApplicable) {
+			fields[prefix+".shirt_size"] = `must be "n/a" or empty when not purchasing a t-shirt`
+		}
 	default:
 		fields[prefix+".tshirt_option"] = "must be one of team_activities, tshirt_only, none"
 	}

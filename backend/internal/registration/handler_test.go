@@ -64,7 +64,7 @@ func validBody() []byte {
 			"is_main_contact": true,
 			"attendance": map[string]any{
 				"type":               "full_week",
-				"shirt_size":         "M",
+				"shirt_size":         "adult_m",
 				"accommodation_code": "lodge",
 			},
 		}},
@@ -140,7 +140,7 @@ func TestPostRegistrations_HasMinor(t *testing.T) {
 			"cell_leader_name": "Pastor", "is_cell_leader": false, "is_main_contact": true,
 			"attendance": map[string]any{
 				"type":               "full_week",
-				"shirt_size":         "S",
+				"shirt_size":         "child_9_11y",
 				"accommodation_code": "lodge",
 			},
 		}},

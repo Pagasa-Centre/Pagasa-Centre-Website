@@ -1,0 +1,29 @@
+# VCS
+.git
+.gitignore
+
+# Env / secrets (compose loads .env separately)
+.env
+.env.*
+!.env.example
+
+# Build output / caches
+bin/
+out/
+tmp/
+*.test
+*.out
+coverage.out
+
+# Editor
+.vscode/
+.idea/
+.DS_Store
+
+# Docker (avoid recursive copy)
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Misc docs not needed in image
+README.md

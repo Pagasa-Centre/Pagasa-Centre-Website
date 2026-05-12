@@ -1,0 +1,48 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pagasa-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pagasa
+      POSTGRES_PASSWORD: pagasa
+      POSTGRES_DB: pagasa
+    ports:
+      # POSTGRES_HOST_PORT lets you remap the host-side port if 5432 is already
+      # taken by another local Postgres. Defaults to 5432.
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - pagasa_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pagasa -d pagasa"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pagasa-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      # API_HOST_PORT lets you remap the host-side port if 8080 is taken by
+      # another project. Defaults to 8080.
+      - "${API_HOST_PORT:-8080}:8080"
+    environment:
+      PORT: "8080"
+      DATABASE_URL: "postgres://pagasa:pagasa@postgres:5432/pagasa?sslmode=disable"
+      PUBLIC_BASE_URL: "http://localhost:8080"
+      CORS_ALLOWED_ORIGIN: "http://localhost:3000"
+      # Stripe values are read from .env (see .env.example). Compose substitutes
+      # ${VAR} from the .env file in this directory.
+      STRIPE_SECRET_KEY: "${STRIPE_SECRET_KEY:-sk_test_placeholder}"
+      STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:-whsec_placeholder}"
+      STRIPE_SUCCESS_URL: "${STRIPE_SUCCESS_URL:-http://localhost:3000/camp/registration/success?session_id={CHECKOUT_SESSION_ID}}"
+      STRIPE_CANCEL_URL: "${STRIPE_CANCEL_URL:-http://localhost:3000/camp/registration/cancelled}"
+
+volumes:
+  pagasa_pgdata:

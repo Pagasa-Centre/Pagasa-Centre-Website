@@ -8,7 +8,7 @@ import (
 	"pagasacentre/backend/internal/httpx"
 )
 
-// Mount registers the POST /registrations route.
+// Mount registers the registration-related routes.
 func Mount(r chi.Router, svc *Service) {
 	r.Post("/registrations", func(w http.ResponseWriter, req *http.Request) {
 		var body SubmitRequest
@@ -22,5 +22,18 @@ func Mount(r chi.Router, svc *Service) {
 			return
 		}
 		httpx.WriteJSON(w, http.StatusOK, resp)
+	})
+
+	r.Get("/shirt-sizes", func(w http.ResponseWriter, req *http.Request) {
+		sizes := ListShirtSizes()
+		grouped := map[string][]ShirtSize{"adult": {}, "child": {}}
+		for _, s := range sizes {
+			grouped[s.Category] = append(grouped[s.Category], s)
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{
+			"sizes":           sizes,
+			"by_category":     grouped,
+			"not_applicable":  ShirtSizeNotApplicable,
+		})
 	})
 }

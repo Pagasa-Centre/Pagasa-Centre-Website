@@ -20,7 +20,7 @@ func validFullWeekCamper(main bool) CamperDTO {
 		IsMainContact:  main,
 		Attendance: AttendanceDTO{
 			Type:              AttendanceFullWeek,
-			ShirtSize:         "M",
+			ShirtSize:         "adult_m",
 			AccommodationCode: "lodge",
 		},
 	}
@@ -107,6 +107,87 @@ func TestValidate_DayPassTeamActivitiesRequiresShirtSize(t *testing.T) {
 		NeedsCatering: boolPtr(true),
 	}
 	assertFieldError(t, Validate(req), "campers[0].attendance.shirt_size")
+}
+
+func TestValidate_FullWeekInvalidShirtSize(t *testing.T) {
+	req := validRequest()
+	req.Campers[0].Attendance.ShirtSize = "potato"
+	assertFieldError(t, Validate(req), "campers[0].attendance.shirt_size")
+}
+
+func TestValidate_FullWeekRejectsNotApplicable(t *testing.T) {
+	req := validRequest()
+	req.Campers[0].Attendance.ShirtSize = ShirtSizeNotApplicable
+	assertFieldError(t, Validate(req), "campers[0].attendance.shirt_size")
+}
+
+func TestValidate_DayPassNoneAcceptsNotApplicable(t *testing.T) {
+	req := validRequest()
+	req.Campers[0].Attendance = AttendanceDTO{
+		Type:          AttendanceDayPass,
+		Days:          []string{"mon"},
+		TshirtOption:  TshirtOptionNone,
+		ShirtSize:     ShirtSizeNotApplicable,
+		NeedsCatering: boolPtr(false),
+	}
+	if err := Validate(req); err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+}
+
+func TestValidate_DayPassNoneAcceptsEmptyShirt(t *testing.T) {
+	req := validRequest()
+	req.Campers[0].Attendance = AttendanceDTO{
+		Type:          AttendanceDayPass,
+		Days:          []string{"mon"},
+		TshirtOption:  TshirtOptionNone,
+		ShirtSize:     "",
+		NeedsCatering: boolPtr(false),
+	}
+	if err := Validate(req); err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+}
+
+func TestValidate_DayPassNoneRejectsRealSize(t *testing.T) {
+	req := validRequest()
+	req.Campers[0].Attendance = AttendanceDTO{
+		Type:          AttendanceDayPass,
+		Days:          []string{"mon"},
+		TshirtOption:  TshirtOptionNone,
+		ShirtSize:     "adult_m",
+		NeedsCatering: boolPtr(false),
+	}
+	assertFieldError(t, Validate(req), "campers[0].attendance.shirt_size")
+}
+
+func TestValidate_DayPassTeamActivitiesRejectsNotApplicable(t *testing.T) {
+	req := validRequest()
+	req.Campers[0].Attendance = AttendanceDTO{
+		Type:          AttendanceDayPass,
+		Days:          []string{"mon"},
+		TshirtOption:  TshirtOptionTeamActivities,
+		ShirtSize:     ShirtSizeNotApplicable,
+		NeedsCatering: boolPtr(true),
+	}
+	assertFieldError(t, Validate(req), "campers[0].attendance.shirt_size")
+}
+
+func TestIsRealShirtSize(t *testing.T) {
+	cases := map[string]bool{
+		"adult_m":         true,
+		"ADULT_M":         true, // case-insensitive
+		"child_3_4y":      true,
+		"child_12_18m":    true,
+		ShirtSizeNotApplicable: false, // n/a is not a "real" size
+		"potato":          false,
+		"":                false,
+	}
+	for in, want := range cases {
+		if got := IsRealShirtSize(in); got != want {
+			t.Errorf("IsRealShirtSize(%q) = %v, want %v", in, got, want)
+		}
+	}
 }
 
 func TestValidate_DayPassInvalidDay(t *testing.T) {
