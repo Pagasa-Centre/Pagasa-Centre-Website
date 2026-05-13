@@ -33,9 +33,12 @@ export const events: Event[] = [
   },
   {
     id: "pc-summer-camp",
-    title: "PC Summer Camp",
+    title: "PC Summer Camp 2026",
     date: "August 10–14th",
-    time: "TBC",
+    time: "Lenchwood Trust, Evesham",
+    description:
+      "A week of worship, teaching, fellowship, and fun together as a church family. Open to all members — full-week stays or day passes available.",
+    cta: { label: "Register now", href: "/camp/register" },
   },
   {
     id: "pc-christmas-party",

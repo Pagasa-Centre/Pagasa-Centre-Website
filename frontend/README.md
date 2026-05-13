@@ -1,22 +1,22 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+This is the Pag-Asa Centre website, built with [Next.js](https://nextjs.org).
 
 ## Getting Started
 
-First, run the development server:
+1. Copy `.env.local.example` to `.env.local` and point it at the backend:
+   ```bash
+   cp .env.local.example .env.local
+   ```
+   If your backend is running on the default port (no `API_HOST_PORT` set in `backend/.env`), use `http://localhost:8080`. Otherwise match the override (e.g. `http://localhost:8081`).
+2. Install dependencies and run the dev server:
+   ```bash
+   npm install
+   npm run dev
+   ```
+3. Open [http://localhost:3000](http://localhost:3000).
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+The camp registration form lives at `/camp/register` and hits the Go backend in `../backend`. Make sure that's running (`cd ../backend && make docker-up`) before testing the submit flow.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+You can start editing the page by modifying `src/app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
