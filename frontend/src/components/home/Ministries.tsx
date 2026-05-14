@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { featuredMinistries } from "@/lib/ministries";
 
@@ -42,11 +43,22 @@ export default function Ministries() {
               key={m.id}
               className="bg-white rounded-xl shadow-sm border border-neutral-300 overflow-hidden hover:shadow-md hover:border-primary/30 transition-all group"
             >
-              {/* Image placeholder */}
-              <div className="h-48 bg-neutral-200 flex items-center justify-center">
-                <span className="text-neutral-400 text-4xl font-bold">
-                  {m.name[0]}
-                </span>
+              <div className="relative h-48 bg-neutral-200 overflow-hidden">
+                {m.imageUrl ? (
+                  <Image
+                    src={m.imageUrl}
+                    alt={m.name}
+                    fill
+                    sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
+                    className="object-cover group-hover:scale-105 transition-transform duration-500"
+                  />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="text-neutral-400 text-4xl font-bold">
+                      {m.name[0]}
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="p-6">
                 <h3 className="font-bold text-neutral-800 text-lg mb-2 group-hover:text-primary transition-colors">

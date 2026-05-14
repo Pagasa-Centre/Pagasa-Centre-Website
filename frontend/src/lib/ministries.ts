@@ -12,6 +12,7 @@ export const ministries: Ministry[] = [
     time: "2:00 PM",
     description:
       "Join us every Sunday at 2PM for the uplifting Pag-Asa Centre Celebration!",
+    imageUrl: "/ministry-sunday.jpg",
   },
   {
     id: "wildsons",
