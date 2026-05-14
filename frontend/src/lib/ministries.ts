@@ -21,6 +21,7 @@ export const ministries: Ministry[] = [
     time: "6:30 PM",
     description:
       "To all youth, join us every Friday at 6:30 PM for Wildsons — a space built for the next generation.",
+    imageUrl: "/ministry-wildsons.jpg",
   },
   {
     id: "production-team",
@@ -29,6 +30,7 @@ export const ministries: Ministry[] = [
     time: "2:00 PM",
     description:
       "The Production ministry transports, assembles, and stores the church's assets so every service runs smoothly.",
+    imageUrl: "/ministry-production.jpg",
   },
   {
     id: "childrens-ministry",
@@ -37,6 +39,7 @@ export const ministries: Ministry[] = [
     time: "3:00 PM",
     description:
       "Nurturing the spiritual growth of the next generation and helping them discover the love of Jesus Christ.",
+    imageUrl: "/ministry-children.jpg",
   },
   {
     id: "media-ministry",
@@ -45,6 +48,7 @@ export const ministries: Ministry[] = [
     time: "2:00 PM",
     description:
       "We focus on using media to spread the word of God and reach communities beyond our walls.",
+    imageUrl: "/ministry-media.jpg",
   },
   {
     id: "creative-arts",
@@ -53,6 +57,7 @@ export const ministries: Ministry[] = [
     time: "12:30 PM",
     description:
       "Our Creative Arts Ministry is all about the beautiful fusion of faith and artistic expression.",
+    imageUrl: "/ministry-creative.jpg",
   },
   {
     id: "music-ministry",
@@ -61,6 +66,7 @@ export const ministries: Ministry[] = [
     time: "9:00 AM",
     description:
       "Genuine worship goes beyond performance. We lead the church into encountering God through music.",
+    imageUrl: "/ministry-music.jpg",
   },
   {
     id: "ushering-security",
@@ -69,6 +75,7 @@ export const ministries: Ministry[] = [
     time: "2:00 PM",
     description:
       "Ushers are the first representatives of Jesus Christ that people meet at a worship service.",
+    imageUrl: "/ministry-ushering.jpg",
   },
 ];
 
