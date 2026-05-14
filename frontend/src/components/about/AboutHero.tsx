@@ -5,7 +5,7 @@ export default function AboutHero() {
   return (
     <section className="relative min-h-[600px] flex items-center justify-center overflow-hidden pt-[88px]">
       <Image
-        src="/hero-bg.jpg"
+        src="/about-hero.jpg"
         alt="Pag-Asa Centre congregation in worship"
         fill
         priority
