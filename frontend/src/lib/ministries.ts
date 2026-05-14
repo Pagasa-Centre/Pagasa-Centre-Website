@@ -118,8 +118,63 @@ export const ministries: Ministry[] = [
     day: "Sunday",
     time: "12:30 PM",
     description:
-      "Our Creative Arts Ministry is all about the beautiful fusion of faith and artistic expression.",
+      "Our Creative Arts Ministry is dedicated to creating a vibrant space where these gifts can flourish, and where we can collectively use them to glorify the Lord.",
     imageUrl: "/ministry-creative.jpg",
+    location: "Jo Richardson - Drama Studio 2",
+    leaders: [{ name: "Nathan Gordon" }, { name: "Ash Ramanah" }],
+    aboutSections: [
+      {
+        body: [
+          "At Pag-Asa Centre, we believe that every individual is uniquely gifted by God with an array of talents and abilities. Our Creative Arts Ministry is dedicated to creating a vibrant space where these gifts can flourish, and where we can collectively use them to glorify the Lord.",
+        ],
+      },
+      {
+        heading:
+          "Discover Your Creative Calling at Pagasa Centre: Creative Arts Ministry",
+        body: [
+          "\"God has given each of you a gift from his great variety of spiritual gifts. Use them well to serve one another.\" — 1 Peter 4:10 (NLT)",
+        ],
+      },
+      {
+        heading: "The Power of Creative Expression",
+        body: [
+          "Our Creative Arts Ministry is all about the beautiful fusion of faith and artistic expression. We find inspiration in the words of 1 Peter 4:10, which remind us that our spiritual gifts are meant to be shared to serve one another and bring glory to God. Through the captivating mediums of dance and acting, we aim to spread joy, love, and our heartfelt praise through the powerful language of movement.",
+        ],
+      },
+      {
+        heading: "Meet Our Visionary Leader",
+        body: [
+          "Under the expert guidance of our visionary leader, Nathan Gordon, a seasoned professional dancer and choreographer, our ministry gathers weekly to craft and refine church-wide productions that inspire, uplift, and engage. Nathan's passion for the arts and unwavering faith in God's grace infuse our ministry with boundless creativity and enthusiasm.",
+        ],
+      },
+      {
+        heading: "Open Doors, Open Hearts",
+        body: [
+          "Whether you have been blessed with a creative gift that's ready to shine or if you're simply intrigued and eager to explore your artistic side, the doors of our Creative Arts Ministry are wide open to all. We believe that creativity knows no bounds, and everyone is welcome to join us on this journey of discovery, expression, and faith.",
+        ],
+      },
+      {
+        heading: "Join Us Today",
+        body: [
+          "Come and be a part of a community where your creativity is celebrated, and your artistic journey is nurtured. At Pag-Asa Centre's Creative Arts Ministry, we are more than a team; we are a family united by our love for God and our passion for creativity. Together, we seek to create meaningful, impactful, and spiritually uplifting productions that touch hearts and inspire souls.",
+        ],
+      },
+      {
+        heading: "Discover, Create, Worship",
+        body: [
+          "Unlock the door to your creative potential, and let your talents shine as a vibrant part of our Creative Arts Ministry. Together, we will illuminate the world with the message of God's love and grace through the universal language of art and expression.",
+          "Join us and let your creative spirit soar at Pag-Asa Centre's Creative Arts Ministry by clicking \"Get Involved\" and filling in the form.",
+        ],
+      },
+      {
+        heading: "Ministry activities and schedule",
+        body: [
+          "Day: Sundays",
+          "Time: 12:30 — 13:30",
+          "Location: Jo Richardson — Drama Studio 2",
+        ],
+      },
+    ],
   },
   {
     id: "music-ministry",
