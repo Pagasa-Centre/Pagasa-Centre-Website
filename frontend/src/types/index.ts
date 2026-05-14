@@ -6,6 +6,7 @@ export interface MinistryLeader {
 export interface MinistryAboutSection {
   heading?: string;
   body: string[];
+  bullets?: string[];
 }
 
 export interface Ministry {

@@ -88,8 +88,29 @@ export const ministries: Ministry[] = [
     day: "Sunday",
     time: "2:00 PM",
     description:
-      "We focus on using media to spread the word of God and reach communities beyond our walls.",
+      "The Media Ministry is the Church's evangelistic extension that focuses on using media to spread the word of God.",
     imageUrl: "/ministry-media.jpg",
+    location: "Jo Richardson Community School",
+    leaders: [{ name: "Gian Ambat" }, { name: "Ash Ramanah" }],
+    aboutSections: [
+      {
+        body: [
+          "The Media Ministry is the Church's evangelistic extension that focuses on using media to spread the word of God. The technical assistance needed for our worship services, archived teachings, sermon messages, and other events will be taught. You will have the chance to use various forms of technology, media outlets, and social media platforms to effectively share the Good News of Jesus Christ with people all over the world if you choose to serve in the team!",
+          "You have lots of options for serving in the media ministry. The Pag-Asa Centre Media team is here to assist you in learning what you'll need to know while having fun!",
+        ],
+      },
+      {
+        heading: "How to get involved in the ministry?",
+        body: [
+          "Please contact Pastor Gian or your cell leader if you want to be a member. You can also click \"Get Involved\" below and fill in the form!",
+        ],
+      },
+      {
+        heading: "Ministry activities and schedule",
+        body: ["Media Ministry serves every Sunday from 2pm-5pm. Activities involve:"],
+        bullets: ["Photography", "Videography", "Editing", "Projection"],
+      },
+    ],
   },
   {
     id: "creative-arts",

@@ -74,6 +74,13 @@ export default function MinistryDetail({ ministry }: { ministry: Ministry }) {
                     {section.body.map((p, j) => (
                       <p key={j}>{p}</p>
                     ))}
+                    {section.bullets && section.bullets.length > 0 && (
+                      <ul className="list-disc pl-6 space-y-1">
+                        {section.bullets.map((b, j) => (
+                          <li key={j}>{b}</li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 ))}
               </div>
