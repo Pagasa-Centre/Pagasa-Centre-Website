@@ -39,7 +39,8 @@ export default function Ministries() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {featuredMinistries.map((m) => (
-            <div
+            <Link
+              href={`/ministry/${m.id}`}
               key={m.id}
               className="bg-white rounded-xl shadow-sm border border-neutral-300 overflow-hidden hover:shadow-md hover:border-primary/30 transition-all group"
             >
@@ -78,13 +79,13 @@ export default function Ministries() {
                   {m.description}
                 </p>
               </div>
-            </div>
+            </Link>
           ))}
         </div>
 
         <div className="mt-12 text-center">
           <Link
-            href="/ministries"
+            href="/schedule#ministries"
             className="inline-flex items-center gap-2 text-primary font-semibold hover:underline"
           >
             Browse all ministries

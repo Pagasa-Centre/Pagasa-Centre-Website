@@ -1,9 +1,5 @@
 import type { Ministry } from "@/types";
 
-// TODO: when real photos exist in /public, set imageUrl on each ministry below.
-// Suggested filenames: /ministry-sunday.jpg, /ministry-wildsons.jpg,
-// /ministry-production.jpg, /ministry-children.jpg, /ministry-media.jpg,
-// /ministry-creative.jpg, /ministry-music.jpg, /ministry-ushering.jpg.
 export const ministries: Ministry[] = [
   {
     id: "sunday-celebration",
@@ -29,8 +25,14 @@ export const ministries: Ministry[] = [
     day: "Sunday",
     time: "2:00 PM",
     description:
-      "The Production ministry transports, assembles, and stores the church's assets so every service runs smoothly.",
+      "The Production ministry is responsible for transporting, assembling, and storing the church's assets and equipment. This ministry involves some lifting and coordination however it is so rewarding to see that all the equipment are working and in its right place.",
     imageUrl: "/ministry-production.jpg",
+    location: "Jo Richardson Community School",
+    leaders: [{ name: "Kenneth Camposano" }, { name: "Ash Ramanah" }],
+    about: [
+      "Our church has a dedicated Production Team that is responsible for creating an atmosphere of worship and celebration through decorations and visual effects. The team is comprised of talented volunteers and designers who are passionate about using their gifts to enhance the worship experience. They also help provide decorations and visual effects for special events throughout the year. They are an integral part of our church's ministry, helping to create a sense of joy and celebration in everything that we do.",
+      "If you are interested in joining our Production Team or would like more information, please don't hesitate to contact your cell leader or click \"Get Involved\" below. We would love to have you join our team and help us create beautiful and inspiring worship experiences for our congregation.",
+    ],
   },
   {
     id: "childrens-ministry",

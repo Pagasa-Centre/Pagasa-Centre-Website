@@ -1,3 +1,8 @@
+export interface MinistryLeader {
+  name: string;
+  imageUrl?: string;
+}
+
 export interface Ministry {
   id: string;
   name: string;
@@ -5,6 +10,10 @@ export interface Ministry {
   time: string;
   description: string;
   imageUrl?: string;
+  location?: string;
+  about?: string[];
+  leaders?: MinistryLeader[];
+  getInvolvedHref?: string;
 }
 
 export interface Location {

@@ -38,30 +38,29 @@ function ClockIcon() {
   );
 }
 
-export default function MinistriesGrid() {
+export default function BrowseMoreMinistries({
+  currentId,
+}: {
+  currentId: string;
+}) {
+  const others = ministries.filter((m) => m.id !== currentId).slice(0, 6);
+
   return (
-    <section className="py-20 lg:py-24 bg-surface" id="ministries">
+    <section className="py-20 lg:py-24 bg-surface">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-14">
-          <p className="text-primary uppercase tracking-widest text-sm font-semibold mb-2">
-            Our Ministries
-          </p>
-          <h2 className="text-3xl sm:text-4xl font-bold text-neutral-800">
-            We have the perfect ministry for you
+        <div className="mb-10">
+          <span className="block w-12 h-0.5 bg-neutral-900 mb-4" />
+          <h2 className="text-3xl sm:text-4xl font-bold text-neutral-900">
+            Browse more ministries
           </h2>
-          <p className="mt-4 text-neutral-600 max-w-xl mx-auto">
-            There is a place for everyone. Find a ministry where you can grow,
-            serve, and belong.
-          </p>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {ministries.map((m) => (
+          {others.map((m) => (
             <Link
               href={`/ministry/${m.id}`}
               key={m.id}
-              id={m.id}
-              className="bg-white rounded-xl shadow-sm border border-neutral-300 overflow-hidden hover:shadow-md hover:border-primary/30 transition-all group scroll-mt-28 block"
+              className="bg-white rounded-xl shadow-sm border border-neutral-300 overflow-hidden hover:shadow-md hover:border-primary/30 transition-all group"
             >
               <div className="relative h-48 bg-neutral-200 overflow-hidden">
                 {m.imageUrl ? (
@@ -81,10 +80,7 @@ export default function MinistriesGrid() {
                 )}
               </div>
               <div className="p-6">
-                <h3 className="font-bold text-neutral-800 text-lg mb-2 group-hover:text-primary transition-colors">
-                  {m.name}
-                </h3>
-                <div className="flex items-center gap-4 text-sm text-neutral-500 mb-3">
+                <div className="flex items-center gap-4 text-xs uppercase tracking-widest text-neutral-500 mb-3 font-semibold">
                   <span className="flex items-center gap-1">
                     <CalendarIcon />
                     {m.day}
@@ -94,9 +90,15 @@ export default function MinistriesGrid() {
                     {m.time}
                   </span>
                 </div>
-                <p className="text-neutral-600 text-sm leading-relaxed">
+                <h3 className="font-bold text-neutral-900 text-lg mb-2 uppercase tracking-wide group-hover:text-primary transition-colors">
+                  {m.name}
+                </h3>
+                <p className="text-neutral-600 text-sm leading-relaxed mb-4 line-clamp-2">
                   {m.description}
                 </p>
+                <span className="inline-flex items-center gap-1 text-xs uppercase tracking-widest font-semibold text-neutral-900 border-b border-neutral-900 pb-1 group-hover:text-primary group-hover:border-primary transition-colors">
+                  More information
+                </span>
               </div>
             </Link>
           ))}
