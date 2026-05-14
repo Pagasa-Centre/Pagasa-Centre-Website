@@ -3,6 +3,11 @@ export interface MinistryLeader {
   imageUrl?: string;
 }
 
+export interface MinistryAboutSection {
+  heading?: string;
+  body: string[];
+}
+
 export interface Ministry {
   id: string;
   name: string;
@@ -11,7 +16,7 @@ export interface Ministry {
   description: string;
   imageUrl?: string;
   location?: string;
-  about?: string[];
+  aboutSections?: MinistryAboutSection[];
   leaders?: MinistryLeader[];
   getInvolvedHref?: string;
 }
