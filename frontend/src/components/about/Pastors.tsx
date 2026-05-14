@@ -4,20 +4,19 @@ interface PastorCardProps {
   name: string;
   title: string;
   bio: string;
-  imageObjectPosition: string;
+  imageUrl: string;
 }
 
-function PastorCard({ name, title, bio, imageObjectPosition }: PastorCardProps) {
+function PastorCard({ name, title, bio, imageUrl }: PastorCardProps) {
   return (
     <article className="bg-white border border-neutral-300 overflow-hidden flex flex-col">
-      {/* TODO: replace shared /pastors.jpg with individual pastor photos when available */}
       <div className="relative w-full aspect-[4/5]">
         <Image
-          src="/pastors.jpg"
+          src={imageUrl}
           alt={name}
           fill
-          className="object-cover"
-          style={{ objectPosition: imageObjectPosition }}
+          className="object-cover object-center"
+          sizes="(min-width: 768px) 50vw, 100vw"
         />
       </div>
       <div className="p-8 flex-1 flex flex-col">
@@ -54,13 +53,13 @@ export default function Pastors() {
             name="Dr. Godofredo Ambat"
             title="Bishop — Senior Pastor"
             bio="Guiding our spiritual journey with his wisdom and compassion. Under his leadership, the church has grown both spiritually and exponentially through the working hand of the Holy Spirit."
-            imageObjectPosition="left center"
+            imageUrl="/pastor-godofredo.jpg"
           />
           <PastorCard
             name="Pstr. Shay Ambat"
             title="Pastora"
             bio="Leading with grace and nurturing our community's faith. She is dedicated, compassionate and loves to serve the Lord, making a significant impact in the ministry alongside Dr. Ambat."
-            imageObjectPosition="right center"
+            imageUrl="/pastor-shay.jpg"
           />
         </div>
       </div>

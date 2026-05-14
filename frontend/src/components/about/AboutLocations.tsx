@@ -1,3 +1,4 @@
+import Image from "next/image";
 import type { LocationDetail } from "@/types";
 
 const locations: LocationDetail[] = [
@@ -17,6 +18,7 @@ const locations: LocationDetail[] = [
     schedule: "Sunday | 12:00PM - 2:00PM",
     phone: "+353 87 186 4957",
     email: "pagasacentreirl@gmail.com",
+    imageUrl: "/loc-bray.png",
   },
   {
     id: "pampanga",
@@ -24,6 +26,7 @@ const locations: LocationDetail[] = [
     venue: "2nd Floor of Juliez Manukan Building",
     address: "San Matias Highway, Santo Tomas, Pampanga, Philippines",
     schedule: "Sunday | 8:30AM - 10:30AM",
+    imageUrl: "/loc-pampanga.jpg",
   },
   {
     id: "bedfordshire",
@@ -31,6 +34,7 @@ const locations: LocationDetail[] = [
     venue: "Bunyan Road Christian Centre",
     address: "30 Bunyan Road, Kempston, Bedfordshire, MK42 8HL",
     schedule: "Saturday | 3:00PM - 6:00PM (Every other week)",
+    imageUrl: "/loc-bedfordshire.png",
   },
   {
     id: "reading",
@@ -38,6 +42,7 @@ const locations: LocationDetail[] = [
     venue: "Emmanuel Church Centre",
     address: "South Lake Crescent, Woodley, Reading, RG5 3QW",
     schedule: "Saturday | 2:30PM - 5:00PM",
+    imageUrl: "/loc-reading.jpg",
   },
   {
     id: "harwich",
@@ -45,6 +50,7 @@ const locations: LocationDetail[] = [
     venue: "Mayflower Primary School Hall",
     address: "Main Road, Dovercourt Harwich, Essex, C012 4AJ",
     schedule: "Saturday | 2:00PM - 4:00PM (Every other week)",
+    imageUrl: "/loc-harwich.jpg",
   },
   {
     id: "banga",
@@ -52,6 +58,7 @@ const locations: LocationDetail[] = [
     venue: "Pag-Asa Centre Banga, Ruiz Compound",
     address: "Bgy Kusan, Barrio 8, Banga, South Cotabato, Philippines",
     schedule: "Sunday | 9:00AM - 11:00AM",
+    imageUrl: "/loc-banga.jpg",
   },
   {
     id: "stratford",
@@ -66,6 +73,7 @@ const locations: LocationDetail[] = [
     venue: "The Old Library Centre",
     address: "65 Ombersley Street East, Droitwich Spa, WR9 8QS",
     schedule: "Saturday | 2:00PM - 6:00PM (Every other week)",
+    imageUrl: "/loc-droitwich.png",
   },
   {
     id: "southend",
@@ -73,6 +81,7 @@ const locations: LocationDetail[] = [
     venue: "The Cornerstone URC Church",
     address: "Bournemouth Park Road, Essex, SS2 5JL",
     schedule: "Saturday | 2:30PM onwards",
+    imageUrl: "/loc-south.png",
   },
 ];
 
@@ -176,53 +185,71 @@ export default function AboutLocations() {
           {locations.map((loc) => (
             <article
               key={loc.id}
-              className="p-6 rounded-xl border border-neutral-300 bg-surface hover:border-primary/40 hover:shadow-md transition-all flex flex-col"
+              className="rounded-xl border border-neutral-300 bg-surface hover:border-primary/40 hover:shadow-md transition-all flex flex-col overflow-hidden"
             >
-              <h3 className="text-lg font-bold text-neutral-900 mb-4 leading-snug">
-                {loc.name}
-              </h3>
-
-              <div className="space-y-3 text-sm flex-1">
-                <div className="flex gap-2">
-                  <MapPinIcon />
-                  <div className="text-neutral-700">
-                    {loc.venue && (
-                      <p className="font-medium text-neutral-800">
-                        {loc.venue}
-                      </p>
-                    )}
-                    <p className="text-neutral-600">{loc.address}</p>
-                  </div>
-                </div>
-
-                <div className="flex gap-2">
-                  <ClockIcon />
-                  <p className="text-neutral-700">{loc.schedule}</p>
-                </div>
-
-                {loc.phone && (
-                  <div className="flex gap-2">
-                    <PhoneIcon />
-                    <a
-                      href={`tel:${loc.phone.replace(/\s+/g, "")}`}
-                      className="text-neutral-700 hover:text-primary transition-colors"
-                    >
-                      {loc.phone}
-                    </a>
+              <div className="relative aspect-[16/10] bg-neutral-200 overflow-hidden">
+                {loc.imageUrl ? (
+                  <Image
+                    src={loc.imageUrl}
+                    alt={loc.name}
+                    fill
+                    sizes="(min-width: 1024px) 33vw, (min-width: 768px) 50vw, 100vw"
+                    className="object-cover"
+                  />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-primary/15 to-primary/5">
+                    <MapPinIcon />
                   </div>
                 )}
+              </div>
 
-                {loc.email && (
+              <div className="p-6 flex-1 flex flex-col">
+                <h3 className="text-lg font-bold text-neutral-900 mb-4 leading-snug">
+                  {loc.name}
+                </h3>
+
+                <div className="space-y-3 text-sm flex-1">
                   <div className="flex gap-2">
-                    <MailIcon />
-                    <a
-                      href={`mailto:${loc.email}`}
-                      className="text-neutral-700 hover:text-primary transition-colors break-all"
-                    >
-                      {loc.email}
-                    </a>
+                    <MapPinIcon />
+                    <div className="text-neutral-700">
+                      {loc.venue && (
+                        <p className="font-medium text-neutral-800">
+                          {loc.venue}
+                        </p>
+                      )}
+                      <p className="text-neutral-600">{loc.address}</p>
+                    </div>
                   </div>
-                )}
+
+                  <div className="flex gap-2">
+                    <ClockIcon />
+                    <p className="text-neutral-700">{loc.schedule}</p>
+                  </div>
+
+                  {loc.phone && (
+                    <div className="flex gap-2">
+                      <PhoneIcon />
+                      <a
+                        href={`tel:${loc.phone.replace(/\s+/g, "")}`}
+                        className="text-neutral-700 hover:text-primary transition-colors"
+                      >
+                        {loc.phone}
+                      </a>
+                    </div>
+                  )}
+
+                  {loc.email && (
+                    <div className="flex gap-2">
+                      <MailIcon />
+                      <a
+                        href={`mailto:${loc.email}`}
+                        className="text-neutral-700 hover:text-primary transition-colors break-all"
+                      >
+                        {loc.email}
+                      </a>
+                    </div>
+                  )}
+                </div>
               </div>
             </article>
           ))}

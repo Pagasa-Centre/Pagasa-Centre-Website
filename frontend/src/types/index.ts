@@ -3,10 +3,16 @@ export interface MinistryLeader {
   imageUrl?: string;
 }
 
+export interface MinistryAboutSubsection {
+  heading: string;
+  body: string[];
+}
+
 export interface MinistryAboutSection {
   heading?: string;
   body: string[];
   bullets?: string[];
+  subsections?: MinistryAboutSubsection[];
 }
 
 export interface Ministry {
@@ -72,6 +78,7 @@ export interface LocationDetail {
   schedule: string;
   phone?: string;
   email?: string;
+  imageUrl?: string;
 }
 
 // Future: returned from Go API once auth is added

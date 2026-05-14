@@ -9,6 +9,18 @@ export const ministries: Ministry[] = [
     description:
       "Join us every Sunday at 2PM for the uplifting Pag-Asa Centre Celebration!",
     imageUrl: "/ministry-sunday.jpg",
+    location: "Jo Richardson Community School",
+    leaders: [{ name: "Dr. Godofredo Ambat" }],
+    aboutSections: [
+      {
+        body: [
+          "Every Sunday at 2 PM, we gather as a community at Pag-Asa Centre to celebrate the goodness of God and the beauty of fellowship. Our Sunday 'Cell' Celebration is a time of worship, reflection, and spiritual growth.",
+          "Experience the uplifting power of prayer, music and inspiring messages that resonate with your heart and soul. Whether you're seeking spiritual guidance, connecting with fellow believers or simply looking to find hope and inspiration, our Sunday Celebration is the perfect place to be.",
+          "Come as you are and feel the warmth of our community. At Pag-Asa Centre, we believe in the transformative power of faith and unity. Join us at 2 PM every Sunday to be part of a joyful, faith-filled experience that will enrich your life and deepen your connection with God.",
+          "We look forward to sharing this sacred time with you!",
+        ],
+      },
+    ],
   },
   {
     id: "wildsons",
@@ -182,8 +194,81 @@ export const ministries: Ministry[] = [
     day: "Saturday",
     time: "9:00 AM",
     description:
-      "Genuine worship goes beyond performance. We lead the church into encountering God through music.",
+      "Through music, we have the privilege to lead ourselves and others into a profound connection with the Divine. Our songs and melodies become a conduit through which we offer ourselves as living sacrifices wholly dedicated to the Lord's purpose.",
     imageUrl: "/ministry-music.jpg",
+    location: "77 Oval Road North, RM10 9ET",
+    leaders: [{ name: "Rommel Butawan" }, { name: "Ash Ramanah" }],
+    aboutSections: [
+      {
+        body: [
+          "\"In the music ministry, we are called to offer our bodies as a living sacrifice, holy and pleasing to God (Romans 12:1). This act of consecration resonates deeply with the essence of worship described in Scripture: 'When the true worshipers will worship the Father in spirit and truth, for the Father is seeking such people to worship Him. God is spirit, and those who worship Him must worship in spirit and truth.' (John 4:22-24)",
+          "As musicians and worshipers, our role is to create an environment where the and truth of God are palpable. Through music, we have the privilege to lead ourselves and others into a profound connection with the Divine. Our songs and melodies become a conduit through which we offer ourselves as living sacrifices wholly dedicated to the Lord's purpose.",
+          "In this ministry, we understand that genuine worship goes beyond external performances; it delves into the depths of our spirits and aligns our hearts with the truth of God's Word. We are not just singers and instrumentalists; we are worshipers who seek to honour God by worshiping Him in spirit and truth, offering our very selves as pleasing offerings to the Father. As we engage in this true and proper worship, we answer the divine call to seek and serve Him with all our hearts, all our souls, and all our musical talents.\"",
+        ],
+      },
+      {
+        heading: "How to get involved in the ministry?",
+        body: [
+          "Getting involved in a ministry can be a fulfilling way to use your gifts and talents for a higher purpose. It's an opportunity to contribute to your faith community and deepen your own spiritual growth while serving others.",
+        ],
+        subsections: [
+          {
+            heading: "Identify Your Gifts and Talents",
+            body: [
+              "Recognise your unique gifts and talents, such as singing, playing an instrument, song-writing, or sound engineering. Consider what you are passionate about and where you feel most skilled.",
+            ],
+          },
+          {
+            heading: "Prayer and Reflection",
+            body: [
+              "Spend time in prayer and reflection to discern if a specific ministry, like a music ministry, aligns with your calling and spiritual journey. Seek guidance from mentors, pastors, or spiritual advisors.",
+            ],
+          },
+          {
+            heading: "Join a Cell Group",
+            body: [
+              "We are a Cell Church. Cell groups or small groups are organized for fellowship, Bible study, evangelism and mutual support. Inquire about joining a cell group that focuses on spiritual growth and fruitfulness.",
+            ],
+          },
+          {
+            heading: "Connect with Leaders",
+            body: [
+              "Reach out to the leaders of the music ministry or the relevant ministry you're interested in. Express your interest and inquire about opportunities to serve. They can provide insights into current needs and expectations.",
+            ],
+          },
+          {
+            heading: "Training and Development",
+            body: [
+              "If necessary, invest in training or honing your skills. Take music lessons, practice regularly, or attend workshops to improve your musical abilities. Ministry often requires a commitment to excellence.",
+            ],
+          },
+          {
+            heading: "Volunteer",
+            body: [
+              "We strongly believe in the power of volunteerism. Offer to volunteer your time and talents. Start small, perhaps by joining the choir or assisting with music-related tasks. Serving in a supportive role like setting up and pack up can help you become familiar with the ministry and its members.",
+            ],
+          },
+          {
+            heading: "Build Relationships",
+            body: [
+              "Forge relationships with fellow ministry members and leaders. Establishing connections within the ministry can help you integrate and find your place within the team.",
+            ],
+          },
+          {
+            heading: "Serve with Humility",
+            body: [
+              "Remember that ministry is about serving others and God, not seeking personal recognition or glory. Approach your service with humility and a servant's heart.",
+            ],
+          },
+        ],
+      },
+      {
+        heading: "Ministry activities and schedule",
+        body: [
+          "Worship practices/rehearsals every 9am Saturday at 77 Oval Road North RM10 9ET in the Summer House.",
+        ],
+      },
+    ],
   },
   {
     id: "ushering-security",

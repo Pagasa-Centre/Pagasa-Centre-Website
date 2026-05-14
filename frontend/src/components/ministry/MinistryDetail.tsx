@@ -81,6 +81,20 @@ export default function MinistryDetail({ ministry }: { ministry: Ministry }) {
                         ))}
                       </ul>
                     )}
+                    {section.subsections && section.subsections.length > 0 && (
+                      <div className="space-y-5 pt-2">
+                        {section.subsections.map((sub, j) => (
+                          <div key={j} className="space-y-2">
+                            <h4 className="text-base sm:text-lg font-bold text-neutral-900">
+                              {sub.heading}
+                            </h4>
+                            {sub.body.map((p, k) => (
+                              <p key={k}>{p}</p>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
