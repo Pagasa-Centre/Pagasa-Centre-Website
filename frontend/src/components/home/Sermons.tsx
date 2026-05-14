@@ -16,25 +16,16 @@ export default function Sermons() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
-          {/* Video player placeholder */}
-          <div className="relative aspect-video bg-ink rounded-2xl overflow-hidden shadow-xl group cursor-pointer">
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_50%,rgba(62,164,99,0.15),transparent)]" />
-              <a
-                href="https://www.youtube.com/@PagasaCentre"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="relative w-16 h-16 rounded-full bg-primary flex items-center justify-center shadow-lg group-hover:scale-110 group-hover:bg-primary-dark transition-all"
-              >
-                <svg className="w-6 h-6 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-              </a>
-            </div>
-            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 p-4">
-              <p className="text-white text-sm font-medium">Latest sermon — Pag-Asa Centre</p>
-              <p className="text-white/50 text-xs">Watch on YouTube</p>
-            </div>
+          {/* Latest sermon video */}
+          <div className="relative aspect-video bg-ink rounded-2xl overflow-hidden shadow-xl">
+            <iframe
+              src="https://www.youtube-nocookie.com/embed/eVnwI5YWbzU?rel=0"
+              title="Latest sermon — Pag-Asa Centre"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+              referrerPolicy="strict-origin-when-cross-origin"
+              className="absolute inset-0 w-full h-full"
+            />
           </div>
 
           {/* Info */}
