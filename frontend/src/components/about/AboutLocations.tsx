@@ -9,6 +9,7 @@ const locations: LocationDetail[] = [
     schedule: "Sunday | 02:00PM - 05:00PM",
     phone: "+44 79 8494 8682",
     email: "pagasa_media@hotmail.co.uk",
+    imageUrl: "/loc-dagenham.jpg",
   },
   {
     id: "bray",
@@ -66,6 +67,7 @@ const locations: LocationDetail[] = [
     venue: "Ken Kennett Centre",
     address: "100 Justins Avenue, CV37 0DA",
     schedule: "Sunday | 2:00PM - 6:00PM (Every other week)",
+    imageUrl: "/loc-stratford.png",
   },
   {
     id: "westmidlands",
