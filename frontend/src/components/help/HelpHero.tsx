@@ -4,8 +4,8 @@ export default function HelpHero() {
   return (
     <section className="relative min-h-[600px] flex items-center justify-center overflow-hidden pt-[88px]">
       <Image
-        src="/our-story.jpg"
-        alt="Pag-Asa Centre community gathered together"
+        src="/help-hero.jpg"
+        alt="Pag-Asa Centre volunteers working with children"
         fill
         priority
         className="object-cover object-center"
