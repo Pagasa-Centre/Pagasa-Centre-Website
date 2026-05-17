@@ -5,16 +5,13 @@ FROM golang:1.25-alpine AS builder
 
 WORKDIR /src
 
-# Cache module downloads
+# Download modules (cached as its own layer via go.mod/go.sum)
 COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod download
+RUN go mod download
 
 # Build
 COPY . .
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api
 
 # ---- Runtime ----------------------------------------------------------------
 FROM alpine:3.20
