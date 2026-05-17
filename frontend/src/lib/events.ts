@@ -20,15 +20,21 @@ export const events: Event[] = [
     id: "pc-19th-anniversary",
     title: "PC 19yrs Anniversary",
     date: "July 19th",
-    time: "TBC",
+    time: "2:00 PM onwards",
+    description:
+      "Celebrate with us! Join the Pag-Asa Centre family as we mark our 19th anniversary together.",
+    location: "Jo Richardson Community School, Dagenham, RM9 4UN",
+    imageUrl: "/event-pc-anniversary.png",
   },
   {
     id: "pc-summer-camp",
     title: "PC Summer Camp 2026",
     date: "August 10–14th",
-    time: "Lenchwood Trust, Evesham",
+    time: "Save the date!",
     description:
       "A week of worship, teaching, fellowship, and fun together as a church family. Open to all members — full-week stays or day passes available.",
+    location: "Evesham, Worcestershire",
+    imageUrl: "/event-pc-summer-camp.png",
     cta: { label: "Register now", href: "/camp/register" },
   },
   {
@@ -36,6 +42,10 @@ export const events: Event[] = [
     title: "PC Christmas Party",
     date: "December 20th",
     time: "TBC",
+    description:
+      "'Tis the season! Join the Pag-Asa Centre family for our Christmas Party.",
+    location: "Jo Richardson Community School, Dagenham, RM9 4UN",
+    imageUrl: "/event-pc-christmas.png",
   },
 ];
 
