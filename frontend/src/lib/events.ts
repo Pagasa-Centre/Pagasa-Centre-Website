@@ -22,7 +22,7 @@ export const events: Event[] = [
     date: "July 19th",
     time: "2:00 PM onwards",
     description:
-      "Celebrate with us! Join the Pag-Asa Centre family as we mark our 19th anniversary together.",
+      "A celebration like no other! Join us for 19th Anniversary as we rejoice in God’s faithfulness in our church. Let’s come together in worship and gratitude!",
     location: "Jo Richardson Community School, Dagenham, RM9 4UN",
     imageUrl: "/event-pc-anniversary.png",
   },
@@ -32,7 +32,7 @@ export const events: Event[] = [
     date: "August 10–14th",
     time: "Save the date!",
     description:
-      "A week of worship, teaching, fellowship, and fun together as a church family. Open to all members — full-week stays or day passes available.",
+      "Our annual Summer Camp is a special time of fellowship, rest, spiritual renewal, and building deeper relationships together. Be sure to set these dates aside for you and your family.",
     location: "Evesham, Worcestershire",
     imageUrl: "/event-pc-summer-camp.png",
     cta: { label: "Register now", href: "/camp/register" },
@@ -43,7 +43,7 @@ export const events: Event[] = [
     date: "December 20th",
     time: "TBC",
     description:
-      "'Tis the season! Join the Pag-Asa Centre family for our Christmas Party.",
+      "It’s the most wonderful time of the year! Don’t come alone - invite your family and friends as we celebrate the true reason for the season, Jesus!",
     location: "Jo Richardson Community School, Dagenham, RM9 4UN",
     imageUrl: "/event-pc-christmas.png",
   },
