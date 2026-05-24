@@ -489,8 +489,8 @@ export default function CampRegisterForm({
                 )}
                 {dayPassCamperCount > 0 && (
                   <li>
-                    {dayPassCamperCount} × day-pass camper — free at
-                    registration
+                    {dayPassCamperCount} × day-pass camper — no deposit
+                    required
                   </li>
                 )}
               </ul>
