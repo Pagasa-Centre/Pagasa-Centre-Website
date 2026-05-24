@@ -81,13 +81,22 @@ func Validate(req SubmitRequest) error {
 // manually so we don't want walls of text.
 const maxRoommateRequestLen = 500
 
+// AccommodationChild is the code for "Child accommodation (sharing with
+// parent)". When a camper picks this as their 1st choice, a 2nd choice is
+// meaningless — they're inherently with their parent — so we skip the
+// usual "2nd choice required + must differ" rules. Kept in sync with the
+// 'child' row seeded in migration 0001.
+const AccommodationChild = "child"
+
 func validateFullWeek(prefix string, a AttendanceDTO, fields map[string]string) {
 	first := strings.TrimSpace(a.AccommodationFirstChoice)
 	second := strings.TrimSpace(a.AccommodationSecondChoice)
 	if first == "" {
 		fields[prefix+".accommodation_first_choice"] = "is required for full week attendance"
 	}
-	if second == "" {
+	// 2nd choice is required for everything EXCEPT the child-with-parent
+	// option, which by definition has no meaningful fallback.
+	if first != AccommodationChild && second == "" {
 		fields[prefix+".accommodation_second_choice"] = "is required for full week attendance"
 	}
 	if first != "" && second != "" && first == second {

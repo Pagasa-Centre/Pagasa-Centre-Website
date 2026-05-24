@@ -93,6 +93,15 @@ func TestValidate_FullWeekMissingSecondChoice(t *testing.T) {
 	assertFieldError(t, Validate(req), "campers[0].attendance.accommodation_second_choice")
 }
 
+func TestValidate_FullWeekChildAccommodationDoesNotRequireSecondChoice(t *testing.T) {
+	req := validRequest()
+	req.Campers[0].Attendance.AccommodationFirstChoice = AccommodationChild
+	req.Campers[0].Attendance.AccommodationSecondChoice = ""
+	if err := Validate(req); err != nil {
+		t.Fatalf("expected nil error when child + empty 2nd choice, got %v", err)
+	}
+}
+
 func TestValidate_FullWeekSecondChoiceMatchesFirst(t *testing.T) {
 	req := validRequest()
 	req.Campers[0].Attendance.AccommodationSecondChoice = req.Campers[0].Attendance.AccommodationFirstChoice

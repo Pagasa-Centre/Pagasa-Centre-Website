@@ -2,6 +2,7 @@
 
 import type { Accommodation, DayCode, ShirtSize } from "@/lib/api";
 import {
+  ACCOMMODATION_CHILD_CODE,
   type CamperState,
   DAY_PASS_DAYS,
   isMinor,
@@ -304,28 +305,34 @@ export default function CamperFieldset({
             value={value.accommodation_first_choice}
             accommodations={accommodations}
             error={attErr("accommodation_first_choice")}
-            onChange={(code) =>
-              onChange({
+            onChange={(code) => {
+              const patch: Partial<CamperState> = {
                 accommodation_first_choice: code,
-                // If they pick the same as 2nd, clear 2nd to force a re-pick.
-                accommodation_second_choice:
-                  value.accommodation_second_choice === code
-                    ? ""
-                    : value.accommodation_second_choice,
-              })
-            }
+              };
+              if (code === ACCOMMODATION_CHILD_CODE) {
+                // Child-with-parent has no meaningful 2nd choice; wipe any
+                // stale value so we don't accidentally submit it.
+                patch.accommodation_second_choice = "";
+              } else if (value.accommodation_second_choice === code) {
+                // Picking the same code as 2nd; clear 2nd to force a re-pick.
+                patch.accommodation_second_choice = "";
+              }
+              onChange(patch);
+            }}
           />
-          <AccommodationPicker
-            name={`${prefix}.accommodation_second_choice`}
-            label="2nd choice accommodation"
-            value={value.accommodation_second_choice}
-            accommodations={accommodations}
-            disabledCode={value.accommodation_first_choice}
-            error={attErr("accommodation_second_choice")}
-            onChange={(code) =>
-              onChange({ accommodation_second_choice: code })
-            }
-          />
+          {value.accommodation_first_choice !== ACCOMMODATION_CHILD_CODE && (
+            <AccommodationPicker
+              name={`${prefix}.accommodation_second_choice`}
+              label="2nd choice accommodation"
+              value={value.accommodation_second_choice}
+              accommodations={accommodations}
+              disabledCode={value.accommodation_first_choice}
+              error={attErr("accommodation_second_choice")}
+              onChange={(code) =>
+                onChange({ accommodation_second_choice: code })
+              }
+            />
+          )}
           <div className="flex flex-col gap-2">
             <label htmlFor={idFor("roommate")} className={labelCls}>
               Roommate requests

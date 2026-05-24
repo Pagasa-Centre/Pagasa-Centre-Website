@@ -6,6 +6,16 @@ import type { CamperSubmission, DayCode, Price } from "@/lib/api";
 
 export const SHIRT_SIZE_NOT_APPLICABLE = "n/a";
 
+// Youngest age that has to pay the deposit. Campers under this attend free
+// (cot / lap-of-parent). Mirrors backend MinDepositAge.
+export const MIN_DEPOSIT_AGE = 3;
+
+// Code for "Child accommodation (sharing with parent)". When chosen as the
+// 1st preference, the 2nd-choice picker is hidden because a child is by
+// definition with their parent — there's no meaningful fallback to pick.
+// Mirrors backend AccommodationChild.
+export const ACCOMMODATION_CHILD_CODE = "child";
+
 /**
  * CamperState is the raw form-state shape for a single camper. Strings (not
  * numbers/enums) so partially-typed inputs are easy to handle. We convert to
@@ -85,9 +95,9 @@ function priceMap(prices: Price[]): Record<string, Price> {
 /**
  * computeTotalPence mirrors the backend pricing logic exactly:
  *
- * - full_week: one flat "deposit" charge per camper
- * - day_pass:  £0 at registration (no deposit, no t-shirt fee — settled with
- *              the camp team on the day if applicable)
+ * - full_week + age >= MIN_DEPOSIT_AGE: one flat "deposit" charge per camper
+ * - full_week + age <  MIN_DEPOSIT_AGE: free (cot / lap-of-parent)
+ * - day_pass:                            £0 at registration
  *
  * Missing price codes contribute 0 (we surface this via a "prices not yet set"
  * notice in the form rather than failing silently).
@@ -100,12 +110,20 @@ export function computeTotalPence(
   const deposit = lookup.deposit?.amount_pence ?? 0;
   let total = 0;
   for (const c of campers) {
-    if (c.attendance.type === "full_week") {
+    if (c.attendance.type === "full_week" && c.age >= MIN_DEPOSIT_AGE) {
       total += deposit;
     }
-    // day_pass campers contribute nothing at registration time.
+    // Day-pass campers and under-3s contribute nothing at registration time.
   }
   return total;
+}
+
+export function payingForDeposit(c: CamperSubmission): boolean {
+  return c.attendance.type === "full_week" && c.age >= MIN_DEPOSIT_AGE;
+}
+
+export function isUnderDepositAge(age: number): boolean {
+  return Number.isFinite(age) && age > 0 && age < MIN_DEPOSIT_AGE;
 }
 
 export function pricesCurrency(prices: Price[]): string {

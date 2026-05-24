@@ -12,11 +12,14 @@ import {
   camp,
 } from "@/lib/api";
 import {
+  ACCOMMODATION_CHILD_CODE,
   type CamperState,
   computeTotalPence,
   emptyCamper,
   formatPence,
   isMinor,
+  MIN_DEPOSIT_AGE,
+  payingForDeposit,
   pricesCurrency,
   SHIRT_SIZE_NOT_APPLICABLE,
 } from "@/lib/camp";
@@ -113,13 +116,16 @@ function toSubmission(
           error: `Camper ${i + 1}: please pick a 1st accommodation choice.`,
         };
       }
-      if (!c.accommodation_second_choice) {
+      const isChildSharing =
+        c.accommodation_first_choice === ACCOMMODATION_CHILD_CODE;
+      if (!isChildSharing && !c.accommodation_second_choice) {
         return {
           ok: false,
           error: `Camper ${i + 1}: please pick a 2nd accommodation choice.`,
         };
       }
       if (
+        !isChildSharing &&
         c.accommodation_first_choice === c.accommodation_second_choice
       ) {
         return {
@@ -271,8 +277,10 @@ export default function CampRegisterForm({
     [previewCampers, prices],
   );
   const currency = pricesCurrency(prices);
-  const fullWeekCamperCount = previewCampers.filter(
-    (c) => c.attendance.type === "full_week",
+  const payingCamperCount = previewCampers.filter(payingForDeposit).length;
+  const freeFullWeekCount = previewCampers.filter(
+    (c) =>
+      c.attendance.type === "full_week" && c.age < MIN_DEPOSIT_AGE,
   ).length;
   const dayPassCamperCount = previewCampers.filter(
     (c) => c.attendance.type === "day_pass",
@@ -344,8 +352,8 @@ export default function CampRegisterForm({
           <p className="mt-4 text-neutral-600 max-w-xl mx-auto text-sm">
             Full-week campers pay a flat{" "}
             <strong>£50 non-refundable deposit per person</strong> at
-            registration. A deposit for day visitors is not required at this
-            stage.
+            registration. Campers under 3 years old and day visitors are not
+            required to pay a deposit at this stage.
           </p>
           <p className="mt-3 text-neutral-600 max-w-xl mx-auto text-sm">
             Pick a 1st and 2nd accommodation preference for each full-week
@@ -475,16 +483,24 @@ export default function CampRegisterForm({
               </button>
             </div>
             {/* Breakdown */}
-            {(fullWeekCamperCount > 0 || dayPassCamperCount > 0) && (
+            {(payingCamperCount > 0 ||
+              freeFullWeekCount > 0 ||
+              dayPassCamperCount > 0) && (
               <ul className="text-xs text-neutral-600 border-t border-neutral-200 pt-3 flex flex-col gap-1">
-                {fullWeekCamperCount > 0 && (
+                {payingCamperCount > 0 && (
                   <li>
-                    {fullWeekCamperCount} × full-week deposit (
+                    {payingCamperCount} × full-week deposit (
                     {formatPence(depositPence, currency)} each) ={" "}
                     {formatPence(
-                      depositPence * fullWeekCamperCount,
+                      depositPence * payingCamperCount,
                       currency,
                     )}
+                  </li>
+                )}
+                {freeFullWeekCount > 0 && (
+                  <li>
+                    {freeFullWeekCount} × full-week camper under{" "}
+                    {MIN_DEPOSIT_AGE} — no deposit required
                   </li>
                 )}
                 {dayPassCamperCount > 0 && (
@@ -495,12 +511,14 @@ export default function CampRegisterForm({
                 )}
               </ul>
             )}
-            {totalPence === 0 && fullWeekCamperCount === 0 && dayPassCamperCount > 0 && (
-              <p className="text-xs text-neutral-600 border-t border-neutral-200 pt-3">
-                Day-pass-only registrations skip Stripe — you&apos;ll get the
-                confirmation email immediately.
-              </p>
-            )}
+            {totalPence === 0 &&
+              payingCamperCount === 0 &&
+              (freeFullWeekCount > 0 || dayPassCamperCount > 0) && (
+                <p className="text-xs text-neutral-600 border-t border-neutral-200 pt-3">
+                  No deposit is owed for this registration — you&apos;ll get
+                  the confirmation email immediately after submitting.
+                </p>
+              )}
           </div>
         </form>
       </div>

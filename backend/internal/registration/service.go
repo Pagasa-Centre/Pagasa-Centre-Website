@@ -141,12 +141,13 @@ func (s *Service) Submit(ctx context.Context, req SubmitRequest) (*SubmitRespons
 		return resp, nil
 	}
 
+	paying := depositPayingCount(req)
 	session, err := s.stripe.CreateCheckoutSession(ctx, CheckoutParams{
 		GroupID:     groupID,
 		Email:       req.Contact.Email,
 		AmountPence: int64(total),
 		Currency:    currency,
-		Description: fmt.Sprintf("PC Summer Camp 2026 non-refundable deposit (%d camper%s)", fullWeekCount(req), pluralS(fullWeekCount(req))),
+		Description: fmt.Sprintf("PC Summer Camp 2026 non-refundable deposit (%d camper%s)", paying, pluralS(paying)),
 	})
 	if err != nil {
 		return nil, httpx.Internal(fmt.Sprintf("stripe checkout: %s", err.Error()))
@@ -164,7 +165,8 @@ func (s *Service) Submit(ctx context.Context, req SubmitRequest) (*SubmitRespons
 }
 
 // computeTotal returns the £-deposit total for the group: flat per
-// full-week camper, day-pass campers contribute 0.
+// deposit-paying camper (full-week AND age >= MinDepositAge). Day-pass
+// campers and under-3s contribute 0.
 func (s *Service) computeTotal(ctx context.Context, req SubmitRequest) (totalPence int, currency string, err error) {
 	deposit, err := s.prices.GetPrice(ctx, PriceDeposit)
 	if err != nil {
@@ -174,7 +176,7 @@ func (s *Service) computeTotal(ctx context.Context, req SubmitRequest) (totalPen
 	if currency == "" {
 		currency = "GBP"
 	}
-	totalPence = deposit.AmountPence * fullWeekCount(req)
+	totalPence = deposit.AmountPence * depositPayingCount(req)
 	return totalPence, currency, nil
 }
 
@@ -204,10 +206,16 @@ func (s *Service) sendConfirmationEmail(ctx context.Context, req SubmitRequest, 
 	}
 }
 
-func fullWeekCount(req SubmitRequest) int {
+// MinDepositAge is the youngest age that has to pay the deposit. Campers
+// under this age attend free (cot / lap-of-parent etc.).
+const MinDepositAge = 3
+
+// depositPayingCount returns the number of campers in the request who owe a
+// deposit: full-week AND age >= MinDepositAge.
+func depositPayingCount(req SubmitRequest) int {
 	n := 0
 	for _, c := range req.Campers {
-		if c.Attendance.Type == AttendanceFullWeek {
+		if c.Attendance.Type == AttendanceFullWeek && c.Age >= MinDepositAge {
 			n++
 		}
 	}
