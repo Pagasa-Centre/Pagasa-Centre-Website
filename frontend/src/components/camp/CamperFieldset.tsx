@@ -293,9 +293,9 @@ export default function CamperFieldset({
           <div className="flex flex-col gap-2 pt-2">
             <p className="text-sm text-neutral-700 leading-relaxed">
               Pick a <strong>1st</strong> and <strong>2nd</strong> accommodation
-              preference. The committee (Marie, Erica, Diane) will place every
-              camper after registrations close — priority goes to women,
-              elderly, and families, so we can't guarantee your first choice.
+              preference. The White Team will place every camper after
+              registrations close — priority goes to women, elderly, and
+              families, so we can&apos;t guarantee your first choice.
             </p>
           </div>
           <AccommodationPicker
@@ -342,8 +342,8 @@ export default function CamperFieldset({
               className={`${inputCls(!!attErr("roommate_requests"))} resize-y`}
             />
             <p className="text-xs text-neutral-500">
-              The committee will try their best to keep couples and friend
-              groups in the same accommodation, but can't guarantee it.
+              The White Team will try their best to keep couples and friend
+              groups in the same accommodation, but can&apos;t guarantee it.
             </p>
             {attErr("roommate_requests") && (
               <p className="text-xs text-red-600">

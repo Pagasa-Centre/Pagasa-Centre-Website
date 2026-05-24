@@ -343,14 +343,15 @@ export default function CampRegisterForm({
           </h2>
           <p className="mt-4 text-neutral-600 max-w-xl mx-auto text-sm">
             Full-week campers pay a flat{" "}
-            <strong>£50 non-refundable deposit per person </strong> at
-            registration. Day visitors don&apos;t pay anything at this stage —
-            catering and t-shirt fees are settled with the camp team on the day.
+            <strong>£50 non-refundable deposit per person</strong> at
+            registration. A deposit for day visitors is not required at this
+            stage.
           </p>
-          <p className="mt-3 text-neutral-600 max-w-xl mx-auto text-xs">
+          <p className="mt-3 text-neutral-600 max-w-xl mx-auto text-sm">
             Pick a 1st and 2nd accommodation preference for each full-week
-            camper. The committee allocates rooms after registrations close;
-            you&apos;ll be told your final placement once your balance is paid.
+            camper. The White Team will allocate rooms after registration
+            closes. Your accommodation choice will be secured once the full
+            payment has been made.
           </p>
         </div>
 

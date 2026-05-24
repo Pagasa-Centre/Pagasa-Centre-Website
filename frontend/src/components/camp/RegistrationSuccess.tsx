@@ -126,7 +126,7 @@ function SuccessBody({ apiBase }: Props) {
                   1 – 15 July: Room allocation
                 </p>
                 <p className="text-sm text-neutral-600">
-                  The committee allocates rooms and posts the temporary
+                  The White Team allocates rooms and posts the temporary
                   allocation so you know the balance for final payment.
                 </p>
               </div>
