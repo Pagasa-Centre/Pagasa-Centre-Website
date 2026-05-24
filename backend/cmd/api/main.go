@@ -18,6 +18,7 @@ import (
 	"pagasacentre/backend/internal/config"
 	"pagasacentre/backend/internal/consent"
 	"pagasacentre/backend/internal/db"
+	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/httpx"
 	"pagasacentre/backend/internal/payment"
 	"pagasacentre/backend/internal/registration"
@@ -52,19 +53,31 @@ func main() {
 		cfg.StripeSuccessURL, cfg.StripeCancelURL,
 	)
 
+	// Email — SMTPMailer if SMTP_HOST is configured, NoopMailer otherwise.
+	// NoopMailer renders the template (so dev still catches template errors)
+	// then logs a one-line summary instead of dispatching.
+	var mailer email.Mailer
+	if cfg.SMTPHost != "" {
+		mailer = email.NewSMTPMailer(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPFrom)
+		log.Printf("email: SMTP enabled (host=%s from=%s)", cfg.SMTPHost, cfg.SMTPFrom)
+	} else {
+		mailer = email.NewNoopMailer()
+		log.Println("email: SMTP_HOST unset, using NoopMailer (no real email sent)")
+	}
+
 	// Registration service depends on small interfaces; adapt camp.Repository
 	// so it satisfies registration.PriceLookup with the local PriceRow type.
 	regSvc := registration.NewService(
 		regRepo,
-		accSvc,
 		campPriceAdapter{repo: campRepo},
 		stripeCli,
 		campRepo,
+		mailer,
 		cfg.PublicBaseURL,
 	)
 
-	// Payment service handles webhook events.
-	paySvc := payment.NewService(pool, regRepo, payment.NewAccommodationLocker(accRepo), stripeCli)
+	// Payment service handles webhook events: mark paid + send confirmation email.
+	paySvc := payment.NewService(pool, regRepo, mailer, cfg.PublicBaseURL)
 
 	r := chi.NewRouter()
 	httpx.UseDefaults(r, cfg.AllowedOrigin)
@@ -83,7 +96,7 @@ func main() {
 
 	r.Route("/admin", func(r chi.Router) {
 		// TODO(auth): protect with admin auth before deploying publicly.
-		admin.Mount(r, regRepo, accRepo, campRepo)
+		admin.Mount(r, regRepo, campRepo)
 	})
 
 	srv := &http.Server{

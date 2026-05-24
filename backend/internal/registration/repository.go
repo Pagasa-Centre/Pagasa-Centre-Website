@@ -44,26 +44,30 @@ func (r *Repository) InsertCamper(ctx context.Context, tx pgx.Tx, groupID string
 		INSERT INTO registrations (
 			group_id, is_main_contact, first_name, last_name, gender, age,
 			cell_leader_name, is_cell_leader, attendance_type,
-			shirt_size, dietary_requirements, needs_coach, accommodation_code,
+			shirt_size, dietary_requirements, needs_coach,
+			accommodation_first_choice, accommodation_second_choice, roommate_requests,
 			day_pass_days, day_pass_tshirt_option, day_pass_needs_catering
 		) VALUES (
 			$1,$2,$3,$4,$5,$6,
 			$7,$8,$9,
-			$10,$11,$12,$13,
-			$14,$15,$16
+			$10,$11,$12,
+			$13,$14,$15,
+			$16,$17,$18
 		)`
 
 	var (
-		shirtSize, dietary, accommodation, tshirtOption *string
-		needsCoach, needsCatering                       *bool
-		days                                            []string
+		shirtSize, dietary, firstChoice, secondChoice, roommate, tshirtOption *string
+		needsCoach, needsCatering                                             *bool
+		days                                                                  []string
 	)
 	switch c.Attendance.Type {
 	case AttendanceFullWeek:
 		shirtSize = strPtr(c.Attendance.ShirtSize)
 		dietary = strPtr(c.Attendance.DietaryRequirements)
 		needsCoach = c.Attendance.NeedsCoach
-		accommodation = strPtr(c.Attendance.AccommodationCode)
+		firstChoice = strPtr(c.Attendance.AccommodationFirstChoice)
+		secondChoice = strPtr(c.Attendance.AccommodationSecondChoice)
+		roommate = strPtr(c.Attendance.RoommateRequests)
 	case AttendanceDayPass:
 		dietary = strPtr(c.Attendance.DietaryRequirements)
 		if s := c.Attendance.ShirtSize; s != "" {
@@ -78,7 +82,8 @@ func (r *Repository) InsertCamper(ctx context.Context, tx pgx.Tx, groupID string
 	_, err := tx.Exec(ctx, q,
 		groupID, c.IsMainContact, c.FirstName, c.LastName, c.Gender, c.Age,
 		c.CellLeaderName, c.IsCellLeader, c.Attendance.Type,
-		shirtSize, dietary, needsCoach, accommodation,
+		shirtSize, dietary, needsCoach,
+		firstChoice, secondChoice, roommate,
 		days, tshirtOption, needsCatering,
 	)
 	if err != nil {
@@ -122,57 +127,19 @@ func (r *Repository) GetGroupBySession(ctx context.Context, tx pgx.Tx, sessionID
 	return &g, nil
 }
 
-// AccommodationCountsForGroup returns how many campers in the group requested
-// each accommodation code (full-week campers only).
-func (r *Repository) AccommodationCountsForGroup(ctx context.Context, tx pgx.Tx, groupID string) (map[string]int, error) {
-	const q = `
-		SELECT accommodation_code, COUNT(*)
-		  FROM registrations
-		 WHERE group_id = $1 AND accommodation_code IS NOT NULL
-		 GROUP BY accommodation_code`
-	rows, err := tx.Query(ctx, q, groupID)
-	if err != nil {
-		return nil, fmt.Errorf("accommodation counts: %w", err)
-	}
-	defer rows.Close()
-
-	out := map[string]int{}
-	for rows.Next() {
-		var code string
-		var n int
-		if err := rows.Scan(&code, &n); err != nil {
-			return nil, err
-		}
-		out[code] = n
-	}
-	return out, rows.Err()
-}
-
 // MarkPaid transitions the group to 'paid' and stamps paid_at + payment intent.
+// paymentIntentID may be empty (used by the £0 day-pass-only Submit path where
+// no Stripe session was ever created).
 func (r *Repository) MarkPaid(ctx context.Context, tx pgx.Tx, groupID, paymentIntentID string) error {
 	_, err := tx.Exec(ctx,
 		`UPDATE registration_groups
 		    SET payment_status = 'paid',
-		        stripe_payment_intent_id = $1,
+		        stripe_payment_intent_id = COALESCE($1, stripe_payment_intent_id),
 		        paid_at = $2
 		  WHERE id = $3`,
-		paymentIntentID, time.Now().UTC(), groupID)
+		nullableString(paymentIntentID), time.Now().UTC(), groupID)
 	if err != nil {
 		return fmt.Errorf("mark paid: %w", err)
-	}
-	return nil
-}
-
-// MarkFailedCapacity transitions a group to failed_capacity (race-loser).
-func (r *Repository) MarkFailedCapacity(ctx context.Context, tx pgx.Tx, groupID, paymentIntentID string) error {
-	_, err := tx.Exec(ctx,
-		`UPDATE registration_groups
-		    SET payment_status = 'failed_capacity',
-		        stripe_payment_intent_id = COALESCE($1, stripe_payment_intent_id)
-		  WHERE id = $2`,
-		nullableString(paymentIntentID), groupID)
-	if err != nil {
-		return fmt.Errorf("mark failed_capacity: %w", err)
 	}
 	return nil
 }
@@ -258,7 +225,8 @@ func (r *Repository) campersByGroupIDs(ctx context.Context, groupIDs []string) (
 	const q = `
 		SELECT id, group_id, is_main_contact, first_name, last_name, gender, age,
 		       cell_leader_name, is_cell_leader, attendance_type,
-		       shirt_size, dietary_requirements, needs_coach, accommodation_code,
+		       shirt_size, dietary_requirements, needs_coach,
+		       accommodation_first_choice, accommodation_second_choice, roommate_requests,
 		       day_pass_days, day_pass_tshirt_option, day_pass_needs_catering, created_at
 		  FROM registrations
 		 WHERE group_id = ANY($1)
@@ -275,7 +243,8 @@ func (r *Repository) campersByGroupIDs(ctx context.Context, groupIDs []string) (
 		if err := rows.Scan(
 			&c.ID, &c.GroupID, &c.IsMainContact, &c.FirstName, &c.LastName, &c.Gender, &c.Age,
 			&c.CellLeaderName, &c.IsCellLeader, &c.AttendanceType,
-			&c.ShirtSize, &c.DietaryRequirements, &c.NeedsCoach, &c.AccommodationCode,
+			&c.ShirtSize, &c.DietaryRequirements, &c.NeedsCoach,
+			&c.AccommodationFirstChoice, &c.AccommodationSecondChoice, &c.RoommateRequests,
 			&c.DayPassDays, &c.DayPassTshirtOption, &c.DayPassNeedsCatering, &c.CreatedAt,
 		); err != nil {
 			return nil, err

@@ -27,12 +27,10 @@ var ValidDayPassDays = map[string]struct{}{
 }
 
 // PriceCode is the lookup key into the prices table used when computing a
-// group total.
+// group total. As of v2, the only priced line item is the per-full-week-camper
+// deposit; day-pass campers contribute 0.
 const (
-	PriceFullWeekAdult = "full_week_adult"
-	PriceFullWeekChild = "full_week_child"
-	PriceDayPass       = "day_pass"
-	PriceTshirtOnly    = "tshirt_only"
+	PriceDeposit = "deposit"
 )
 
 // Group is the persisted form of a registration_groups row.
@@ -53,22 +51,24 @@ type Group struct {
 
 // Camper is the persisted form of a registrations row.
 type Camper struct {
-	ID                   string
-	GroupID              string
-	IsMainContact        bool
-	FirstName            string
-	LastName             string
-	Gender               string
-	Age                  int
-	CellLeaderName       string
-	IsCellLeader         bool
-	AttendanceType       string
-	ShirtSize            *string
-	DietaryRequirements  *string
-	NeedsCoach           *bool
-	AccommodationCode    *string
-	DayPassDays          []string
-	DayPassTshirtOption  *string
-	DayPassNeedsCatering *bool
-	CreatedAt            time.Time
+	ID                        string
+	GroupID                   string
+	IsMainContact             bool
+	FirstName                 string
+	LastName                  string
+	Gender                    string
+	Age                       int
+	CellLeaderName            string
+	IsCellLeader              bool
+	AttendanceType            string
+	ShirtSize                 *string
+	DietaryRequirements       *string
+	NeedsCoach                *bool
+	AccommodationFirstChoice  *string
+	AccommodationSecondChoice *string
+	RoommateRequests          *string
+	DayPassDays               []string
+	DayPassTshirtOption       *string
+	DayPassNeedsCatering      *bool
+	CreatedAt                 time.Time
 }

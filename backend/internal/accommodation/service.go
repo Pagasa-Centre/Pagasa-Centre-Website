@@ -3,13 +3,14 @@ package accommodation
 import "context"
 
 // Service is a thin layer over the repository so handlers don't talk to SQL
-// directly. Future caching / business rules go here.
+// directly.
 type Service struct {
 	repo *Repository
 }
 
 func NewService(repo *Repository) *Service { return &Service{repo: repo} }
 
-func (s *Service) ListAvailability(ctx context.Context) ([]Availability, error) {
-	return s.repo.ListWithAvailability(ctx)
+// ListOptions returns the catalogue of accommodation options.
+func (s *Service) ListOptions(ctx context.Context) ([]Option, error) {
+	return s.repo.ListOptions(ctx)
 }

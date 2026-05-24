@@ -15,7 +15,8 @@ var csvHeader = []string{
 	"contact_first_name", "contact_last_name", "contact_email", "contact_phone",
 	"is_main_contact", "first_name", "last_name", "gender", "age",
 	"cell_leader_name", "is_cell_leader", "attendance_type",
-	"shirt_size", "dietary_requirements", "needs_coach", "accommodation_code",
+	"shirt_size", "dietary_requirements", "needs_coach",
+	"accommodation_first_choice", "accommodation_second_choice", "roommate_requests",
 	"day_pass_days", "day_pass_tshirt_option", "day_pass_needs_catering",
 }
 
@@ -51,7 +52,9 @@ func WriteCSV(w io.Writer, groups []registration.Group, campersByGroup map[strin
 				deref(c.ShirtSize),
 				deref(c.DietaryRequirements),
 				formatBoolPtr(c.NeedsCoach),
-				deref(c.AccommodationCode),
+				deref(c.AccommodationFirstChoice),
+				deref(c.AccommodationSecondChoice),
+				deref(c.RoommateRequests),
 				strings.Join(c.DayPassDays, "|"),
 				deref(c.DayPassTshirtOption),
 				formatBoolPtr(c.DayPassNeedsCatering),

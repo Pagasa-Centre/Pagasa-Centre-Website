@@ -76,9 +76,25 @@ func Validate(req SubmitRequest) error {
 	return nil
 }
 
+// maxRoommateRequestLen caps free-text roommate request input. Anything longer
+// is almost certainly malicious / accidental paste — committee reads these
+// manually so we don't want walls of text.
+const maxRoommateRequestLen = 500
+
 func validateFullWeek(prefix string, a AttendanceDTO, fields map[string]string) {
-	if strings.TrimSpace(a.AccommodationCode) == "" {
-		fields[prefix+".accommodation_code"] = "is required for full week attendance"
+	first := strings.TrimSpace(a.AccommodationFirstChoice)
+	second := strings.TrimSpace(a.AccommodationSecondChoice)
+	if first == "" {
+		fields[prefix+".accommodation_first_choice"] = "is required for full week attendance"
+	}
+	if second == "" {
+		fields[prefix+".accommodation_second_choice"] = "is required for full week attendance"
+	}
+	if first != "" && second != "" && first == second {
+		fields[prefix+".accommodation_second_choice"] = "must be different from the first choice"
+	}
+	if len(a.RoommateRequests) > maxRoommateRequestLen {
+		fields[prefix+".roommate_requests"] = fmt.Sprintf("must be %d characters or fewer", maxRoommateRequestLen)
 	}
 	switch {
 	case strings.TrimSpace(a.ShirtSize) == "":

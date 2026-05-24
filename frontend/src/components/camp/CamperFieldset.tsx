@@ -290,13 +290,67 @@ export default function CamperFieldset({
               ))}
             </div>
           </div>
+          <div className="flex flex-col gap-2 pt-2">
+            <p className="text-sm text-neutral-700 leading-relaxed">
+              Pick a <strong>1st</strong> and <strong>2nd</strong> accommodation
+              preference. The committee (Marie, Erica, Diane) will place every
+              camper after registrations close — priority goes to women,
+              elderly, and families, so we can't guarantee your first choice.
+            </p>
+          </div>
           <AccommodationPicker
-            name={`${prefix}.accommodation_code`}
-            value={value.accommodation_code}
+            name={`${prefix}.accommodation_first_choice`}
+            label="1st choice accommodation"
+            value={value.accommodation_first_choice}
             accommodations={accommodations}
-            error={attErr("accommodation_code")}
-            onChange={(code) => onChange({ accommodation_code: code })}
+            error={attErr("accommodation_first_choice")}
+            onChange={(code) =>
+              onChange({
+                accommodation_first_choice: code,
+                // If they pick the same as 2nd, clear 2nd to force a re-pick.
+                accommodation_second_choice:
+                  value.accommodation_second_choice === code
+                    ? ""
+                    : value.accommodation_second_choice,
+              })
+            }
           />
+          <AccommodationPicker
+            name={`${prefix}.accommodation_second_choice`}
+            label="2nd choice accommodation"
+            value={value.accommodation_second_choice}
+            accommodations={accommodations}
+            disabledCode={value.accommodation_first_choice}
+            error={attErr("accommodation_second_choice")}
+            onChange={(code) =>
+              onChange({ accommodation_second_choice: code })
+            }
+          />
+          <div className="flex flex-col gap-2">
+            <label htmlFor={idFor("roommate")} className={labelCls}>
+              Roommate requests
+            </label>
+            <textarea
+              id={idFor("roommate")}
+              rows={3}
+              maxLength={500}
+              value={value.roommate_requests}
+              placeholder="e.g. sharing with my partner Jane Doe, or with the cell group of Pastor Bob. Leave blank if no preference."
+              onChange={(e) =>
+                onChange({ roommate_requests: e.target.value })
+              }
+              className={`${inputCls(!!attErr("roommate_requests"))} resize-y`}
+            />
+            <p className="text-xs text-neutral-500">
+              The committee will try their best to keep couples and friend
+              groups in the same accommodation, but can't guarantee it.
+            </p>
+            {attErr("roommate_requests") && (
+              <p className="text-xs text-red-600">
+                {attErr("roommate_requests")}
+              </p>
+            )}
+          </div>
         </div>
       )}
 

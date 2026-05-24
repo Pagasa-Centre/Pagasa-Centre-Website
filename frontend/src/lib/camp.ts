@@ -2,12 +2,7 @@
 // logic in backend/internal/registration/service.go::computeTotal so the UI
 // running-total stays consistent with what Stripe gets charged.
 
-import type {
-  CamperSubmission,
-  DayCode,
-  Price,
-  PriceCode,
-} from "@/lib/api";
+import type { CamperSubmission, DayCode, Price } from "@/lib/api";
 
 export const SHIRT_SIZE_NOT_APPLICABLE = "n/a";
 
@@ -28,7 +23,9 @@ export type CamperState = {
   shirt_size: string;
   dietary_requirements: string;
   needs_coach: boolean | null;
-  accommodation_code: string;
+  accommodation_first_choice: string;
+  accommodation_second_choice: string;
+  roommate_requests: string;
   // day_pass fields
   day_pass_days: DayCode[];
   tshirt_option: "" | "team_activities" | "tshirt_only" | "none";
@@ -47,7 +44,9 @@ export function emptyCamper(): CamperState {
     shirt_size: "",
     dietary_requirements: "",
     needs_coach: null,
-    accommodation_code: "",
+    accommodation_first_choice: "",
+    accommodation_second_choice: "",
+    roommate_requests: "",
     day_pass_days: [],
     tshirt_option: "",
     needs_catering: null,
@@ -86,9 +85,9 @@ function priceMap(prices: Price[]): Record<string, Price> {
 /**
  * computeTotalPence mirrors the backend pricing logic exactly:
  *
- * - full_week: full_week_adult for age >= 18, full_week_child otherwise
- * - day_pass:  day_pass × number of days; plus tshirt_only if the camper is
- *   buying a t-shirt (option = team_activities or tshirt_only)
+ * - full_week: one flat "deposit" charge per camper
+ * - day_pass:  £0 at registration (no deposit, no t-shirt fee — settled with
+ *              the camp team on the day if applicable)
  *
  * Missing price codes contribute 0 (we surface this via a "prices not yet set"
  * notice in the form rather than failing silently).
@@ -98,21 +97,13 @@ export function computeTotalPence(
   prices: Price[],
 ): number {
   const lookup = priceMap(prices);
+  const deposit = lookup.deposit?.amount_pence ?? 0;
   let total = 0;
   for (const c of campers) {
     if (c.attendance.type === "full_week") {
-      const code: PriceCode = c.age < 18 ? "full_week_child" : "full_week_adult";
-      total += lookup[code]?.amount_pence ?? 0;
-    } else if (c.attendance.type === "day_pass") {
-      total +=
-        (lookup.day_pass?.amount_pence ?? 0) * c.attendance.days.length;
-      if (
-        c.attendance.tshirt_option === "team_activities" ||
-        c.attendance.tshirt_option === "tshirt_only"
-      ) {
-        total += lookup.tshirt_only?.amount_pence ?? 0;
-      }
+      total += deposit;
     }
+    // day_pass campers contribute nothing at registration time.
   }
   return total;
 }

@@ -107,6 +107,26 @@ function toSubmission(
           error: `Camper ${i + 1}: please choose a transport option.`,
         };
       }
+      if (!c.accommodation_first_choice) {
+        return {
+          ok: false,
+          error: `Camper ${i + 1}: please pick a 1st accommodation choice.`,
+        };
+      }
+      if (!c.accommodation_second_choice) {
+        return {
+          ok: false,
+          error: `Camper ${i + 1}: please pick a 2nd accommodation choice.`,
+        };
+      }
+      if (
+        c.accommodation_first_choice === c.accommodation_second_choice
+      ) {
+        return {
+          ok: false,
+          error: `Camper ${i + 1}: 1st and 2nd accommodation choices must differ.`,
+        };
+      }
       campers.push({
         ...base,
         attendance: {
@@ -114,7 +134,9 @@ function toSubmission(
           shirt_size: c.shirt_size,
           dietary_requirements: c.dietary_requirements.trim(),
           needs_coach: c.needs_coach,
-          accommodation_code: c.accommodation_code,
+          accommodation_first_choice: c.accommodation_first_choice,
+          accommodation_second_choice: c.accommodation_second_choice,
+          roommate_requests: c.roommate_requests.trim(),
         },
       });
     } else {
@@ -217,7 +239,9 @@ export default function CampRegisterForm({
               shirt_size: c.shirt_size,
               dietary_requirements: c.dietary_requirements,
               needs_coach: c.needs_coach ?? false,
-              accommodation_code: c.accommodation_code,
+              accommodation_first_choice: c.accommodation_first_choice,
+              accommodation_second_choice: c.accommodation_second_choice,
+              roommate_requests: c.roommate_requests,
             },
           },
         ];
@@ -247,6 +271,13 @@ export default function CampRegisterForm({
     [previewCampers, prices],
   );
   const currency = pricesCurrency(prices);
+  const fullWeekCamperCount = previewCampers.filter(
+    (c) => c.attendance.type === "full_week",
+  ).length;
+  const dayPassCamperCount = previewCampers.filter(
+    (c) => c.attendance.type === "day_pass",
+  ).length;
+  const depositPence = prices.find((p) => p.code === "deposit")?.amount_pence ?? 0;
 
   const anyMinor = state.campers.some((c) => {
     const age = parseInt(c.age, 10);
@@ -279,7 +310,14 @@ export default function CampRegisterForm({
       } catch {
         // sessionStorage can be disabled — proceed anyway
       }
-      window.location.href = res.checkout_url;
+      if (res.checkout_url) {
+        window.location.href = res.checkout_url;
+      } else {
+        // £0 total (day-pass-only): backend already marked paid + emailed.
+        // Send the user straight to the success page; the ?free=1 flag lets
+        // it adjust copy to match.
+        window.location.href = "/camp/registration/success?free=1";
+      }
     } catch (err) {
       setSubmitting(false);
       if (err instanceof ApiClientError) {
@@ -304,8 +342,15 @@ export default function CampRegisterForm({
             Sign up for camp
           </h2>
           <p className="mt-4 text-neutral-600 max-w-xl mx-auto text-sm">
-            All questions must be answered before the form can be submitted.
-            You&apos;ll be redirected to Stripe to complete payment.
+            Full-week campers pay a flat{" "}
+            <strong>£50 non-refundable deposit per person</strong> at
+            registration. Day visitors don&apos;t pay anything at this stage —
+            catering and t-shirt fees are settled with the camp team on the day.
+          </p>
+          <p className="mt-3 text-neutral-600 max-w-xl mx-auto text-xs">
+            Pick a 1st and 2nd accommodation preference for each full-week
+            camper. The committee allocates rooms after registrations close;
+            you&apos;ll be told your final placement once your balance is paid.
           </p>
         </div>
 
@@ -399,35 +444,62 @@ export default function CampRegisterForm({
           {anyMinor && (
             <div className="p-4 bg-primary/10 border border-primary/30 text-sm text-neutral-700 rounded">
               <strong>Parental Consent Form:</strong> at least one camper is
-              under 18. After you submit, the consent form will download
-              automatically. A manual link will also be shown on the success
-              page.
+              under 18. After you submit you&apos;ll be able to download the
+              form — print it, sign it in ink, and hand the completed copy to
+              Bro Ash before camp.
             </div>
           )}
 
           {/* Total + Submit */}
-          <div className="bg-white border border-neutral-300 p-6 rounded-xl flex flex-col sm:flex-row gap-4 sm:items-center sm:justify-between">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-widest text-neutral-500">
-                Total
-              </p>
-              <p className="text-3xl font-extrabold text-neutral-900">
-                {formatPence(totalPence, currency)}
-              </p>
-              {totalPence === 0 && (
-                <p className="text-xs text-neutral-500 mt-1">
-                  Prices are still being finalised by the team. The amount
-                  shown here will update before you reach Stripe.
+          <div className="bg-white border border-neutral-300 p-6 rounded-xl flex flex-col gap-4">
+            <div className="flex flex-col sm:flex-row gap-4 sm:items-end sm:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-neutral-500">
+                  Non-refundable deposit
                 </p>
-              )}
+                <p className="text-3xl font-extrabold text-neutral-900">
+                  {formatPence(totalPence, currency)}
+                </p>
+              </div>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="px-10 py-4 bg-primary text-white font-bold uppercase tracking-widest text-sm hover:bg-primary-dark transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {submitting
+                  ? "Submitting…"
+                  : totalPence === 0
+                    ? "Submit registration"
+                    : "Continue to payment"}
+              </button>
             </div>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="px-10 py-4 bg-primary text-white font-bold uppercase tracking-widest text-sm hover:bg-primary-dark transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {submitting ? "Redirecting…" : "Continue to payment"}
-            </button>
+            {/* Breakdown */}
+            {(fullWeekCamperCount > 0 || dayPassCamperCount > 0) && (
+              <ul className="text-xs text-neutral-600 border-t border-neutral-200 pt-3 flex flex-col gap-1">
+                {fullWeekCamperCount > 0 && (
+                  <li>
+                    {fullWeekCamperCount} × full-week deposit (
+                    {formatPence(depositPence, currency)} each) ={" "}
+                    {formatPence(
+                      depositPence * fullWeekCamperCount,
+                      currency,
+                    )}
+                  </li>
+                )}
+                {dayPassCamperCount > 0 && (
+                  <li>
+                    {dayPassCamperCount} × day-pass camper — free at
+                    registration
+                  </li>
+                )}
+              </ul>
+            )}
+            {totalPence === 0 && fullWeekCamperCount === 0 && dayPassCamperCount > 0 && (
+              <p className="text-xs text-neutral-600 border-t border-neutral-200 pt-3">
+                Day-pass-only registrations skip Stripe — you&apos;ll get the
+                confirmation email immediately.
+              </p>
+            )}
           </div>
         </form>
       </div>

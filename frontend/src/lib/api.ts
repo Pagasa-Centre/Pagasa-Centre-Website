@@ -79,11 +79,8 @@ export type CampConfig = {
   registrations_open: boolean;
 };
 
-export type PriceCode =
-  | "full_week_adult"
-  | "full_week_child"
-  | "day_pass"
-  | "tshirt_only";
+// v2 collapsed the price catalogue to a single per-full-week-camper deposit.
+export type PriceCode = "deposit";
 
 export type Price = {
   code: PriceCode;
@@ -95,9 +92,6 @@ export type Price = {
 export type Accommodation = {
   code: string;
   display_name: string;
-  capacity: number | null;
-  taken: number;
-  remaining: number | null;
   notes?: string;
 };
 
@@ -114,7 +108,9 @@ export type FullWeekAttendance = {
   shirt_size: string;
   dietary_requirements: string;
   needs_coach: boolean;
-  accommodation_code: string;
+  accommodation_first_choice: string;
+  accommodation_second_choice: string;
+  roommate_requests: string;
 };
 
 export type DayPassAttendance = {
@@ -149,7 +145,11 @@ export type SubmitRequest = {
 
 export type SubmitResponse = {
   group_id: string;
+  // Empty when total_amount_pence is 0 (day-pass-only). In that case the
+  // backend has already marked the group paid and sent the confirmation email
+  // — the frontend should send the user straight to the success page.
   checkout_url: string;
+  total_amount_pence: number;
   has_minor: boolean;
   consent_form_url?: string;
 };

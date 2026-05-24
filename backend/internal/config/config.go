@@ -18,6 +18,13 @@ type Config struct {
 	StripeCancelURL     string
 	AllowedOrigin       string
 	PublicBaseURL       string
+	// SMTP for transactional emails. All optional — if SMTPHost is empty the
+	// app boots with a NoopMailer (local dev, no real email sent).
+	SMTPHost     string
+	SMTPPort     string
+	SMTPUsername string
+	SMTPPassword string
+	SMTPFrom     string
 }
 
 func Load() (Config, error) {
@@ -32,6 +39,11 @@ func Load() (Config, error) {
 		StripeCancelURL:     os.Getenv("STRIPE_CANCEL_URL"),
 		AllowedOrigin:       getEnv("CORS_ALLOWED_ORIGIN", "http://localhost:3000"),
 		PublicBaseURL:       getEnv("PUBLIC_BASE_URL", "http://localhost:8080"),
+		SMTPHost:            os.Getenv("SMTP_HOST"),
+		SMTPPort:            getEnv("SMTP_PORT", "587"),
+		SMTPUsername:        os.Getenv("SMTP_USERNAME"),
+		SMTPPassword:        os.Getenv("SMTP_PASSWORD"),
+		SMTPFrom:            os.Getenv("SMTP_FROM"),
 	}
 
 	var missing []string

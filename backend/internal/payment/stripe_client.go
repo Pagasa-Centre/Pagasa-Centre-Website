@@ -6,7 +6,6 @@ import (
 
 	stripe "github.com/stripe/stripe-go/v79"
 	checkoutsession "github.com/stripe/stripe-go/v79/checkout/session"
-	refundpkg "github.com/stripe/stripe-go/v79/refund"
 	"github.com/stripe/stripe-go/v79/webhook"
 
 	"pagasacentre/backend/internal/registration"
@@ -58,19 +57,6 @@ func (c *StripeClient) CreateCheckoutSession(ctx context.Context, p registration
 		return registration.CheckoutSession{}, fmt.Errorf("stripe checkout.session.New: %w", err)
 	}
 	return registration.CheckoutSession{ID: sess.ID, URL: sess.URL}, nil
-}
-
-// Refund issues a full refund for a payment intent.
-func (c *StripeClient) Refund(ctx context.Context, paymentIntentID string) error {
-	if paymentIntentID == "" {
-		return fmt.Errorf("refund: empty payment intent id")
-	}
-	params := &stripe.RefundParams{PaymentIntent: stripe.String(paymentIntentID)}
-	params.Context = ctx
-	if _, err := refundpkg.New(params); err != nil {
-		return fmt.Errorf("stripe refund.New: %w", err)
-	}
-	return nil
 }
 
 // VerifyWebhook validates a Stripe webhook signature and returns the parsed event.

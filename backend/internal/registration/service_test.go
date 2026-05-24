@@ -1,64 +1,60 @@
 package registration
 
 import (
+	"context"
 	"testing"
-
-	"pagasacentre/backend/internal/accommodation"
 )
 
-func TestCollectSoldOut_HasRoom(t *testing.T) {
-	cap20 := 20
-	avail := []accommodation.Availability{
-		{Code: "lodge", Capacity: &cap20, Taken: 5},
+type fakePriceLookup struct{ amount int }
+
+func (f fakePriceLookup) GetPrice(_ context.Context, code string) (PriceRow, error) {
+	if code != PriceDeposit {
+		return PriceRow{}, nil
 	}
+	return PriceRow{AmountPence: f.amount, Currency: "GBP"}, nil
+}
+
+func TestFullWeekCount(t *testing.T) {
 	req := SubmitRequest{Campers: []CamperDTO{
-		{Attendance: AttendanceDTO{Type: AttendanceFullWeek, AccommodationCode: "lodge"}},
+		{Attendance: AttendanceDTO{Type: AttendanceFullWeek}},
+		{Attendance: AttendanceDTO{Type: AttendanceDayPass}},
+		{Attendance: AttendanceDTO{Type: AttendanceFullWeek}},
 	}}
-	got := collectSoldOut(req, avail)
-	if len(got) != 0 {
-		t.Fatalf("expected no sold-out, got %v", got)
+	if got := fullWeekCount(req); got != 2 {
+		t.Errorf("fullWeekCount = %d, want 2", got)
 	}
 }
 
-func TestCollectSoldOut_Exhausted(t *testing.T) {
-	cap5 := 5
-	avail := []accommodation.Availability{
-		{Code: "lodge", Capacity: &cap5, Taken: 5},
-	}
+func TestComputeTotal_DepositPerFullWeek(t *testing.T) {
+	svc := &Service{prices: fakePriceLookup{amount: 5000}}
 	req := SubmitRequest{Campers: []CamperDTO{
-		{Attendance: AttendanceDTO{Type: AttendanceFullWeek, AccommodationCode: "lodge"}},
+		{Attendance: AttendanceDTO{Type: AttendanceFullWeek}},
+		{Attendance: AttendanceDTO{Type: AttendanceFullWeek}},
+		{Attendance: AttendanceDTO{Type: AttendanceDayPass}},
 	}}
-	got := collectSoldOut(req, avail)
-	if len(got) != 1 || got[0] != "lodge" {
-		t.Fatalf("expected [lodge], got %v", got)
+	total, currency, err := svc.computeTotal(context.Background(), req)
+	if err != nil {
+		t.Fatalf("computeTotal: %v", err)
+	}
+	if total != 10000 {
+		t.Errorf("total = %d, want 10000", total)
+	}
+	if currency != "GBP" {
+		t.Errorf("currency = %q, want GBP", currency)
 	}
 }
 
-func TestCollectSoldOut_GroupExceedsRemaining(t *testing.T) {
-	cap5 := 5
-	avail := []accommodation.Availability{
-		{Code: "cabin", Capacity: &cap5, Taken: 4}, // 1 remaining
-	}
-	// two campers want cabin -> sold out
+func TestComputeTotal_DayPassOnlyIsZero(t *testing.T) {
+	svc := &Service{prices: fakePriceLookup{amount: 5000}}
 	req := SubmitRequest{Campers: []CamperDTO{
-		{Attendance: AttendanceDTO{Type: AttendanceFullWeek, AccommodationCode: "cabin"}},
-		{Attendance: AttendanceDTO{Type: AttendanceFullWeek, AccommodationCode: "cabin"}},
+		{Attendance: AttendanceDTO{Type: AttendanceDayPass}},
+		{Attendance: AttendanceDTO{Type: AttendanceDayPass}},
 	}}
-	got := collectSoldOut(req, avail)
-	if len(got) != 1 || got[0] != "cabin" {
-		t.Fatalf("expected [cabin], got %v", got)
+	total, _, err := svc.computeTotal(context.Background(), req)
+	if err != nil {
+		t.Fatalf("computeTotal: %v", err)
 	}
-}
-
-func TestCollectSoldOut_UnlimitedAccommodation(t *testing.T) {
-	avail := []accommodation.Availability{
-		{Code: "tent", Capacity: nil, Taken: 100},
-	}
-	req := SubmitRequest{Campers: []CamperDTO{
-		{Attendance: AttendanceDTO{Type: AttendanceFullWeek, AccommodationCode: "tent"}},
-	}}
-	got := collectSoldOut(req, avail)
-	if len(got) != 0 {
-		t.Fatalf("expected no sold-out for unlimited, got %v", got)
+	if total != 0 {
+		t.Errorf("day-pass-only total = %d, want 0", total)
 	}
 }

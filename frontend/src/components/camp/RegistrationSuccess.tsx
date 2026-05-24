@@ -31,6 +31,10 @@ type Props = {
 function SuccessBody({ apiBase }: Props) {
   const sp = useSearchParams();
   const sessionId = sp.get("session_id");
+  // ?free=1 is set by the form when the total is £0 (day-pass-only) — no
+  // Stripe round-trip happens in that case, so the messaging needs to be
+  // tweaked to not promise a Stripe receipt that won't arrive.
+  const isFreeRegistration = sp.get("free") === "1";
   const stashJson = useSyncExternalStore(
     subscribe,
     getClientSnapshot,
@@ -65,31 +69,95 @@ function SuccessBody({ apiBase }: Props) {
 
   return (
     <section className="bg-surface py-20 lg:py-28">
-      <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+      <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="w-14 h-1 bg-primary mb-7 mx-auto" />
-        <p className="text-primary uppercase tracking-widest text-sm font-semibold mb-3">
-          Registration received
+        <p className="text-primary uppercase tracking-widest text-sm font-semibold mb-3 text-center">
+          {isFreeRegistration ? "Registration confirmed" : "Deposit received"}
         </p>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-neutral-900 leading-tight mb-5">
-          You&apos;re registered for camp
+        <h1 className="text-3xl sm:text-4xl font-extrabold text-neutral-900 leading-tight mb-5 text-center">
+          {isFreeRegistration
+            ? "You're registered for camp"
+            : "Thanks, your deposit is in"}
         </h1>
-        <p className="text-neutral-600 mb-3">
-          Thank you for signing up to PC Summer Camp 2026. Your payment was
-          processed by Stripe and a receipt will arrive in your inbox shortly.
+        <p className="text-neutral-700 mb-3 text-center">
+          {isFreeRegistration
+            ? "Thank you for registering for PC Summer Camp 2026. Day-pass attendance doesn't require a deposit — we'll see you on the day."
+            : "Thank you for signing up to PC Summer Camp 2026. Your non-refundable deposit has been received. A separate payment receipt will arrive from Stripe shortly."}
+        </p>
+        <p className="text-neutral-700 mb-3 text-center">
+          A confirmation email has been sent to{" "}
+          <span className="font-semibold">
+            {stash?.contact_email ?? "the email you provided"}
+          </span>
+          . Check your spam folder if you don&apos;t see it within a few
+          minutes.
         </p>
         {sessionId && (
-          <p className="text-xs text-neutral-400 mb-8">
-            Reference: <span className="font-mono">{sessionId}</span>
+          <p className="text-xs text-neutral-400 mb-8 text-center">
+            Stripe reference: <span className="font-mono">{sessionId}</span>
           </p>
         )}
 
+        {/* Key dates timeline */}
+        <div className="bg-white border border-neutral-300 rounded-xl p-6 mb-8">
+          <p className="text-xs font-bold uppercase tracking-widest text-neutral-500 mb-4">
+            What happens next
+          </p>
+          <ol className="flex flex-col gap-4">
+            <li className="flex gap-4">
+              <span className="flex-shrink-0 w-8 h-8 bg-primary/10 text-primary flex items-center justify-center font-bold text-sm">
+                1
+              </span>
+              <div>
+                <p className="font-semibold text-neutral-900 text-sm">
+                  1 – 30 June: Registration window
+                </p>
+                <p className="text-sm text-neutral-600">
+                  Tell friends and family before registrations close.
+                </p>
+              </div>
+            </li>
+            <li className="flex gap-4">
+              <span className="flex-shrink-0 w-8 h-8 bg-primary/10 text-primary flex items-center justify-center font-bold text-sm">
+                2
+              </span>
+              <div>
+                <p className="font-semibold text-neutral-900 text-sm">
+                  1 – 15 July: Room allocation
+                </p>
+                <p className="text-sm text-neutral-600">
+                  The committee allocates rooms and posts the temporary
+                  allocation so you know the balance for final payment.
+                </p>
+              </div>
+            </li>
+            <li className="flex gap-4">
+              <span className="flex-shrink-0 w-8 h-8 bg-primary/10 text-primary flex items-center justify-center font-bold text-sm">
+                3
+              </span>
+              <div>
+                <p className="font-semibold text-neutral-900 text-sm">
+                  26 – 31 July: Final payment
+                </p>
+                <p className="text-sm text-neutral-600">
+                  Settle your balance to lock in your room. Once fully paid,
+                  you&apos;ll get your final accommodation confirmation by
+                  email, in person, or via your cell leader.
+                </p>
+              </div>
+            </li>
+          </ol>
+        </div>
+
         {stash?.has_minor && consentURL && (
-          <div className="p-5 bg-primary/10 border border-primary/30 text-left text-sm text-neutral-800 mb-8">
+          <div className="p-5 bg-primary/10 border border-primary/30 text-left text-sm text-neutral-800 mb-8 rounded">
             <p className="font-bold mb-2">Parental Consent Form</p>
             <p className="mb-3">
               At least one registered camper is under 18. The Parental Consent
-              Form should have downloaded automatically. If it didn&apos;t, use
-              the link below:
+              Form should have downloaded automatically — if not, use the
+              button below. <strong>Print it, sign it in ink, and hand
+              the completed form to Bro Ash</strong> before the start of camp.
+              We don&apos;t accept emailed scans.
             </p>
             <a
               href={consentURL}
@@ -101,9 +169,9 @@ function SuccessBody({ apiBase }: Props) {
           </div>
         )}
 
-        <p className="text-neutral-600 mb-8">
-          More information will be announced soon. For now, please reach out
-          to your cell or network leader if you have any questions. God bless!
+        <p className="text-neutral-600 mb-8 text-center">
+          Got questions? Speak to your cell leader or reply to the confirmation
+          email. God bless!
         </p>
 
         <div className="flex flex-wrap gap-3 justify-center">

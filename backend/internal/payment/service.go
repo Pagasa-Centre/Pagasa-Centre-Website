@@ -4,36 +4,32 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"pagasacentre/backend/internal/accommodation"
+	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/registration"
 )
 
-// AccommodationLocker is the slim interface the service needs from the
-// accommodation repository so the webhook can lock + recount within a tx.
-type AccommodationLocker interface {
-	LockAndCount(ctx context.Context, tx pgx.Tx, code string) (*int, int, error)
-}
-
-// Refunder is the surface the service needs from the Stripe client to issue
-// race-loser refunds.
-type Refunder interface {
-	Refund(ctx context.Context, paymentIntentID string) error
-}
-
-// Service handles Stripe webhook events.
+// Service handles Stripe webhook events. As of v2 it is a thin layer that
+// transitions a registration_group to 'paid' and fires the confirmation email.
+// Race-loser refund logic was deleted along with accommodation capacity caps.
 type Service struct {
-	pool    *pgxpool.Pool
-	regRepo *registration.Repository
-	accRepo AccommodationLocker
-	refund  Refunder
+	pool          *pgxpool.Pool
+	regRepo       *registration.Repository
+	mailer        email.Mailer
+	publicBaseURL string
 }
 
-func NewService(pool *pgxpool.Pool, regRepo *registration.Repository, accRepo AccommodationLocker, refund Refunder) *Service {
-	return &Service{pool: pool, regRepo: regRepo, accRepo: accRepo, refund: refund}
+func NewService(pool *pgxpool.Pool, regRepo *registration.Repository, mailer email.Mailer, publicBaseURL string) *Service {
+	return &Service{
+		pool:          pool,
+		regRepo:       regRepo,
+		mailer:        mailer,
+		publicBaseURL: publicBaseURL,
+	}
 }
 
 // CheckoutCompleted is the payload extracted from a checkout.session.completed
@@ -43,10 +39,9 @@ type CheckoutCompleted struct {
 	PaymentIntentID string
 }
 
-// HandleCheckoutCompleted is the authoritative step that transitions a group
-// to 'paid' and reserves accommodation slots. If capacity has been exhausted
-// by a concurrent winner, the group is marked failed_capacity and a refund is
-// issued.
+// HandleCheckoutCompleted transitions a pending group to paid, then sends the
+// deposit confirmation email. Idempotent: replays after the first successful
+// run are no-ops (email is not re-sent on the same group).
 func (s *Service) HandleCheckoutCompleted(ctx context.Context, evt CheckoutCompleted) error {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -67,38 +62,7 @@ func (s *Service) HandleCheckoutCompleted(ctx context.Context, evt CheckoutCompl
 		return fmt.Errorf("no registration group for session %s", evt.SessionID)
 	}
 	if group.PaymentStatus != registration.PaymentPending {
-		return nil // idempotent
-	}
-
-	counts, err := s.regRepo.AccommodationCountsForGroup(ctx, tx, group.ID)
-	if err != nil {
-		return err
-	}
-
-	overflowing := false
-	for code, needed := range counts {
-		capacity, taken, err := s.accRepo.LockAndCount(ctx, tx, code)
-		if err != nil {
-			return err
-		}
-		if capacity != nil && taken+needed > *capacity {
-			overflowing = true
-			break
-		}
-	}
-
-	if overflowing {
-		if err := s.regRepo.MarkFailedCapacity(ctx, tx, group.ID, evt.PaymentIntentID); err != nil {
-			return err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return err
-		}
-		committed = true
-		if refundErr := s.refund.Refund(ctx, evt.PaymentIntentID); refundErr != nil {
-			return fmt.Errorf("mark failed_capacity ok, refund failed: %w", refundErr)
-		}
-		return nil
+		return nil // already processed — webhook replays are expected
 	}
 
 	if err := s.regRepo.MarkPaid(ctx, tx, group.ID, evt.PaymentIntentID); err != nil {
@@ -108,6 +72,8 @@ func (s *Service) HandleCheckoutCompleted(ctx context.Context, evt CheckoutCompl
 		return err
 	}
 	committed = true
+
+	s.sendConfirmationEmail(ctx, group)
 	return nil
 }
 
@@ -133,20 +99,42 @@ func (s *Service) HandleCheckoutExpired(ctx context.Context, sessionID string) e
 	return tx.Commit(ctx)
 }
 
-// Ensure accommodation.Repository satisfies AccommodationLocker via a small
-// adapter; this also documents the dependency direction.
-var _ AccommodationLocker = (*accommodationLockerAdapter)(nil)
-
-type accommodationLockerAdapter struct{ repo *accommodation.Repository }
-
-func (a accommodationLockerAdapter) LockAndCount(ctx context.Context, tx pgx.Tx, code string) (*int, int, error) {
-	return a.repo.LockAndCount(ctx, tx, code)
-}
-
-// NewAccommodationLocker wraps an *accommodation.Repository so it satisfies
-// AccommodationLocker.
-func NewAccommodationLocker(repo *accommodation.Repository) AccommodationLocker {
-	return accommodationLockerAdapter{repo: repo}
+// sendConfirmationEmail dispatches the deposit confirmation. Failure is
+// logged, never surfaced — the registration is already paid in DB at this
+// point, and a webhook return value of error would cause Stripe to retry the
+// whole HandleCheckoutCompleted (which is fine, but doesn't help if SMTP is
+// down — we'd just rack up retries).
+func (s *Service) sendConfirmationEmail(ctx context.Context, g *registration.Group) {
+	if s.mailer == nil {
+		return
+	}
+	campers, err := s.regRepo.CampersForGroup(ctx, g.ID)
+	if err != nil {
+		log.Printf("load campers for email (group %s): %v", g.ID, err)
+		return
+	}
+	hasMinor := false
+	for _, c := range campers {
+		if c.Age < 18 {
+			hasMinor = true
+			break
+		}
+	}
+	consentURL := ""
+	if hasMinor {
+		consentURL = s.publicBaseURL + "/api/consent-form"
+	}
+	if err := s.mailer.SendDepositConfirmation(ctx, email.DepositConfirmation{
+		ToEmail:        g.ContactEmail,
+		ToName:         g.ContactFirstName,
+		AmountPence:    g.TotalAmountPence,
+		Currency:       g.Currency,
+		CamperCount:    len(campers),
+		HasMinor:       hasMinor,
+		ConsentFormURL: consentURL,
+	}); err != nil {
+		log.Printf("send confirmation email to %s failed: %v", g.ContactEmail, err)
+	}
 }
 
 // ErrUnhandledEvent is returned by the handler for event types it ignores.

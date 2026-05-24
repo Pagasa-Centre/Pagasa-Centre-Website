@@ -1,29 +1,20 @@
 package accommodation
 
+// Type is the canonical record for an accommodation option, mirroring a row
+// in the accommodation_types table.
 type Type struct {
 	Code        string
 	DisplayName string
-	Capacity    *int
 	SortOrder   int
 	Notes       string
 }
 
-type Availability struct {
+// Option is what we expose to the public API. As of v2 it's identical to Type
+// minus SortOrder (which only matters for ordering, not the consumer). Capacity
+// and availability tracking were dropped — the committee allocates placements
+// manually after registrations close.
+type Option struct {
 	Code        string `json:"code"`
 	DisplayName string `json:"display_name"`
-	Capacity    *int   `json:"capacity"`
-	Taken       int    `json:"taken"`
-	Remaining   *int   `json:"remaining"`
 	Notes       string `json:"notes,omitempty"`
-}
-
-// IsUnlimited returns true if this accommodation has no capacity cap (e.g. tent).
-func (a Availability) IsUnlimited() bool { return a.Capacity == nil }
-
-// HasRoomFor reports whether n more campers can be accommodated.
-func (a Availability) HasRoomFor(n int) bool {
-	if a.IsUnlimited() {
-		return true
-	}
-	return a.Taken+n <= *a.Capacity
 }

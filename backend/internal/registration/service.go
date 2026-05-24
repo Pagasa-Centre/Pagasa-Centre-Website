@@ -3,20 +3,13 @@ package registration
 import (
 	"context"
 	"fmt"
-	"sort"
-	"strings"
+	"log"
 
 	"github.com/jackc/pgx/v5"
 
-	"pagasacentre/backend/internal/accommodation"
+	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/httpx"
 )
-
-// AccommodationLister is the subset of accommodation.Service the registration
-// service needs. Defined here so we can mock it in tests.
-type AccommodationLister interface {
-	ListAvailability(ctx context.Context) ([]accommodation.Availability, error)
-}
 
 // PriceLookup returns the current amount and currency for a price code.
 type PriceLookup interface {
@@ -56,35 +49,37 @@ type CampConfigReader interface {
 }
 
 type Service struct {
-	repo            *Repository
-	accommodations  AccommodationLister
-	prices          PriceLookup
-	stripe          CheckoutCreator
-	camp            CampConfigReader
-	publicBaseURL   string
+	repo          *Repository
+	prices        PriceLookup
+	stripe        CheckoutCreator
+	camp          CampConfigReader
+	mailer        email.Mailer
+	publicBaseURL string
 }
 
 func NewService(
 	repo *Repository,
-	accommodations AccommodationLister,
 	prices PriceLookup,
 	stripe CheckoutCreator,
 	campCfg CampConfigReader,
+	mailer email.Mailer,
 	publicBaseURL string,
 ) *Service {
 	return &Service{
-		repo:           repo,
-		accommodations: accommodations,
-		prices:         prices,
-		stripe:         stripe,
-		camp:           campCfg,
-		publicBaseURL:  publicBaseURL,
+		repo:          repo,
+		prices:        prices,
+		stripe:        stripe,
+		camp:          campCfg,
+		mailer:        mailer,
+		publicBaseURL: publicBaseURL,
 	}
 }
 
-// Submit validates the request, pre-checks capacity, inserts the pending group
-// and campers, creates a Stripe Checkout session, and returns the URL the
-// frontend should redirect to.
+// Submit validates the request, persists the pending group and campers, then
+// either:
+//   - creates a Stripe Checkout session (total > 0), or
+//   - marks the group paid + sends a confirmation email inline (total == 0,
+//     i.e. day-pass-only registrations).
 func (s *Service) Submit(ctx context.Context, req SubmitRequest) (*SubmitResponse, error) {
 	if err := Validate(req); err != nil {
 		return nil, err
@@ -99,16 +94,6 @@ func (s *Service) Submit(ctx context.Context, req SubmitRequest) (*SubmitRespons
 			Code:    "registrations_closed",
 			Message: "Camp registrations are currently closed",
 		}
-	}
-
-	avail, err := s.accommodations.ListAvailability(ctx)
-	if err != nil {
-		return nil, httpx.Internal(err.Error())
-	}
-	if soldOut := collectSoldOut(req, avail); len(soldOut) > 0 {
-		return nil, httpx.Conflict("accommodation_sold_out",
-			"One or more accommodations are sold out",
-			map[string]string{"accommodation_codes": strings.Join(soldOut, ",")})
 	}
 
 	total, currency, err := s.computeTotal(ctx, req)
@@ -132,12 +117,36 @@ func (s *Service) Submit(ctx context.Context, req SubmitRequest) (*SubmitRespons
 		}
 	}
 
+	hasMinor := HasMinor(req)
+	resp := &SubmitResponse{
+		GroupID:          groupID,
+		TotalAmountPence: total,
+		HasMinor:         hasMinor,
+	}
+	if hasMinor {
+		resp.ConsentFormURL = s.publicBaseURL + "/api/consent-form"
+	}
+
+	if total == 0 {
+		// Day-pass-only registration: no Stripe round-trip needed. Mark paid
+		// immediately and fire the confirmation email so the user gets the
+		// same "what to expect next" copy as deposit-paying groups.
+		if err := s.repo.MarkPaid(ctx, tx, groupID, ""); err != nil {
+			return nil, httpx.Internal(err.Error())
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, httpx.Internal(err.Error())
+		}
+		s.sendConfirmationEmail(ctx, req, total, currency, hasMinor)
+		return resp, nil
+	}
+
 	session, err := s.stripe.CreateCheckoutSession(ctx, CheckoutParams{
 		GroupID:     groupID,
 		Email:       req.Contact.Email,
 		AmountPence: int64(total),
 		Currency:    currency,
-		Description: "PC Summer Camp 2026 Registration",
+		Description: fmt.Sprintf("PC Summer Camp 2026 non-refundable deposit (%d camper%s)", fullWeekCount(req), pluralS(fullWeekCount(req))),
 	})
 	if err != nil {
 		return nil, httpx.Internal(fmt.Sprintf("stripe checkout: %s", err.Error()))
@@ -150,91 +159,64 @@ func (s *Service) Submit(ctx context.Context, req SubmitRequest) (*SubmitRespons
 		return nil, httpx.Internal(err.Error())
 	}
 
-	hasMinor := HasMinor(req)
-	resp := &SubmitResponse{
-		GroupID:     groupID,
-		CheckoutURL: session.URL,
-		HasMinor:    hasMinor,
-	}
-	if hasMinor {
-		resp.ConsentFormURL = s.publicBaseURL + "/api/consent-form"
-	}
+	resp.CheckoutURL = session.URL
 	return resp, nil
 }
 
-// computeTotal sums all priced line items implied by the request.
+// computeTotal returns the £-deposit total for the group: flat per
+// full-week camper, day-pass campers contribute 0.
 func (s *Service) computeTotal(ctx context.Context, req SubmitRequest) (totalPence int, currency string, err error) {
-	prices := map[string]PriceRow{}
-	get := func(code string) (PriceRow, error) {
-		if p, ok := prices[code]; ok {
-			return p, nil
-		}
-		p, err := s.prices.GetPrice(ctx, code)
-		if err != nil {
-			return PriceRow{}, err
-		}
-		prices[code] = p
-		return p, nil
+	deposit, err := s.prices.GetPrice(ctx, PriceDeposit)
+	if err != nil {
+		return 0, "", fmt.Errorf("lookup deposit price: %w", err)
 	}
-
-	currency = "GBP"
-	for _, c := range req.Campers {
-		switch c.Attendance.Type {
-		case AttendanceFullWeek:
-			code := PriceFullWeekAdult
-			if c.Age < 18 {
-				code = PriceFullWeekChild
-			}
-			p, err := get(code)
-			if err != nil {
-				return 0, "", err
-			}
-			currency = p.Currency
-			totalPence += p.AmountPence
-		case AttendanceDayPass:
-			p, err := get(PriceDayPass)
-			if err != nil {
-				return 0, "", err
-			}
-			currency = p.Currency
-			totalPence += p.AmountPence * len(c.Attendance.Days)
-			if c.Attendance.TshirtOption == TshirtOptionTeamActivities ||
-				c.Attendance.TshirtOption == TshirtOptionTshirtOnly {
-				tp, err := get(PriceTshirtOnly)
-				if err != nil {
-					return 0, "", err
-				}
-				totalPence += tp.AmountPence
-			}
-		}
+	currency = deposit.Currency
+	if currency == "" {
+		currency = "GBP"
 	}
+	totalPence = deposit.AmountPence * fullWeekCount(req)
 	return totalPence, currency, nil
 }
 
-// collectSoldOut compares requested accommodations against current availability
-// and returns the codes that have no room. Returned list is sorted and unique.
-func collectSoldOut(req SubmitRequest, avail []accommodation.Availability) []string {
-	byCode := map[string]accommodation.Availability{}
-	for _, a := range avail {
-		byCode[a.Code] = a
+// sendConfirmationEmail dispatches the deposit / day-pass confirmation. Failure
+// is logged but not surfaced to the caller — the registration is already
+// committed at this point, and we'd rather a user see "success" + chase a
+// missing email than have the submit appear to fail after the fact.
+func (s *Service) sendConfirmationEmail(ctx context.Context, req SubmitRequest, totalPence int, currency string, hasMinor bool) {
+	if s.mailer == nil {
+		return
 	}
-	want := map[string]int{}
+	consentURL := ""
+	if hasMinor {
+		consentURL = s.publicBaseURL + "/api/consent-form"
+	}
+	err := s.mailer.SendDepositConfirmation(ctx, email.DepositConfirmation{
+		ToEmail:        req.Contact.Email,
+		ToName:         req.Contact.FirstName,
+		AmountPence:    totalPence,
+		Currency:       currency,
+		CamperCount:    len(req.Campers),
+		HasMinor:       hasMinor,
+		ConsentFormURL: consentURL,
+	})
+	if err != nil {
+		log.Printf("send confirmation email to %s failed: %v", req.Contact.Email, err)
+	}
+}
+
+func fullWeekCount(req SubmitRequest) int {
+	n := 0
 	for _, c := range req.Campers {
-		if c.Attendance.Type == AttendanceFullWeek && c.Attendance.AccommodationCode != "" {
-			want[c.Attendance.AccommodationCode]++
+		if c.Attendance.Type == AttendanceFullWeek {
+			n++
 		}
 	}
-	var soldOut []string
-	for code, n := range want {
-		a, ok := byCode[code]
-		if !ok {
-			soldOut = append(soldOut, code)
-			continue
-		}
-		if !a.HasRoomFor(n) {
-			soldOut = append(soldOut, code)
-		}
+	return n
+}
+
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
 	}
-	sort.Strings(soldOut)
-	return soldOut
+	return "s"
 }

@@ -19,9 +19,10 @@ func validFullWeekCamper(main bool) CamperDTO {
 		IsCellLeader:   false,
 		IsMainContact:  main,
 		Attendance: AttendanceDTO{
-			Type:              AttendanceFullWeek,
-			ShirtSize:         "adult_m",
-			AccommodationCode: "lodge",
+			Type:                      AttendanceFullWeek,
+			ShirtSize:                 "adult_m",
+			AccommodationFirstChoice:  "lodge",
+			AccommodationSecondChoice: "cabin",
 		},
 	}
 }
@@ -80,10 +81,32 @@ func TestValidate_InvalidAge(t *testing.T) {
 	assertFieldError(t, Validate(req), "campers[0].age")
 }
 
-func TestValidate_FullWeekMissingAccommodation(t *testing.T) {
+func TestValidate_FullWeekMissingFirstChoice(t *testing.T) {
 	req := validRequest()
-	req.Campers[0].Attendance.AccommodationCode = ""
-	assertFieldError(t, Validate(req), "campers[0].attendance.accommodation_code")
+	req.Campers[0].Attendance.AccommodationFirstChoice = ""
+	assertFieldError(t, Validate(req), "campers[0].attendance.accommodation_first_choice")
+}
+
+func TestValidate_FullWeekMissingSecondChoice(t *testing.T) {
+	req := validRequest()
+	req.Campers[0].Attendance.AccommodationSecondChoice = ""
+	assertFieldError(t, Validate(req), "campers[0].attendance.accommodation_second_choice")
+}
+
+func TestValidate_FullWeekSecondChoiceMatchesFirst(t *testing.T) {
+	req := validRequest()
+	req.Campers[0].Attendance.AccommodationSecondChoice = req.Campers[0].Attendance.AccommodationFirstChoice
+	assertFieldError(t, Validate(req), "campers[0].attendance.accommodation_second_choice")
+}
+
+func TestValidate_RoommateRequestsTooLong(t *testing.T) {
+	req := validRequest()
+	long := make([]byte, maxRoommateRequestLen+1)
+	for i := range long {
+		long[i] = 'x'
+	}
+	req.Campers[0].Attendance.RoommateRequests = string(long)
+	assertFieldError(t, Validate(req), "campers[0].attendance.roommate_requests")
 }
 
 func TestValidate_DayPassEmptyDays(t *testing.T) {

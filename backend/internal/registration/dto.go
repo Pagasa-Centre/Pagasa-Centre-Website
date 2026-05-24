@@ -27,10 +27,12 @@ type AttendanceDTO struct {
 	Type string `json:"type"` // full_week | day_pass
 
 	// Full-week fields
-	ShirtSize           string `json:"shirt_size,omitempty"`
-	DietaryRequirements string `json:"dietary_requirements,omitempty"`
-	NeedsCoach          *bool  `json:"needs_coach,omitempty"`
-	AccommodationCode   string `json:"accommodation_code,omitempty"`
+	ShirtSize                 string `json:"shirt_size,omitempty"`
+	DietaryRequirements       string `json:"dietary_requirements,omitempty"`
+	NeedsCoach                *bool  `json:"needs_coach,omitempty"`
+	AccommodationFirstChoice  string `json:"accommodation_first_choice,omitempty"`
+	AccommodationSecondChoice string `json:"accommodation_second_choice,omitempty"`
+	RoommateRequests          string `json:"roommate_requests,omitempty"`
 
 	// Day-pass fields
 	Days          []string `json:"days,omitempty"`
@@ -39,8 +41,9 @@ type AttendanceDTO struct {
 }
 
 type SubmitResponse struct {
-	GroupID        string `json:"group_id"`
-	CheckoutURL    string `json:"checkout_url"`
-	HasMinor       bool   `json:"has_minor"`
-	ConsentFormURL string `json:"consent_form_url,omitempty"`
+	GroupID          string `json:"group_id"`
+	CheckoutURL      string `json:"checkout_url"`
+	TotalAmountPence int    `json:"total_amount_pence"`
+	HasMinor         bool   `json:"has_minor"`
+	ConsentFormURL   string `json:"consent_form_url,omitempty"`
 }

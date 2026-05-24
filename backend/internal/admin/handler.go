@@ -10,23 +10,23 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"pagasacentre/backend/internal/accommodation"
 	"pagasacentre/backend/internal/camp"
 	"pagasacentre/backend/internal/httpx"
 	"pagasacentre/backend/internal/registration"
 )
 
 // Mount wires admin routes onto r.
+//
+// v2 dropped PUT /accommodations/{code}: there is no capacity to manage and
+// the price is a single deposit row in the prices table.
 func Mount(
 	r chi.Router,
 	regRepo *registration.Repository,
-	accRepo *accommodation.Repository,
 	campRepo *camp.Repository,
 ) {
 	r.Get("/registrations", listRegistrationsJSON(regRepo))
 	r.Get("/registrations.csv", listRegistrationsCSV(regRepo))
 	r.Patch("/registrations/{groupID}", patchRegistration(regRepo))
-	r.Put("/accommodations/{code}", putAccommodation(accRepo))
 	r.Put("/prices/{code}", putPrice(campRepo))
 }
 
@@ -122,24 +122,6 @@ func patchRegistration(repo *registration.Repository) http.HandlerFunc {
 			return
 		}
 		if err := repo.MarkStatus(r.Context(), chi.URLParam(r, "groupID"), b.PaymentStatus); err != nil {
-			httpx.WriteError(w, httpx.Internal(err.Error()))
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}
-}
-
-func putAccommodation(repo *accommodation.Repository) http.HandlerFunc {
-	type body struct {
-		Capacity *int `json:"capacity"`
-	}
-	return func(w http.ResponseWriter, r *http.Request) {
-		var b body
-		if err := httpx.DecodeJSON(r, &b); err != nil {
-			httpx.WriteError(w, err)
-			return
-		}
-		if err := repo.UpdateCapacity(r.Context(), chi.URLParam(r, "code"), b.Capacity); err != nil {
 			httpx.WriteError(w, httpx.Internal(err.Error()))
 			return
 		}
