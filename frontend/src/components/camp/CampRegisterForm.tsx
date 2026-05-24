@@ -343,7 +343,7 @@ export default function CampRegisterForm({
           </h2>
           <p className="mt-4 text-neutral-600 max-w-xl mx-auto text-sm">
             Full-week campers pay a flat{" "}
-            <strong>£50 non-refundable deposit per person</strong> at
+            <strong>£50 non-refundable deposit per person </strong> at
             registration. Day visitors don&apos;t pay anything at this stage —
             catering and t-shirt fees are settled with the camp team on the day.
           </p>
