@@ -18,8 +18,15 @@ type Config struct {
 	StripeCancelURL     string
 	AllowedOrigin       string
 	PublicBaseURL       string
-	// SMTP for transactional emails. All optional — if SMTPHost is empty the
-	// app boots with a NoopMailer (local dev, no real email sent).
+	// Email config. Two possible backends, in priority order:
+	//   1. Resend HTTP API (RESEND_API_KEY + EMAIL_FROM) — required on hosts
+	//      that block outbound SMTP (Railway, Fly, etc.).
+	//   2. SMTP (SMTP_HOST + SMTP_* + SMTP_FROM) — works locally and on hosts
+	//      that allow port 465/587 out.
+	// If neither is configured, a NoopMailer is used (template still renders,
+	// just logs instead of sending).
+	ResendAPIKey string
+	EmailFrom    string
 	SMTPHost     string
 	SMTPPort     string
 	SMTPUsername string
@@ -39,6 +46,8 @@ func Load() (Config, error) {
 		StripeCancelURL:     os.Getenv("STRIPE_CANCEL_URL"),
 		AllowedOrigin:       getEnv("CORS_ALLOWED_ORIGIN", "http://localhost:3000"),
 		PublicBaseURL:       getEnv("PUBLIC_BASE_URL", "http://localhost:8080"),
+		ResendAPIKey:        os.Getenv("RESEND_API_KEY"),
+		EmailFrom:           os.Getenv("EMAIL_FROM"),
 		SMTPHost:            os.Getenv("SMTP_HOST"),
 		SMTPPort:            getEnv("SMTP_PORT", "587"),
 		SMTPUsername:        os.Getenv("SMTP_USERNAME"),

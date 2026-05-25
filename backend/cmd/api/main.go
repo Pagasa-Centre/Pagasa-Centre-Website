@@ -53,16 +53,21 @@ func main() {
 		cfg.StripeSuccessURL, cfg.StripeCancelURL,
 	)
 
-	// Email — SMTPMailer if SMTP_HOST is configured, NoopMailer otherwise.
-	// NoopMailer renders the template (so dev still catches template errors)
-	// then logs a one-line summary instead of dispatching.
+	// Email backend selection. Priority:
+	//   1. Resend (HTTPS, works on hosts that block SMTP)
+	//   2. SMTP (works locally and on hosts that allow 465/587 out)
+	//   3. NoopMailer (template still renders, just logs)
 	var mailer email.Mailer
-	if cfg.SMTPHost != "" {
+	switch {
+	case cfg.ResendAPIKey != "" && cfg.EmailFrom != "":
+		mailer = email.NewResendMailer(cfg.ResendAPIKey, cfg.EmailFrom)
+		log.Printf("email: Resend enabled (from=%s)", cfg.EmailFrom)
+	case cfg.SMTPHost != "":
 		mailer = email.NewSMTPMailer(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPFrom)
 		log.Printf("email: SMTP enabled (host=%s from=%s)", cfg.SMTPHost, cfg.SMTPFrom)
-	} else {
+	default:
 		mailer = email.NewNoopMailer()
-		log.Println("email: SMTP_HOST unset, using NoopMailer (no real email sent)")
+		log.Println("email: no backend configured, using NoopMailer (no real email sent)")
 	}
 
 	// Registration service depends on small interfaces; adapt camp.Repository
