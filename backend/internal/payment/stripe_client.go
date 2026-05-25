@@ -60,6 +60,15 @@ func (c *StripeClient) CreateCheckoutSession(ctx context.Context, p registration
 }
 
 // VerifyWebhook validates a Stripe webhook signature and returns the parsed event.
+//
+// IgnoreAPIVersionMismatch is set because Stripe's default API version drifts
+// faster than we bump stripe-go. The signature check is still performed; only
+// the soft "this event was sent with version X but library was compiled
+// against Y" error is suppressed. We only read top-level fields
+// (event.Type / event.Data.Raw on checkout.session.*) which are stable across
+// versions, so this is safe.
 func (c *StripeClient) VerifyWebhook(body []byte, signature string) (stripe.Event, error) {
-	return webhook.ConstructEvent(body, signature, c.webhookSecret)
+	return webhook.ConstructEventWithOptions(body, signature, c.webhookSecret, webhook.ConstructEventOptions{
+		IgnoreAPIVersionMismatch: true,
+	})
 }
