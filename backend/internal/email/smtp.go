@@ -2,10 +2,13 @@ package email
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"net"
 	"net/mail"
 	"net/smtp"
 	"strings"
+	"time"
 )
 
 // SMTPMailer sends real email via SMTP (Gmail / Google Workspace with an app
@@ -43,8 +46,6 @@ func (s *SMTPMailer) send(_ context.Context, to, subject, htmlBody string) error
 	if to == "" {
 		return fmt.Errorf("empty recipient")
 	}
-	auth := smtp.PlainAuth("", s.username, s.password, s.host)
-	addr := s.host + ":" + s.port
 
 	// `From` env var may be either a bare address ("foo@bar.com") or RFC 5322
 	// display-name form ("Name <foo@bar.com>"). The header keeps the full
@@ -59,10 +60,60 @@ func (s *SMTPMailer) send(_ context.Context, to, subject, htmlBody string) error
 		"MIME-Version: 1.0",
 		`Content-Type: text/html; charset="utf-8"`,
 	}
-	msg := strings.Join(headers, "\r\n") + "\r\n\r\n" + htmlBody
+	msg := []byte(strings.Join(headers, "\r\n") + "\r\n\r\n" + htmlBody)
 
-	if err := smtp.SendMail(addr, auth, envelopeFrom, []string{to}, []byte(msg)); err != nil {
+	// Port 465 = implicit TLS from connection start (SMTPS). Required on
+	// hosts like Railway/Fly that block 587. Port 587 = STARTTLS upgrade
+	// from plaintext, which is the original net/smtp.SendMail behaviour.
+	if s.port == "465" {
+		return s.sendImplicitTLS(envelopeFrom, to, msg)
+	}
+	return s.sendSTARTTLS(envelopeFrom, to, msg)
+}
+
+func (s *SMTPMailer) sendSTARTTLS(from, to string, msg []byte) error {
+	auth := smtp.PlainAuth("", s.username, s.password, s.host)
+	addr := s.host + ":" + s.port
+	if err := smtp.SendMail(addr, auth, from, []string{to}, msg); err != nil {
 		return fmt.Errorf("smtp send to %s: %w", to, err)
+	}
+	return nil
+}
+
+func (s *SMTPMailer) sendImplicitTLS(from, to string, msg []byte) error {
+	addr := s.host + ":" + s.port
+	dialer := &net.Dialer{Timeout: 30 * time.Second}
+	tlsConn, err := tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{ServerName: s.host})
+	if err != nil {
+		return fmt.Errorf("smtp dial %s: %w", addr, err)
+	}
+	defer tlsConn.Close()
+
+	client, err := smtp.NewClient(tlsConn, s.host)
+	if err != nil {
+		return fmt.Errorf("smtp new client: %w", err)
+	}
+	defer client.Quit()
+
+	auth := smtp.PlainAuth("", s.username, s.password, s.host)
+	if err := client.Auth(auth); err != nil {
+		return fmt.Errorf("smtp auth: %w", err)
+	}
+	if err := client.Mail(from); err != nil {
+		return fmt.Errorf("smtp MAIL FROM: %w", err)
+	}
+	if err := client.Rcpt(to); err != nil {
+		return fmt.Errorf("smtp RCPT TO %s: %w", to, err)
+	}
+	w, err := client.Data()
+	if err != nil {
+		return fmt.Errorf("smtp DATA: %w", err)
+	}
+	if _, err := w.Write(msg); err != nil {
+		return fmt.Errorf("smtp write body: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("smtp close body: %w", err)
 	}
 	return nil
 }
