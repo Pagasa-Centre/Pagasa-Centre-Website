@@ -43,6 +43,13 @@ services:
       STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:-whsec_placeholder}"
       STRIPE_SUCCESS_URL: "${STRIPE_SUCCESS_URL:-http://localhost:3000/camp/registration/success?session_id={CHECKOUT_SESSION_ID}}"
       STRIPE_CANCEL_URL: "${STRIPE_CANCEL_URL:-http://localhost:3000/camp/registration/cancelled}"
+      # SMTP values are also read from .env. Leave SMTP_HOST blank to fall back
+      # to the no-op mailer that just logs the email instead of sending it.
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USERNAME: "${SMTP_USERNAME:-}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
+      SMTP_FROM: "${SMTP_FROM:-}"
 
 volumes:
   pagasa_pgdata:

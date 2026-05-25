@@ -3,6 +3,7 @@ package email
 import (
 	"context"
 	"fmt"
+	"net/mail"
 	"net/smtp"
 	"strings"
 )
@@ -45,6 +46,12 @@ func (s *SMTPMailer) send(_ context.Context, to, subject, htmlBody string) error
 	auth := smtp.PlainAuth("", s.username, s.password, s.host)
 	addr := s.host + ":" + s.port
 
+	// `From` env var may be either a bare address ("foo@bar.com") or RFC 5322
+	// display-name form ("Name <foo@bar.com>"). The header keeps the full
+	// thing; the SMTP envelope-MAIL-FROM only accepts the bare address, and
+	// Gmail rejects display-name syntax there with 501 5.1.7.
+	envelopeFrom := envelopeAddress(s.from, s.username)
+
 	headers := []string{
 		"From: " + s.from,
 		"To: " + to,
@@ -54,8 +61,21 @@ func (s *SMTPMailer) send(_ context.Context, to, subject, htmlBody string) error
 	}
 	msg := strings.Join(headers, "\r\n") + "\r\n\r\n" + htmlBody
 
-	if err := smtp.SendMail(addr, auth, s.from, []string{to}, []byte(msg)); err != nil {
+	if err := smtp.SendMail(addr, auth, envelopeFrom, []string{to}, []byte(msg)); err != nil {
 		return fmt.Errorf("smtp send to %s: %w", to, err)
 	}
 	return nil
+}
+
+// envelopeAddress extracts the bare email from an RFC 5322 address string.
+// Falls back to `fallback` if parsing fails so we never end up with an empty
+// envelope-from.
+func envelopeAddress(raw, fallback string) string {
+	if a, err := mail.ParseAddress(raw); err == nil && a.Address != "" {
+		return a.Address
+	}
+	if a, err := mail.ParseAddress(fallback); err == nil && a.Address != "" {
+		return a.Address
+	}
+	return fallback
 }
