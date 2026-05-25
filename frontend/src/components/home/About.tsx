@@ -48,6 +48,7 @@ export default function About() {
           src="/our-story.jpg"
           alt="Pag-Asa Centre worship team"
           fill
+          sizes="(min-width: 1024px) 45vw, 100vw"
           className="object-cover object-center"
         />
       </div>
