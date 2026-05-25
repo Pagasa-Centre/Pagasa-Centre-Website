@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/httpx"
+	"pagasacentre/backend/internal/sheets"
 )
 
 // PriceLookup returns the current amount and currency for a price code.
@@ -54,6 +56,7 @@ type Service struct {
 	stripe        CheckoutCreator
 	camp          CampConfigReader
 	mailer        email.Mailer
+	sheets        sheets.Sync
 	publicBaseURL string
 }
 
@@ -63,14 +66,19 @@ func NewService(
 	stripe CheckoutCreator,
 	campCfg CampConfigReader,
 	mailer email.Mailer,
+	sheetSync sheets.Sync,
 	publicBaseURL string,
 ) *Service {
+	if sheetSync == nil {
+		sheetSync = sheets.NewNoopSync()
+	}
 	return &Service{
 		repo:          repo,
 		prices:        prices,
 		stripe:        stripe,
 		camp:          campCfg,
 		mailer:        mailer,
+		sheets:        sheetSync,
 		publicBaseURL: publicBaseURL,
 	}
 }
@@ -138,6 +146,12 @@ func (s *Service) Submit(ctx context.Context, req SubmitRequest) (*SubmitRespons
 			return nil, httpx.Internal(err.Error())
 		}
 		s.sendConfirmationEmail(ctx, req, total, currency, hasMinor)
+		// Zero-total path skips Pending entirely — write straight to Paid.
+		now := time.Now().UTC()
+		rows := rowsFromRequest(groupID, req, PaymentPaid, total, currency, now, &now)
+		if err := s.sheets.AppendPaidAndRemovePending(ctx, groupID, rows); err != nil {
+			log.Printf("sheets append paid (group %s): %v", groupID, err)
+		}
 		return resp, nil
 	}
 
@@ -160,8 +174,66 @@ func (s *Service) Submit(ctx context.Context, req SubmitRequest) (*SubmitRespons
 		return nil, httpx.Internal(err.Error())
 	}
 
+	// Append to Pending tab so leaders can see the registration even before
+	// the Stripe webhook fires. Failure is non-fatal — checkout flow continues.
+	pendingRows := rowsFromRequest(groupID, req, PaymentPending, total, currency, time.Now().UTC(), nil)
+	if err := s.sheets.AppendPending(ctx, pendingRows); err != nil {
+		log.Printf("sheets append pending (group %s): %v", groupID, err)
+	}
+
 	resp.CheckoutURL = session.URL
 	return resp, nil
+}
+
+// rowsFromRequest builds one sheets.Row per camper in the SubmitRequest,
+// denormalising the group-level contact fields onto each row to match the
+// CSV export layout.
+func rowsFromRequest(groupID string, req SubmitRequest, status string, totalPence int, currency string, submittedAt time.Time, paidAt *time.Time) []sheets.Row {
+	rows := make([]sheets.Row, 0, len(req.Campers))
+	for _, c := range req.Campers {
+		row := sheets.Row{
+			GroupID:          groupID,
+			PaymentStatus:    status,
+			SubmittedAt:      submittedAt,
+			PaidAt:           paidAt,
+			TotalAmountPence: totalPence,
+			Currency:         currency,
+			ContactFirstName: req.Contact.FirstName,
+			ContactLastName:  req.Contact.LastName,
+			ContactEmail:     req.Contact.Email,
+			ContactPhone:     req.Contact.Phone,
+			IsMainContact:    c.IsMainContact,
+			FirstName:        c.FirstName,
+			LastName:         c.LastName,
+			Gender:           c.Gender,
+			Age:              c.Age,
+			CellLeaderName:   c.CellLeaderName,
+			IsCellLeader:     c.IsCellLeader,
+			AttendanceType:   c.Attendance.Type,
+		}
+		switch c.Attendance.Type {
+		case AttendanceFullWeek:
+			row.ShirtSize = ptrIfNotEmpty(c.Attendance.ShirtSize)
+			row.DietaryRequirements = ptrIfNotEmpty(c.Attendance.DietaryRequirements)
+			row.NeedsCoach = c.Attendance.NeedsCoach
+			row.AccommodationFirstChoice = ptrIfNotEmpty(c.Attendance.AccommodationFirstChoice)
+			row.AccommodationSecondChoice = ptrIfNotEmpty(c.Attendance.AccommodationSecondChoice)
+			row.RoommateRequests = ptrIfNotEmpty(c.Attendance.RoommateRequests)
+		case AttendanceDayPass:
+			row.DayPassDays = c.Attendance.Days
+			row.DayPassTshirtOption = ptrIfNotEmpty(c.Attendance.TshirtOption)
+			row.DayPassNeedsCatering = c.Attendance.NeedsCatering
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func ptrIfNotEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // computeTotal returns the £-deposit total for the group: flat per

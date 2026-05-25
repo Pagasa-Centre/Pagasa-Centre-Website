@@ -67,7 +67,7 @@ func newHarness(t *testing.T) *harness {
 	repo := registration.NewRepository(pool)
 	stripe := &fakeCheckout{id: "sess_test", url: "https://checkout.stripe.com/test"}
 	mailer := &recordingMailer{}
-	svc := registration.NewService(repo, fakePrices{}, stripe, fakeCamp{open: true}, mailer, "http://localhost:8080")
+	svc := registration.NewService(repo, fakePrices{}, stripe, fakeCamp{open: true}, mailer, nil, "http://localhost:8080")
 	r := chi.NewRouter()
 	registration.Mount(r, svc)
 	return &harness{router: r, stripe: stripe, mailer: mailer}

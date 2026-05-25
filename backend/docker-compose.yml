@@ -50,6 +50,14 @@ services:
       SMTP_USERNAME: "${SMTP_USERNAME:-}"
       SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
       SMTP_FROM: "${SMTP_FROM:-}"
+      # Resend HTTPS API (preferred for hosts that block SMTP, e.g. Railway).
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+      EMAIL_FROM: "${EMAIL_FROM:-}"
+      # Google Sheets live sync. Leave any of these blank to disable.
+      GOOGLE_SERVICE_ACCOUNT_JSON: "${GOOGLE_SERVICE_ACCOUNT_JSON:-}"
+      GOOGLE_SHEETS_SPREADSHEET_ID: "${GOOGLE_SHEETS_SPREADSHEET_ID:-}"
+      GOOGLE_SHEETS_PENDING_TAB: "${GOOGLE_SHEETS_PENDING_TAB:-Pending}"
+      GOOGLE_SHEETS_PAID_TAB: "${GOOGLE_SHEETS_PAID_TAB:-Paid}"
 
 volumes:
   pagasa_pgdata:

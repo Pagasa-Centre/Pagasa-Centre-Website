@@ -78,7 +78,7 @@ func TestHandleCheckoutCompleted_MarksPaidAndSendsEmail(t *testing.T) {
 
 	_ = seedPendingGroup(t, ctx, repo, "sess_happy", "happy@example.com")
 	mailer := &recordingMailer{}
-	svc := payment.NewService(pool, repo, mailer, "http://localhost:8080")
+	svc := payment.NewService(pool, repo, mailer, nil, "http://localhost:8080")
 
 	if err := svc.HandleCheckoutCompleted(ctx, payment.CheckoutCompleted{
 		SessionID:       "sess_happy",
@@ -110,7 +110,7 @@ func TestHandleCheckoutCompleted_Idempotent(t *testing.T) {
 
 	_ = seedPendingGroup(t, ctx, repo, "sess_idem", "idem@example.com")
 	mailer := &recordingMailer{}
-	svc := payment.NewService(pool, repo, mailer, "http://localhost:8080")
+	svc := payment.NewService(pool, repo, mailer, nil, "http://localhost:8080")
 
 	for i := 0; i < 3; i++ {
 		if err := svc.HandleCheckoutCompleted(ctx, payment.CheckoutCompleted{

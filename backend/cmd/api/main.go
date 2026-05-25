@@ -22,6 +22,7 @@ import (
 	"pagasacentre/backend/internal/httpx"
 	"pagasacentre/backend/internal/payment"
 	"pagasacentre/backend/internal/registration"
+	"pagasacentre/backend/internal/sheets"
 )
 
 func main() {
@@ -70,6 +71,30 @@ func main() {
 		log.Println("email: no backend configured, using NoopMailer (no real email sent)")
 	}
 
+	// Google Sheets live sync. Requires service-account JSON + spreadsheet
+	// ID; if either is missing or auth fails, fall back to NoopSync so the
+	// rest of the app keeps working.
+	var sheetSync sheets.Sync
+	if cfg.GoogleServiceAccountJSON != "" && cfg.GoogleSheetsSpreadsheetID != "" {
+		gs, err := sheets.NewGoogleSync(ctx, sheets.GoogleSyncConfig{
+			ServiceAccountJSON: cfg.GoogleServiceAccountJSON,
+			SpreadsheetID:      cfg.GoogleSheetsSpreadsheetID,
+			PendingTab:         cfg.GoogleSheetsPendingTab,
+			PaidTab:            cfg.GoogleSheetsPaidTab,
+		})
+		if err != nil {
+			log.Printf("sheets: init failed, falling back to NoopSync: %v", err)
+			sheetSync = sheets.NewNoopSync()
+		} else {
+			sheetSync = gs
+			log.Printf("sheets: GoogleSync enabled (spreadsheet=%s pending=%q paid=%q)",
+				cfg.GoogleSheetsSpreadsheetID, cfg.GoogleSheetsPendingTab, cfg.GoogleSheetsPaidTab)
+		}
+	} else {
+		sheetSync = sheets.NewNoopSync()
+		log.Println("sheets: GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SHEETS_SPREADSHEET_ID unset, using NoopSync")
+	}
+
 	// Registration service depends on small interfaces; adapt camp.Repository
 	// so it satisfies registration.PriceLookup with the local PriceRow type.
 	regSvc := registration.NewService(
@@ -78,11 +103,13 @@ func main() {
 		stripeCli,
 		campRepo,
 		mailer,
+		sheetSync,
 		cfg.PublicBaseURL,
 	)
 
-	// Payment service handles webhook events: mark paid + send confirmation email.
-	paySvc := payment.NewService(pool, regRepo, mailer, cfg.PublicBaseURL)
+	// Payment service handles webhook events: mark paid + send confirmation email
+	// + push to Paid tab of the Sheet.
+	paySvc := payment.NewService(pool, regRepo, mailer, sheetSync, cfg.PublicBaseURL)
 
 	r := chi.NewRouter()
 	httpx.UseDefaults(r, cfg.AllowedOrigin)

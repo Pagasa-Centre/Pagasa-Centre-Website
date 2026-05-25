@@ -32,6 +32,13 @@ type Config struct {
 	SMTPUsername string
 	SMTPPassword string
 	SMTPFrom     string
+
+	// Google Sheets live sync. All three required to enable; if any is
+	// empty the app boots with a NoopSync (no rows written).
+	GoogleServiceAccountJSON string
+	GoogleSheetsSpreadsheetID string
+	GoogleSheetsPendingTab    string // defaults to "Pending"
+	GoogleSheetsPaidTab       string // defaults to "Paid"
 }
 
 func Load() (Config, error) {
@@ -46,13 +53,17 @@ func Load() (Config, error) {
 		StripeCancelURL:     os.Getenv("STRIPE_CANCEL_URL"),
 		AllowedOrigin:       getEnv("CORS_ALLOWED_ORIGIN", "http://localhost:3000"),
 		PublicBaseURL:       getEnv("PUBLIC_BASE_URL", "http://localhost:8080"),
-		ResendAPIKey:        os.Getenv("RESEND_API_KEY"),
-		EmailFrom:           os.Getenv("EMAIL_FROM"),
-		SMTPHost:            os.Getenv("SMTP_HOST"),
-		SMTPPort:            getEnv("SMTP_PORT", "587"),
-		SMTPUsername:        os.Getenv("SMTP_USERNAME"),
-		SMTPPassword:        os.Getenv("SMTP_PASSWORD"),
-		SMTPFrom:            os.Getenv("SMTP_FROM"),
+		ResendAPIKey:              os.Getenv("RESEND_API_KEY"),
+		EmailFrom:                 os.Getenv("EMAIL_FROM"),
+		SMTPHost:                  os.Getenv("SMTP_HOST"),
+		SMTPPort:                  getEnv("SMTP_PORT", "587"),
+		SMTPUsername:              os.Getenv("SMTP_USERNAME"),
+		SMTPPassword:              os.Getenv("SMTP_PASSWORD"),
+		SMTPFrom:                  os.Getenv("SMTP_FROM"),
+		GoogleServiceAccountJSON:  os.Getenv("GOOGLE_SERVICE_ACCOUNT_JSON"),
+		GoogleSheetsSpreadsheetID: os.Getenv("GOOGLE_SHEETS_SPREADSHEET_ID"),
+		GoogleSheetsPendingTab:    getEnv("GOOGLE_SHEETS_PENDING_TAB", "Pending"),
+		GoogleSheetsPaidTab:       getEnv("GOOGLE_SHEETS_PAID_TAB", "Paid"),
 	}
 
 	var missing []string

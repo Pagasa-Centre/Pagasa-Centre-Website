@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/registration"
+	"pagasacentre/backend/internal/sheets"
 )
 
 // Service handles Stripe webhook events. As of v2 it is a thin layer that
@@ -20,14 +22,19 @@ type Service struct {
 	pool          *pgxpool.Pool
 	regRepo       *registration.Repository
 	mailer        email.Mailer
+	sheets        sheets.Sync
 	publicBaseURL string
 }
 
-func NewService(pool *pgxpool.Pool, regRepo *registration.Repository, mailer email.Mailer, publicBaseURL string) *Service {
+func NewService(pool *pgxpool.Pool, regRepo *registration.Repository, mailer email.Mailer, sheetSync sheets.Sync, publicBaseURL string) *Service {
+	if sheetSync == nil {
+		sheetSync = sheets.NewNoopSync()
+	}
 	return &Service{
 		pool:          pool,
 		regRepo:       regRepo,
 		mailer:        mailer,
+		sheets:        sheetSync,
 		publicBaseURL: publicBaseURL,
 	}
 }
@@ -73,8 +80,73 @@ func (s *Service) HandleCheckoutCompleted(ctx context.Context, evt CheckoutCompl
 	}
 	committed = true
 
+	// MarkPaid set payment_status='paid' and paid_at=now() in the DB. Mirror
+	// that into the in-memory group so sendConfirmationEmail + syncToSheet
+	// see consistent data without an extra round-trip.
+	now := time.Now().UTC()
+	group.PaymentStatus = registration.PaymentPaid
+	group.PaidAt = &now
+
 	s.sendConfirmationEmail(ctx, group)
+	s.syncToSheet(ctx, group)
 	return nil
+}
+
+// syncToSheet appends the paid group + campers to the Paid tab and deletes
+// any matching Pending rows. Failure is logged, never fatal — the webhook
+// return value of "OK" already triggered DB commit + email; the sheet is a
+// view layer.
+func (s *Service) syncToSheet(ctx context.Context, g *registration.Group) {
+	if s.sheets == nil {
+		return
+	}
+	campers, err := s.regRepo.CampersForGroup(ctx, g.ID)
+	if err != nil {
+		log.Printf("sheets: load campers for group %s: %v", g.ID, err)
+		return
+	}
+	rows := rowsFromGroup(g, campers)
+	if err := s.sheets.AppendPaidAndRemovePending(ctx, g.ID, rows); err != nil {
+		log.Printf("sheets: append paid for group %s: %v", g.ID, err)
+	}
+}
+
+// rowsFromGroup builds one sheets.Row per camper, denormalising group-level
+// contact fields onto each row to match the CSV export layout.
+func rowsFromGroup(g *registration.Group, campers []registration.Camper) []sheets.Row {
+	rows := make([]sheets.Row, 0, len(campers))
+	for _, c := range campers {
+		rows = append(rows, sheets.Row{
+			GroupID:                   g.ID,
+			PaymentStatus:             g.PaymentStatus,
+			SubmittedAt:               g.CreatedAt,
+			PaidAt:                    g.PaidAt,
+			TotalAmountPence:          g.TotalAmountPence,
+			Currency:                  g.Currency,
+			ContactFirstName:          g.ContactFirstName,
+			ContactLastName:           g.ContactLastName,
+			ContactEmail:              g.ContactEmail,
+			ContactPhone:              g.ContactPhone,
+			IsMainContact:             c.IsMainContact,
+			FirstName:                 c.FirstName,
+			LastName:                  c.LastName,
+			Gender:                    c.Gender,
+			Age:                       c.Age,
+			CellLeaderName:            c.CellLeaderName,
+			IsCellLeader:              c.IsCellLeader,
+			AttendanceType:            c.AttendanceType,
+			ShirtSize:                 c.ShirtSize,
+			DietaryRequirements:       c.DietaryRequirements,
+			NeedsCoach:                c.NeedsCoach,
+			AccommodationFirstChoice:  c.AccommodationFirstChoice,
+			AccommodationSecondChoice: c.AccommodationSecondChoice,
+			RoommateRequests:          c.RoommateRequests,
+			DayPassDays:               c.DayPassDays,
+			DayPassTshirtOption:       c.DayPassTshirtOption,
+			DayPassNeedsCatering:      c.DayPassNeedsCatering,
+		})
+	}
+	return rows
 }
 
 // HandleCheckoutExpired marks a group as cancelled when the Stripe session
