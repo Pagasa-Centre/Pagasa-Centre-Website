@@ -34,7 +34,7 @@ export default function Navbar() {
   const closeMenu = () => setMenuOpen(false);
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 bg-transparent text-white">
+    <header className="absolute top-0 left-0 right-0 z-50 bg-transparent text-white">
       <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-[88px]">
         {/* Logo */}
         <Link href="/" className="flex items-center shrink-0">

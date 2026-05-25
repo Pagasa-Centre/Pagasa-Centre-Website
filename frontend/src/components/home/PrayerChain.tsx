@@ -31,6 +31,7 @@ export default function PrayerChain() {
           src="/prayer-chain.jpg"
           alt="24-Hour Prayer Chain online meeting"
           fill
+          sizes="(min-width: 1024px) 45vw, 100vw"
           className="object-cover object-center"
         />
       </div>

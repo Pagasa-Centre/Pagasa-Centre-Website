@@ -10,6 +10,7 @@ export default function Leadership() {
           src="/pastors.jpg"
           alt="Dr. Godofredo Ambat and Pastor Shirley Ambat"
           fill
+          sizes="(min-width: 1024px) 45vw, 100vw"
           className="object-cover object-top"
         />
       </div>
