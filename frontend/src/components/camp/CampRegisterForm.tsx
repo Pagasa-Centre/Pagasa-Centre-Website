@@ -18,6 +18,7 @@ import {
   emptyCamper,
   formatPence,
   isMinor,
+  MAX_CHILD_ACCOMMODATION_AGE,
   MIN_DEPOSIT_AGE,
   payingForDeposit,
   pricesCurrency,
@@ -30,6 +31,11 @@ export type SuccessStash = {
   has_minor: boolean;
   consent_form_url: string | null;
   contact_email: string;
+  // Camper list for the "we've registered the following" panel on the
+  // success page. We snapshot it client-side so the free path doesn't need
+  // a backend round-trip; the Stripe path falls back to the backend
+  // `/api/registrations/summary` endpoint if sessionStorage is missing.
+  campers: { first_name: string; last_name: string }[];
 };
 
 const STASH_KEY = "pc-camp-last-registration";
@@ -118,6 +124,16 @@ function toSubmission(
       }
       const isChildSharing =
         c.accommodation_first_choice === ACCOMMODATION_CHILD_CODE;
+      if (
+        (c.accommodation_first_choice === ACCOMMODATION_CHILD_CODE ||
+          c.accommodation_second_choice === ACCOMMODATION_CHILD_CODE) &&
+        age > MAX_CHILD_ACCOMMODATION_AGE
+      ) {
+        return {
+          ok: false,
+          error: `Camper ${i + 1}: child accommodation is only available for campers aged ${MAX_CHILD_ACCOMMODATION_AGE} or under.`,
+        };
+      }
       if (!isChildSharing && !c.accommodation_second_choice) {
         return {
           ok: false,
@@ -312,6 +328,10 @@ export default function CampRegisterForm({
         has_minor: res.has_minor,
         consent_form_url: res.consent_form_url ?? null,
         contact_email: built.payload.contact.email,
+        campers: built.payload.campers.map((c) => ({
+          first_name: c.first_name,
+          last_name: c.last_name,
+        })),
       };
       try {
         sessionStorage.setItem(STASH_KEY, JSON.stringify(stash));
@@ -323,8 +343,10 @@ export default function CampRegisterForm({
       } else {
         // £0 total (day-pass-only): backend already marked paid + emailed.
         // Send the user straight to the success page; the ?free=1 flag lets
-        // it adjust copy to match.
-        window.location.href = "/camp/registration/success?free=1";
+        // it adjust copy to match. Also pass group_id so the success page
+        // can fall back to /api/registrations/summary if sessionStorage is
+        // unavailable (rare, but possible).
+        window.location.href = `/camp/registration/success?free=1&group_id=${encodeURIComponent(res.group_id)}`;
       }
     } catch (err) {
       setSubmitting(false);
@@ -361,6 +383,28 @@ export default function CampRegisterForm({
             closes. Your accommodation choice will be secured once the full
             payment has been made.
           </p>
+        </div>
+
+        {/* Static site capacity overview. Display-only, no live allocation —
+            just so families have a sense of what's on site before picking a
+            preference. Numbers supplied by the White Team. */}
+        <div className="bg-white border border-neutral-300 rounded-xl p-6 mb-8">
+          <p className="text-xs font-bold uppercase tracking-widest text-neutral-500 mb-3">
+            What&apos;s on site
+          </p>
+          <p className="text-sm text-neutral-600 mb-4">
+            Approximate capacity across the camp. The White Team allocates
+            rooms after registrations close — this is just for context.
+          </p>
+          <ul className="grid grid-cols-1 sm:grid-cols-2 gap-y-1.5 gap-x-6 text-sm text-neutral-800">
+            <li>• 3 × Lodges — sleeps 8 each</li>
+            <li>• 8 × Cabins — sleeps 2 each</li>
+            <li>• 1 × Caravan — sleeps 5</li>
+            <li>• 3 × Caravans — sleeps 5 each (includes one sofa bed)</li>
+            <li>• 4 × Caravans — sleeps 6 each</li>
+            <li>• 10 × Pods — sleeps 2 each</li>
+            <li>• Tents — unlimited</li>
+          </ul>
         </div>
 
         {topError && (

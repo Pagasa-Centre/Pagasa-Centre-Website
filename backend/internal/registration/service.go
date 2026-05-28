@@ -282,6 +282,53 @@ func (s *Service) sendConfirmationEmail(ctx context.Context, req SubmitRequest, 
 // under this age attend free (cot / lap-of-parent etc.).
 const MinDepositAge = 3
 
+// Summary loads a public-facing summary of a registration for display on the
+// success page. Lookup is by sessionID OR groupID — exactly one of those
+// should be non-empty. Returns (nil, nil) if no group matches; the caller
+// should map that to 404.
+func (s *Service) Summary(ctx context.Context, sessionID, groupID string) (*SummaryResponse, error) {
+	if sessionID == "" && groupID == "" {
+		return nil, httpx.APIError{
+			Code:    "missing_identifier",
+			Message: "either session_id or group_id is required",
+		}
+	}
+
+	var group *Group
+	var err error
+	if sessionID != "" {
+		group, err = s.repo.FindGroupBySessionID(ctx, sessionID)
+	} else {
+		group, err = s.repo.FindGroupByID(ctx, groupID)
+	}
+	if err != nil {
+		return nil, httpx.Internal(err.Error())
+	}
+	if group == nil {
+		return nil, nil
+	}
+
+	campers, err := s.repo.CampersForGroup(ctx, group.ID)
+	if err != nil {
+		return nil, httpx.Internal(err.Error())
+	}
+	out := &SummaryResponse{
+		GroupID:          group.ID,
+		PaymentStatus:    group.PaymentStatus,
+		TotalAmountPence: group.TotalAmountPence,
+		Currency:         group.Currency,
+		ContactEmail:     group.ContactEmail,
+		Campers:          make([]SummaryCamper, 0, len(campers)),
+	}
+	for _, c := range campers {
+		out.Campers = append(out.Campers, SummaryCamper{
+			FirstName: c.FirstName,
+			LastName:  c.LastName,
+		})
+	}
+	return out, nil
+}
+
 // depositPayingCount returns the number of campers in the request who owe a
 // deposit: full-week AND age >= MinDepositAge.
 func depositPayingCount(req SubmitRequest) int {

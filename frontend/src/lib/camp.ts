@@ -16,6 +16,11 @@ export const MIN_DEPOSIT_AGE = 3;
 // Mirrors backend AccommodationChild.
 export const ACCOMMODATION_CHILD_CODE = "child";
 
+// Oldest age that can pick the child-with-parent accommodation. Anyone older
+// has to pick a regular tier (lodge/cabin/etc.). Mirrors backend
+// MaxChildAccommodationAge.
+export const MAX_CHILD_ACCOMMODATION_AGE = 12;
+
 /**
  * CamperState is the raw form-state shape for a single camper. Strings (not
  * numbers/enums) so partially-typed inputs are easy to handle. We convert to

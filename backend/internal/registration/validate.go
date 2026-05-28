@@ -58,7 +58,7 @@ func Validate(req SubmitRequest) error {
 
 		switch c.Attendance.Type {
 		case AttendanceFullWeek:
-			validateFullWeek(prefix+".attendance", c.Attendance, fields)
+			validateFullWeek(prefix+".attendance", c.Attendance, c.Age, fields)
 		case AttendanceDayPass:
 			validateDayPass(prefix+".attendance", c.Attendance, fields)
 		default:
@@ -88,11 +88,27 @@ const maxRoommateRequestLen = 500
 // 'child' row seeded in migration 0001.
 const AccommodationChild = "child"
 
-func validateFullWeek(prefix string, a AttendanceDTO, fields map[string]string) {
+// MaxChildAccommodationAge caps the child-with-parent accommodation option.
+// Anyone older sleeps in their own bed in a regular tier (lodge/cabin/etc.).
+// Mirrors frontend MAX_CHILD_ACCOMMODATION_AGE.
+const MaxChildAccommodationAge = 12
+
+func validateFullWeek(prefix string, a AttendanceDTO, age int, fields map[string]string) {
 	first := strings.TrimSpace(a.AccommodationFirstChoice)
 	second := strings.TrimSpace(a.AccommodationSecondChoice)
 	if first == "" {
 		fields[prefix+".accommodation_first_choice"] = "is required for full week attendance"
+	}
+	// Child-with-parent option is only valid for actual children. The age
+	// threshold is enforced server-side because the frontend toggle is
+	// trivially bypassable.
+	if first == AccommodationChild && age > MaxChildAccommodationAge {
+		fields[prefix+".accommodation_first_choice"] = fmt.Sprintf(
+			"child accommodation is only available for campers aged %d or under", MaxChildAccommodationAge)
+	}
+	if second == AccommodationChild && age > MaxChildAccommodationAge {
+		fields[prefix+".accommodation_second_choice"] = fmt.Sprintf(
+			"child accommodation is only available for campers aged %d or under", MaxChildAccommodationAge)
 	}
 	// 2nd choice is required for everything EXCEPT the child-with-parent
 	// option, which by definition has no meaningful fallback.

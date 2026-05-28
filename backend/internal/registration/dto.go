@@ -47,3 +47,24 @@ type SubmitResponse struct {
 	HasMinor         bool   `json:"has_minor"`
 	ConsentFormURL   string `json:"consent_form_url,omitempty"`
 }
+
+// SummaryResponse is the payload returned by GET /api/registrations/summary.
+// Intentionally minimal — used to populate the "Thank you for registering"
+// confirmation list on the success page. Authenticated by knowing the Stripe
+// session ID or the registration group ID (both one-time random tokens the
+// payer received via redirect).
+type SummaryResponse struct {
+	GroupID          string          `json:"group_id"`
+	PaymentStatus    string          `json:"payment_status"`
+	TotalAmountPence int             `json:"total_amount_pence"`
+	Currency         string          `json:"currency"`
+	ContactEmail     string          `json:"contact_email"`
+	Campers          []SummaryCamper `json:"campers"`
+}
+
+// SummaryCamper is the public-safe slice of camper data returned by
+// /api/registrations/summary. Only the fields the success page renders.
+type SummaryCamper struct {
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+}

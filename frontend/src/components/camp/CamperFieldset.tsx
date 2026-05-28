@@ -6,9 +6,12 @@ import {
   type CamperState,
   DAY_PASS_DAYS,
   isMinor,
+  MAX_CHILD_ACCOMMODATION_AGE,
   SHIRT_SIZE_NOT_APPLICABLE,
 } from "@/lib/camp";
-import AccommodationPicker from "./AccommodationPicker";
+import AccommodationPicker, {
+  type UnavailableCode,
+} from "./AccommodationPicker";
 import ShirtSizeSelect from "./ShirtSizeSelect";
 
 type Props = {
@@ -56,6 +59,20 @@ export default function CamperFieldset({
     fieldError(fieldErrors, `${prefix}.attendance`, k);
   const ageN = parseInt(value.age, 10);
   const showMinorBanner = Number.isFinite(ageN) && isMinor(ageN);
+  // Child-with-parent accommodation is only valid for under-13s. We make the
+  // option un-selectable in the picker as soon as the age has been typed,
+  // but if it's been *pre*-selected and the age is bumped past the limit,
+  // wipe the stale choice so we don't silently submit something invalid.
+  const childAccommodationLocked =
+    Number.isFinite(ageN) && ageN > MAX_CHILD_ACCOMMODATION_AGE;
+  const childUnavailable: UnavailableCode[] = childAccommodationLocked
+    ? [
+        {
+          code: ACCOMMODATION_CHILD_CODE,
+          reason: `Ages 1\u2013${MAX_CHILD_ACCOMMODATION_AGE} only`,
+        },
+      ]
+    : [];
 
   return (
     <fieldset className="bg-white border border-neutral-300 p-6 sm:p-8 rounded-xl shadow-sm flex flex-col gap-5">
@@ -141,7 +158,30 @@ export default function CamperFieldset({
             max={119}
             value={value.age}
             required
-            onChange={(e) => onChange({ age: e.target.value })}
+            onChange={(e) => {
+              const next = e.target.value;
+              const parsed = parseInt(next, 10);
+              const patch: Partial<CamperState> = { age: next };
+              // If the new age makes the child accommodation invalid, wipe
+              // any previously-selected child choice. Keeps state and the
+              // backend in sync.
+              if (
+                Number.isFinite(parsed) &&
+                parsed > MAX_CHILD_ACCOMMODATION_AGE
+              ) {
+                if (
+                  value.accommodation_first_choice === ACCOMMODATION_CHILD_CODE
+                ) {
+                  patch.accommodation_first_choice = "";
+                }
+                if (
+                  value.accommodation_second_choice === ACCOMMODATION_CHILD_CODE
+                ) {
+                  patch.accommodation_second_choice = "";
+                }
+              }
+              onChange(patch);
+            }}
             className={inputCls(!!err("age"))}
           />
           {err("age") && <p className="text-xs text-red-600">{err("age")}</p>}
@@ -304,6 +344,7 @@ export default function CamperFieldset({
             label="1st choice accommodation"
             value={value.accommodation_first_choice}
             accommodations={accommodations}
+            unavailable={childUnavailable}
             error={attErr("accommodation_first_choice")}
             onChange={(code) => {
               const patch: Partial<CamperState> = {
@@ -326,7 +367,17 @@ export default function CamperFieldset({
               label="2nd choice accommodation"
               value={value.accommodation_second_choice}
               accommodations={accommodations}
-              disabledCode={value.accommodation_first_choice}
+              unavailable={[
+                ...(value.accommodation_first_choice
+                  ? [
+                      {
+                        code: value.accommodation_first_choice,
+                        reason: "Already 1st choice",
+                      },
+                    ]
+                  : []),
+                ...childUnavailable,
+              ]}
               error={attErr("accommodation_second_choice")}
               onChange={(code) =>
                 onChange({ accommodation_second_choice: code })

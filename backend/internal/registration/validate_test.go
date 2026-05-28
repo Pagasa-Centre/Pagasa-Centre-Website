@@ -95,11 +95,30 @@ func TestValidate_FullWeekMissingSecondChoice(t *testing.T) {
 
 func TestValidate_FullWeekChildAccommodationDoesNotRequireSecondChoice(t *testing.T) {
 	req := validRequest()
+	// Use an age within the child-accommodation limit so we exercise the
+	// "child code skips 2nd choice" branch rather than the new age gate.
+	req.Campers[0].Age = MaxChildAccommodationAge
 	req.Campers[0].Attendance.AccommodationFirstChoice = AccommodationChild
 	req.Campers[0].Attendance.AccommodationSecondChoice = ""
 	if err := Validate(req); err != nil {
 		t.Fatalf("expected nil error when child + empty 2nd choice, got %v", err)
 	}
+}
+
+func TestValidate_FullWeekChildAccommodationRejectedOverAgeLimit(t *testing.T) {
+	req := validRequest()
+	req.Campers[0].Age = MaxChildAccommodationAge + 1
+	req.Campers[0].Attendance.AccommodationFirstChoice = AccommodationChild
+	req.Campers[0].Attendance.AccommodationSecondChoice = ""
+	assertFieldError(t, Validate(req), "campers[0].attendance.accommodation_first_choice")
+}
+
+func TestValidate_FullWeekChildAccommodationRejectedAsSecondChoiceOverAgeLimit(t *testing.T) {
+	req := validRequest()
+	req.Campers[0].Age = MaxChildAccommodationAge + 1
+	req.Campers[0].Attendance.AccommodationFirstChoice = "lodge"
+	req.Campers[0].Attendance.AccommodationSecondChoice = AccommodationChild
+	assertFieldError(t, Validate(req), "campers[0].attendance.accommodation_second_choice")
 }
 
 func TestValidate_FullWeekSecondChoiceMatchesFirst(t *testing.T) {

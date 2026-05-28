@@ -127,6 +127,56 @@ func (r *Repository) GetGroupBySession(ctx context.Context, tx pgx.Tx, sessionID
 	return &g, nil
 }
 
+// FindGroupBySessionID is a non-locking read of a group by stripe_session_id.
+// Used by the success-page summary endpoint, which only needs read access.
+// Returns (nil, nil) if no group matches.
+func (r *Repository) FindGroupBySessionID(ctx context.Context, sessionID string) (*Group, error) {
+	const q = `
+		SELECT id, contact_first_name, contact_last_name, contact_email, contact_phone,
+		       payment_status, stripe_session_id, stripe_payment_intent_id,
+		       total_amount_pence, currency, created_at, paid_at
+		  FROM registration_groups
+		 WHERE stripe_session_id = $1`
+	var g Group
+	err := r.pool.QueryRow(ctx, q, sessionID).Scan(
+		&g.ID, &g.ContactFirstName, &g.ContactLastName, &g.ContactEmail, &g.ContactPhone,
+		&g.PaymentStatus, &g.StripeSessionID, &g.StripePaymentIntentID,
+		&g.TotalAmountPence, &g.Currency, &g.CreatedAt, &g.PaidAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find group by session: %w", err)
+	}
+	return &g, nil
+}
+
+// FindGroupByID is a non-locking read of a group by primary key. Used by the
+// success-page summary endpoint for the £0 / day-pass-only path which has no
+// Stripe session ID. Returns (nil, nil) if no group matches.
+func (r *Repository) FindGroupByID(ctx context.Context, groupID string) (*Group, error) {
+	const q = `
+		SELECT id, contact_first_name, contact_last_name, contact_email, contact_phone,
+		       payment_status, stripe_session_id, stripe_payment_intent_id,
+		       total_amount_pence, currency, created_at, paid_at
+		  FROM registration_groups
+		 WHERE id = $1`
+	var g Group
+	err := r.pool.QueryRow(ctx, q, groupID).Scan(
+		&g.ID, &g.ContactFirstName, &g.ContactLastName, &g.ContactEmail, &g.ContactPhone,
+		&g.PaymentStatus, &g.StripeSessionID, &g.StripePaymentIntentID,
+		&g.TotalAmountPence, &g.Currency, &g.CreatedAt, &g.PaidAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find group by id: %w", err)
+	}
+	return &g, nil
+}
+
 // MarkPaid transitions the group to 'paid' and stamps paid_at + payment intent.
 // paymentIntentID may be empty (used by the £0 day-pass-only Submit path where
 // no Stripe session was ever created).

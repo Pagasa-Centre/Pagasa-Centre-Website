@@ -154,6 +154,20 @@ export type SubmitResponse = {
   consent_form_url?: string;
 };
 
+export type SummaryCamper = {
+  first_name: string;
+  last_name: string;
+};
+
+export type SummaryResponse = {
+  group_id: string;
+  payment_status: string;
+  total_amount_pence: number;
+  currency: string;
+  contact_email: string;
+  campers: SummaryCamper[];
+};
+
 export const camp = {
   config: () => apiFetch<CampConfig>("/api/camp"),
   prices: () => apiFetch<{ prices: Price[] }>("/api/prices"),
@@ -170,4 +184,15 @@ export const camp = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  // Fetch the public-facing summary of a registration for the success page.
+  // Pass either session_id (Stripe path) or group_id (£0 path). Backend
+  // returns minimal data: camper first/last names + payment status.
+  summary: (params: { sessionId?: string; groupId?: string }) => {
+    const q = new URLSearchParams();
+    if (params.sessionId) q.set("session_id", params.sessionId);
+    if (params.groupId) q.set("group_id", params.groupId);
+    return apiFetch<SummaryResponse>(
+      `/api/registrations/summary?${q.toString()}`,
+    );
+  },
 };
