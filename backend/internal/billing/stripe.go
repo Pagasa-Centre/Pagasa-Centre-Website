@@ -78,6 +78,11 @@ func (s *StripeBilling) CreateInvoice(
 		CollectionMethod: stripe.String(string(stripe.InvoiceCollectionMethodSendInvoice)),
 		DaysUntilDue:     stripe.Int64(daysUntilDue),
 		AutoAdvance:      stripe.Bool(true),
+		// Stripe defaults pending_invoice_items_behavior to "exclude", which
+		// would create an EMPTY (£0) invoice even though we just created the
+		// line items above. We must explicitly pull them in, or the invoice is
+		// £0, auto-finalizes, and is instantly marked paid.
+		PendingInvoiceItemsBehavior: stripe.String("include"),
 		Metadata: map[string]string{
 			"group_id": groupID,
 		},
