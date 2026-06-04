@@ -49,6 +49,14 @@ type recordingMailer struct {
 	calls []email.DepositConfirmation
 }
 
+func (m *recordingMailer) SendAllocationReleased(context.Context, email.AllocationReleased) error {
+	return nil
+}
+
+func (m *recordingMailer) SendWhiteTeamNotification(context.Context, email.WhiteTeamNotification) error {
+	return nil
+}
+
 func (m *recordingMailer) SendDepositConfirmation(_ context.Context, p email.DepositConfirmation) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

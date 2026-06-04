@@ -73,6 +73,31 @@ func formatPence(pence int, currency string) string {
 	return fmt.Sprintf("%s%d.%02d", symbol, pence/100, pence%100)
 }
 
+func renderAllocationReleased(p AllocationReleased) (subject, htmlBody string, err error) {
+	subject = "PC Summer Camp 2026 — accommodation allocation released"
+	names := ""
+	for _, n := range p.CamperNames {
+		names += "<li>" + template.HTMLEscapeString(n) + "</li>"
+	}
+	reason := template.HTMLEscapeString(p.Reason)
+	htmlBody = fmt.Sprintf(`<!DOCTYPE html><html><body style="font-family:sans-serif;color:#333">
+<p>Dear %s,</p>
+<p>Your temporary accommodation allocation for PC Summer Camp 2026 has been released because the balance invoice was not paid by the due date.</p>
+<p><strong>Reason:</strong> %s</p>
+<ul>%s</ul>
+<p>If you still wish to attend, please speak to your cell leader or the White Team. You may register again if places are still available.</p>
+<p>God bless,<br>Pag-Asa Centre</p>
+</body></html>`, template.HTMLEscapeString(p.ToName), reason, names)
+	return subject, htmlBody, nil
+}
+
+func renderWhiteTeamNotification(p WhiteTeamNotification) (subject, htmlBody string, err error) {
+	subject = p.Subject
+	body := template.HTMLEscapeString(p.Body)
+	htmlBody = fmt.Sprintf(`<!DOCTYPE html><html><body style="font-family:sans-serif;white-space:pre-wrap">%s</body></html>`, body)
+	return subject, htmlBody, nil
+}
+
 const depositConfirmationHTML = `<!DOCTYPE html>
 <html lang="en">
 <head>

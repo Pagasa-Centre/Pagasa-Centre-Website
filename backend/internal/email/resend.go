@@ -43,6 +43,22 @@ func (r *ResendMailer) SendDepositConfirmation(ctx context.Context, p DepositCon
 	return r.send(ctx, p.ToEmail, subject, body)
 }
 
+func (r *ResendMailer) SendAllocationReleased(ctx context.Context, p AllocationReleased) error {
+	subject, body, err := renderAllocationReleased(p)
+	if err != nil {
+		return err
+	}
+	return r.send(ctx, p.ToEmail, subject, body)
+}
+
+func (r *ResendMailer) SendWhiteTeamNotification(ctx context.Context, p WhiteTeamNotification) error {
+	subject, body, err := renderWhiteTeamNotification(p)
+	if err != nil {
+		return err
+	}
+	return r.send(ctx, p.ToEmail, subject, body)
+}
+
 type resendRequest struct {
 	From    string   `json:"from"`
 	To      []string `json:"to"`

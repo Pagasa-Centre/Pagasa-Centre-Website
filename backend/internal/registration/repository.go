@@ -16,6 +16,44 @@ type Repository struct {
 
 func NewRepository(pool *pgxpool.Pool) *Repository { return &Repository{pool: pool} }
 
+const groupSelectCols = `
+	id, contact_first_name, contact_last_name, contact_email, contact_phone,
+	payment_status, stripe_session_id, stripe_payment_intent_id,
+	total_amount_pence, currency, created_at, paid_at,
+	stripe_customer_id, stripe_invoice_id, billing_status, invoice_due_at, balance_paid_at`
+
+func scanGroup(row pgx.Row) (Group, error) {
+	var g Group
+	err := row.Scan(
+		&g.ID, &g.ContactFirstName, &g.ContactLastName, &g.ContactEmail, &g.ContactPhone,
+		&g.PaymentStatus, &g.StripeSessionID, &g.StripePaymentIntentID,
+		&g.TotalAmountPence, &g.Currency, &g.CreatedAt, &g.PaidAt,
+		&g.StripeCustomerID, &g.StripeInvoiceID, &g.BillingStatus, &g.InvoiceDueAt, &g.BalancePaidAt,
+	)
+	return g, err
+}
+
+const camperSelectCols = `
+	id, group_id, is_main_contact, first_name, last_name, gender, age,
+	cell_leader_name, is_cell_leader, attendance_type,
+	shirt_size, dietary_requirements, needs_coach,
+	accommodation_first_choice, accommodation_second_choice, roommate_requests,
+	day_pass_days, day_pass_tshirt_option, day_pass_needs_catering,
+	allocated_accommodation_code, billed_stripe_price_id, created_at`
+
+func scanCamper(row pgx.Row) (Camper, error) {
+	var c Camper
+	err := row.Scan(
+		&c.ID, &c.GroupID, &c.IsMainContact, &c.FirstName, &c.LastName, &c.Gender, &c.Age,
+		&c.CellLeaderName, &c.IsCellLeader, &c.AttendanceType,
+		&c.ShirtSize, &c.DietaryRequirements, &c.NeedsCoach,
+		&c.AccommodationFirstChoice, &c.AccommodationSecondChoice, &c.RoommateRequests,
+		&c.DayPassDays, &c.DayPassTshirtOption, &c.DayPassNeedsCatering,
+		&c.AllocatedAccommodationCode, &c.BilledStripePriceID, &c.CreatedAt,
+	)
+	return c, err
+}
+
 // Pool exposes the underlying pool for callers that need to manage their own
 // transactions (e.g. the payment webhook service which spans repositories).
 func (r *Repository) Pool() *pgxpool.Pool { return r.pool }
@@ -105,19 +143,11 @@ func (r *Repository) SetStripeSession(ctx context.Context, tx pgx.Tx, groupID, s
 
 // GetGroupBySession reads a group by stripe_session_id and locks it FOR UPDATE.
 func (r *Repository) GetGroupBySession(ctx context.Context, tx pgx.Tx, sessionID string) (*Group, error) {
-	const q = `
-		SELECT id, contact_first_name, contact_last_name, contact_email, contact_phone,
-		       payment_status, stripe_session_id, stripe_payment_intent_id,
-		       total_amount_pence, currency, created_at, paid_at
+	const q = `SELECT ` + groupSelectCols + `
 		  FROM registration_groups
 		 WHERE stripe_session_id = $1
 		   FOR UPDATE`
-	var g Group
-	err := tx.QueryRow(ctx, q, sessionID).Scan(
-		&g.ID, &g.ContactFirstName, &g.ContactLastName, &g.ContactEmail, &g.ContactPhone,
-		&g.PaymentStatus, &g.StripeSessionID, &g.StripePaymentIntentID,
-		&g.TotalAmountPence, &g.Currency, &g.CreatedAt, &g.PaidAt,
-	)
+	g, err := scanGroup(tx.QueryRow(ctx, q, sessionID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -131,18 +161,10 @@ func (r *Repository) GetGroupBySession(ctx context.Context, tx pgx.Tx, sessionID
 // Used by the success-page summary endpoint, which only needs read access.
 // Returns (nil, nil) if no group matches.
 func (r *Repository) FindGroupBySessionID(ctx context.Context, sessionID string) (*Group, error) {
-	const q = `
-		SELECT id, contact_first_name, contact_last_name, contact_email, contact_phone,
-		       payment_status, stripe_session_id, stripe_payment_intent_id,
-		       total_amount_pence, currency, created_at, paid_at
+	const q = `SELECT ` + groupSelectCols + `
 		  FROM registration_groups
 		 WHERE stripe_session_id = $1`
-	var g Group
-	err := r.pool.QueryRow(ctx, q, sessionID).Scan(
-		&g.ID, &g.ContactFirstName, &g.ContactLastName, &g.ContactEmail, &g.ContactPhone,
-		&g.PaymentStatus, &g.StripeSessionID, &g.StripePaymentIntentID,
-		&g.TotalAmountPence, &g.Currency, &g.CreatedAt, &g.PaidAt,
-	)
+	g, err := scanGroup(r.pool.QueryRow(ctx, q, sessionID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -156,18 +178,10 @@ func (r *Repository) FindGroupBySessionID(ctx context.Context, sessionID string)
 // success-page summary endpoint for the £0 / day-pass-only path which has no
 // Stripe session ID. Returns (nil, nil) if no group matches.
 func (r *Repository) FindGroupByID(ctx context.Context, groupID string) (*Group, error) {
-	const q = `
-		SELECT id, contact_first_name, contact_last_name, contact_email, contact_phone,
-		       payment_status, stripe_session_id, stripe_payment_intent_id,
-		       total_amount_pence, currency, created_at, paid_at
+	const q = `SELECT ` + groupSelectCols + `
 		  FROM registration_groups
 		 WHERE id = $1`
-	var g Group
-	err := r.pool.QueryRow(ctx, q, groupID).Scan(
-		&g.ID, &g.ContactFirstName, &g.ContactLastName, &g.ContactEmail, &g.ContactPhone,
-		&g.PaymentStatus, &g.StripeSessionID, &g.StripePaymentIntentID,
-		&g.TotalAmountPence, &g.Currency, &g.CreatedAt, &g.PaidAt,
-	)
+	g, err := scanGroup(r.pool.QueryRow(ctx, q, groupID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -227,10 +241,7 @@ type ListFilter struct {
 // List returns groups (newest first), optionally filtered by status.
 func (r *Repository) List(ctx context.Context, f ListFilter) ([]Group, error) {
 	args := []any{}
-	q := `SELECT id, contact_first_name, contact_last_name, contact_email, contact_phone,
-	             payment_status, stripe_session_id, stripe_payment_intent_id,
-	             total_amount_pence, currency, created_at, paid_at
-	        FROM registration_groups`
+	q := `SELECT ` + groupSelectCols + ` FROM registration_groups`
 	if f.PaymentStatus != "" {
 		q += ` WHERE payment_status = $1`
 		args = append(args, f.PaymentStatus)
@@ -245,12 +256,8 @@ func (r *Repository) List(ctx context.Context, f ListFilter) ([]Group, error) {
 
 	var out []Group
 	for rows.Next() {
-		var g Group
-		if err := rows.Scan(
-			&g.ID, &g.ContactFirstName, &g.ContactLastName, &g.ContactEmail, &g.ContactPhone,
-			&g.PaymentStatus, &g.StripeSessionID, &g.StripePaymentIntentID,
-			&g.TotalAmountPence, &g.Currency, &g.CreatedAt, &g.PaidAt,
-		); err != nil {
+		g, err := scanGroup(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, g)
@@ -272,12 +279,7 @@ func (r *Repository) CampersForGroups(ctx context.Context, groupIDs []string) ([
 }
 
 func (r *Repository) campersByGroupIDs(ctx context.Context, groupIDs []string) ([]Camper, error) {
-	const q = `
-		SELECT id, group_id, is_main_contact, first_name, last_name, gender, age,
-		       cell_leader_name, is_cell_leader, attendance_type,
-		       shirt_size, dietary_requirements, needs_coach,
-		       accommodation_first_choice, accommodation_second_choice, roommate_requests,
-		       day_pass_days, day_pass_tshirt_option, day_pass_needs_catering, created_at
+	const q = `SELECT ` + camperSelectCols + `
 		  FROM registrations
 		 WHERE group_id = ANY($1)
 		 ORDER BY group_id, is_main_contact DESC, created_at`
@@ -289,14 +291,8 @@ func (r *Repository) campersByGroupIDs(ctx context.Context, groupIDs []string) (
 
 	var out []Camper
 	for rows.Next() {
-		var c Camper
-		if err := rows.Scan(
-			&c.ID, &c.GroupID, &c.IsMainContact, &c.FirstName, &c.LastName, &c.Gender, &c.Age,
-			&c.CellLeaderName, &c.IsCellLeader, &c.AttendanceType,
-			&c.ShirtSize, &c.DietaryRequirements, &c.NeedsCoach,
-			&c.AccommodationFirstChoice, &c.AccommodationSecondChoice, &c.RoommateRequests,
-			&c.DayPassDays, &c.DayPassTshirtOption, &c.DayPassNeedsCatering, &c.CreatedAt,
-		); err != nil {
+		c, err := scanCamper(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, c)

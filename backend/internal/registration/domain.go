@@ -19,6 +19,12 @@ const (
 	PaymentFailedCapacity = "failed_capacity"
 	PaymentRefunded       = "refunded"
 	PaymentCancelled      = "cancelled"
+
+	BillingNone        = "none"
+	BillingAllocated   = "allocated"
+	BillingInvoiced    = "invoiced"
+	BillingBalancePaid = "balance_paid"
+	BillingReleased    = "released"
 )
 
 // ValidDayPassDays enumerates the allowed day_pass_days entries.
@@ -47,6 +53,11 @@ type Group struct {
 	Currency              string
 	CreatedAt             time.Time
 	PaidAt                *time.Time
+	StripeCustomerID      *string
+	StripeInvoiceID       *string
+	BillingStatus         string
+	InvoiceDueAt          *time.Time
+	BalancePaidAt         *time.Time
 }
 
 // Camper is the persisted form of a registrations row.
@@ -69,6 +80,15 @@ type Camper struct {
 	RoommateRequests          *string
 	DayPassDays               []string
 	DayPassTshirtOption       *string
-	DayPassNeedsCatering      *bool
-	CreatedAt                 time.Time
+	DayPassNeedsCatering       *bool
+	AllocatedAccommodationCode *string
+	BilledStripePriceID        *string
+	CreatedAt                  time.Time
+}
+
+// AccommodationType mirrors accommodation_types for billing lookups.
+type AccommodationType struct {
+	Code          string  `json:"code"`
+	DisplayName   string  `json:"display_name"`
+	StripePriceID *string `json:"stripe_price_id,omitempty"`
 }

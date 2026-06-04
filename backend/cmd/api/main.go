@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/robfig/cron/v3"
 
 	"pagasacentre/backend/internal/accommodation"
 	"pagasacentre/backend/internal/admin"
+	"pagasacentre/backend/internal/billing"
 	"pagasacentre/backend/internal/camp"
 	"pagasacentre/backend/internal/config"
 	"pagasacentre/backend/internal/consent"
@@ -48,6 +50,8 @@ func main() {
 	campRepo := camp.NewRepository(pool)
 	regRepo := registration.NewRepository(pool)
 
+	applyStripePriceOverrides(ctx, regRepo, cfg)
+
 	// Stripe
 	stripeCli := payment.NewStripeClient(
 		cfg.StripeSecretKey, cfg.StripeWebhookSecret,
@@ -71,9 +75,7 @@ func main() {
 		log.Println("email: no backend configured, using NoopMailer (no real email sent)")
 	}
 
-	// Google Sheets live sync. Requires service-account JSON + spreadsheet
-	// ID; if either is missing or auth fails, fall back to NoopSync so the
-	// rest of the app keeps working.
+	// Google Sheets live sync.
 	var sheetSync sheets.Sync
 	if cfg.GoogleServiceAccountJSON != "" && cfg.GoogleSheetsSpreadsheetID != "" {
 		gs, err := sheets.NewGoogleSync(ctx, sheets.GoogleSyncConfig{
@@ -95,8 +97,6 @@ func main() {
 		log.Println("sheets: GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SHEETS_SPREADSHEET_ID unset, using NoopSync")
 	}
 
-	// Registration service depends on small interfaces; adapt camp.Repository
-	// so it satisfies registration.PriceLookup with the local PriceRow type.
 	regSvc := registration.NewService(
 		regRepo,
 		campPriceAdapter{repo: campRepo},
@@ -107,9 +107,41 @@ func main() {
 		cfg.PublicBaseURL,
 	)
 
-	// Payment service handles webhook events: mark paid + send confirmation email
-	// + push to Paid tab of the Sheet.
 	paySvc := payment.NewService(pool, regRepo, mailer, sheetSync, cfg.PublicBaseURL)
+
+	billCfg := billing.Config{
+		StripePriceChildUnder3: cfg.StripePriceChildUnder3,
+		InvoiceDueDays:         cfg.InvoiceDueDays,
+		WhiteTeamEmail:         cfg.WhiteTeamEmail,
+	}
+	billSvc := billing.NewService(regRepo, billing.NewStripeBilling(), mailer, billCfg)
+
+	adminAuth := admin.AuthConfig{
+		Password:      cfg.AdminPassword,
+		SessionSecret: []byte(cfg.AdminSessionSecret),
+		SecureCookie:  cfg.AdminSecureCookie,
+	}
+	if cfg.AdminPassword == "" || cfg.AdminSessionSecret == "" {
+		log.Println("admin: WARNING — ADMIN_PASSWORD or ADMIN_SESSION_SECRET unset; login will not work")
+	}
+
+	// Daily sweep: release allocations unpaid past invoice_due_at.
+	cronScheduler := cron.New()
+	_, err = cronScheduler.AddFunc("0 3 * * *", func() {
+		n, sweepErr := billSvc.SweepOverdue(context.Background())
+		if sweepErr != nil {
+			log.Printf("billing sweep: %v", sweepErr)
+			return
+		}
+		if n > 0 {
+			log.Printf("billing sweep: released %d overdue group(s)", n)
+		}
+	})
+	if err != nil {
+		log.Fatalf("cron: %v", err)
+	}
+	cronScheduler.Start()
+	defer cronScheduler.Stop()
 
 	r := chi.NewRouter()
 	httpx.UseDefaults(r, cfg.AllowedOrigin)
@@ -122,13 +154,12 @@ func main() {
 		camp.Mount(r, campRepo)
 		accommodation.Mount(r, accSvc)
 		registration.Mount(r, regSvc)
-		payment.Mount(r, paySvc, stripeCli)
+		payment.Mount(r, paySvc, billSvc, stripeCli)
 		consent.Mount(r)
 	})
 
 	r.Route("/admin", func(r chi.Router) {
-		// TODO(auth): protect with admin auth before deploying publicly.
-		admin.Mount(r, regRepo, campRepo)
+		admin.Mount(r, adminAuth, regRepo, campRepo, billSvc)
 	})
 
 	srv := &http.Server{
@@ -151,6 +182,25 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdownCtx)
+}
+
+func applyStripePriceOverrides(ctx context.Context, repo *registration.Repository, cfg config.Config) {
+	pairs := map[string]string{
+		"lodge":          cfg.StripePriceLodge,
+		"cabin":          cfg.StripePriceCabin,
+		"static_caravan": cfg.StripePriceStaticCaravan,
+		"pod":            cfg.StripePricePod,
+		"tent":           cfg.StripePriceTent,
+		"child":          cfg.StripePriceChild312,
+	}
+	for code, priceID := range pairs {
+		if priceID == "" {
+			continue
+		}
+		if err := repo.UpdateAccommodationStripePrice(ctx, code, priceID); err != nil {
+			log.Printf("stripe price override %s: %v", code, err)
+		}
+	}
 }
 
 // campPriceAdapter wraps a *camp.Repository so it satisfies

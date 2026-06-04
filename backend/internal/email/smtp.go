@@ -42,6 +42,22 @@ func (s *SMTPMailer) SendDepositConfirmation(ctx context.Context, p DepositConfi
 	return s.send(ctx, p.ToEmail, subject, body)
 }
 
+func (s *SMTPMailer) SendAllocationReleased(ctx context.Context, p AllocationReleased) error {
+	subject, body, err := renderAllocationReleased(p)
+	if err != nil {
+		return err
+	}
+	return s.send(ctx, p.ToEmail, subject, body)
+}
+
+func (s *SMTPMailer) SendWhiteTeamNotification(ctx context.Context, p WhiteTeamNotification) error {
+	subject, body, err := renderWhiteTeamNotification(p)
+	if err != nil {
+		return err
+	}
+	return s.send(ctx, p.ToEmail, subject, body)
+}
+
 func (s *SMTPMailer) send(_ context.Context, to, subject, htmlBody string) error {
 	if to == "" {
 		return fmt.Errorf("empty recipient")

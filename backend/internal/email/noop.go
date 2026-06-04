@@ -25,3 +25,17 @@ func (NoopMailer) SendDepositConfirmation(_ context.Context, p DepositConfirmati
 		p.ToEmail, subject, p.AmountPence, p.HasMinor)
 	return nil
 }
+
+func (NoopMailer) SendAllocationReleased(_ context.Context, p AllocationReleased) error {
+	subject, _, err := renderAllocationReleased(p)
+	if err != nil {
+		return err
+	}
+	log.Printf("[email noop] to=%s subject=%q (allocation released)", p.ToEmail, subject)
+	return nil
+}
+
+func (NoopMailer) SendWhiteTeamNotification(_ context.Context, p WhiteTeamNotification) error {
+	log.Printf("[email noop] to=%s subject=%q (white team)", p.ToEmail, p.Subject)
+	return nil
+}

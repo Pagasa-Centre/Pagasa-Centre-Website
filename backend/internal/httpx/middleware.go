@@ -22,11 +22,16 @@ func UseDefaults(r chi.Router, allowedOrigins string) {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60_000_000_000)) // 60s
 
+	origins := parseOrigins(allowedOrigins)
+	allowCreds := len(origins) == 1 && origins[0] != "*"
+	if len(origins) > 1 {
+		allowCreds = true
+	}
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   parseOrigins(allowedOrigins),
+		AllowedOrigins:   origins,
 		AllowedMethods:   []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "Stripe-Signature"},
-		AllowCredentials: false,
+		AllowCredentials: allowCreds,
 		MaxAge:           300,
 	}))
 }

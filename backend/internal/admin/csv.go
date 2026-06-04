@@ -11,12 +11,14 @@ import (
 )
 
 var csvHeader = []string{
-	"group_id", "payment_status", "paid_at", "total_amount_pence", "currency",
+	"group_id", "payment_status", "billing_status", "paid_at", "balance_paid_at",
+	"invoice_due_at", "total_amount_pence", "currency",
 	"contact_first_name", "contact_last_name", "contact_email", "contact_phone",
 	"is_main_contact", "first_name", "last_name", "gender", "age",
 	"cell_leader_name", "is_cell_leader", "attendance_type",
 	"shirt_size", "dietary_requirements", "needs_coach",
 	"accommodation_first_choice", "accommodation_second_choice", "roommate_requests",
+	"allocated_accommodation_code", "billed_stripe_price_id",
 	"day_pass_days", "day_pass_tshirt_option", "day_pass_needs_catering",
 }
 
@@ -34,7 +36,10 @@ func WriteCSV(w io.Writer, groups []registration.Group, campersByGroup map[strin
 			row := []string{
 				g.ID,
 				g.PaymentStatus,
+				g.BillingStatus,
 				formatTimePtr(g.PaidAt),
+				formatTimePtr(g.BalancePaidAt),
+				formatTimePtr(g.InvoiceDueAt),
 				strconv.Itoa(g.TotalAmountPence),
 				g.Currency,
 				g.ContactFirstName,
@@ -55,6 +60,8 @@ func WriteCSV(w io.Writer, groups []registration.Group, campersByGroup map[strin
 				deref(c.AccommodationFirstChoice),
 				deref(c.AccommodationSecondChoice),
 				deref(c.RoommateRequests),
+				deref(c.AllocatedAccommodationCode),
+				deref(c.BilledStripePriceID),
 				strings.Join(c.DayPassDays, "|"),
 				deref(c.DayPassTshirtOption),
 				formatBoolPtr(c.DayPassNeedsCatering),

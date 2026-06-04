@@ -1,0 +1,340 @@
+package billing
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"strings"
+	"time"
+
+	"pagasacentre/backend/internal/email"
+	"pagasacentre/backend/internal/httpx"
+	"pagasacentre/backend/internal/registration"
+)
+
+// Service coordinates allocation, Stripe Invoices, and release sweeps.
+type Service struct {
+	repo   *registration.Repository
+	stripe *StripeBilling
+	mailer email.Mailer
+	cfg    Config
+}
+
+func NewService(repo *registration.Repository, stripe *StripeBilling, mailer email.Mailer, cfg Config) *Service {
+	if cfg.InvoiceDueDays <= 0 {
+		cfg.InvoiceDueDays = 15
+	}
+	return &Service{repo: repo, stripe: stripe, mailer: mailer, cfg: cfg}
+}
+
+// Allocate persists White Team placements and sets billing_status=allocated.
+func (s *Service) Allocate(ctx context.Context, groupID string, req AllocateRequest) error {
+	g, err := s.repo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		return httpx.Internal(err.Error())
+	}
+	if g == nil {
+		return httpx.NotFound("group not found")
+	}
+	if g.PaymentStatus != registration.PaymentPaid {
+		return httpx.BadRequest("deposit must be paid before allocation", nil)
+	}
+	if g.BillingStatus == registration.BillingInvoiced {
+		return httpx.BadRequest("cannot change allocation while invoice is open; release first", nil)
+	}
+	if g.BillingStatus == registration.BillingBalancePaid {
+		return httpx.BadRequest("balance already paid", nil)
+	}
+
+	campers, err := s.repo.CampersForGroup(ctx, groupID)
+	if err != nil {
+		return httpx.Internal(err.Error())
+	}
+	byID := map[string]registration.Camper{}
+	for _, c := range campers {
+		byID[c.ID] = c
+	}
+
+	var allocs []registration.CamperAllocation
+	for _, a := range req.Campers {
+		c, ok := byID[a.CamperID]
+		if !ok {
+			return httpx.BadRequest("unknown camper_id "+a.CamperID, nil)
+		}
+		if c.AttendanceType != registration.AttendanceFullWeek {
+			continue
+		}
+		code := strings.TrimSpace(a.AllocatedAccommodationCode)
+		if code == "" {
+			return httpx.ValidationFailed(map[string]string{
+				a.CamperID: "allocated_accommodation_code is required for full-week campers",
+			})
+		}
+		priceID := strings.TrimSpace(a.BilledStripePriceID)
+		if priceID == "" {
+			priceID, err = s.resolvePriceID(ctx, code, c.Age)
+			if err != nil {
+				return httpx.BadRequest(err.Error(), nil)
+			}
+		}
+		allocs = append(allocs, registration.CamperAllocation{
+			CamperID:                   a.CamperID,
+			AllocatedAccommodationCode: code,
+			BilledStripePriceID:        priceID,
+		})
+	}
+
+	// Every full-week camper must be allocated.
+	for _, c := range campers {
+		if c.AttendanceType != registration.AttendanceFullWeek {
+			continue
+		}
+		found := false
+		for _, a := range allocs {
+			if a.CamperID == c.ID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return httpx.ValidationFailed(map[string]string{
+				"campers": fmt.Sprintf("full-week camper %s %s is not allocated", c.FirstName, c.LastName),
+			})
+		}
+	}
+
+	if err := s.repo.SetCamperAllocations(ctx, groupID, allocs); err != nil {
+		return httpx.Internal(err.Error())
+	}
+	return s.repo.SetBillingStatus(ctx, groupID, registration.BillingAllocated)
+}
+
+func (s *Service) resolvePriceID(ctx context.Context, accommodationCode string, age int) (string, error) {
+	if accommodationCode == registration.AccommodationChild && age < registration.MinDepositAge {
+		if s.cfg.StripePriceChildUnder3 == "" {
+			return "", fmt.Errorf("STRIPE_PRICE_CHILD_UNDER3 is not configured")
+		}
+		return s.cfg.StripePriceChildUnder3, nil
+	}
+	t, err := s.repo.GetAccommodationType(ctx, accommodationCode)
+	if err != nil {
+		return "", err
+	}
+	if t == nil {
+		return "", fmt.Errorf("unknown accommodation %q", accommodationCode)
+	}
+	if t.StripePriceID == nil || strings.TrimSpace(*t.StripePriceID) == "" {
+		return "", fmt.Errorf("accommodation %q has no stripe_price_id configured", accommodationCode)
+	}
+	return strings.TrimSpace(*t.StripePriceID), nil
+}
+
+// SendInvoice creates and emails a Stripe Invoice for an allocated group.
+func (s *Service) SendInvoice(ctx context.Context, groupID string) error {
+	g, err := s.repo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		return httpx.Internal(err.Error())
+	}
+	if g == nil {
+		return httpx.NotFound("group not found")
+	}
+	if g.PaymentStatus != registration.PaymentPaid {
+		return httpx.BadRequest("deposit must be paid first", nil)
+	}
+	switch g.BillingStatus {
+	case registration.BillingBalancePaid:
+		return httpx.BadRequest("balance already paid", nil)
+	case registration.BillingInvoiced:
+		return httpx.BadRequest("invoice already sent", nil)
+	case registration.BillingNone, registration.BillingReleased:
+		return httpx.BadRequest("group must be allocated before invoicing", nil)
+	}
+
+	campers, err := s.repo.CampersForGroup(ctx, groupID)
+	if err != nil {
+		return httpx.Internal(err.Error())
+	}
+	var priceIDs []string
+	for _, c := range campers {
+		if c.AttendanceType != registration.AttendanceFullWeek {
+			continue
+		}
+		if c.BilledStripePriceID == nil || strings.TrimSpace(*c.BilledStripePriceID) == "" {
+			return httpx.BadRequest(fmt.Sprintf("camper %s %s is not fully allocated", c.FirstName, c.LastName), nil)
+		}
+		priceIDs = append(priceIDs, strings.TrimSpace(*c.BilledStripePriceID))
+	}
+	if len(priceIDs) == 0 {
+		return httpx.BadRequest("no full-week campers to invoice", nil)
+	}
+
+	customerID := ""
+	if g.StripeCustomerID != nil {
+		customerID = *g.StripeCustomerID
+	}
+	name := strings.TrimSpace(g.ContactFirstName + " " + g.ContactLastName)
+	customerID, err = s.stripe.EnsureCustomer(ctx, customerID, g.ContactEmail, name, g.ID)
+	if err != nil {
+		return httpx.Internal(err.Error())
+	}
+	if customerID != "" && (g.StripeCustomerID == nil || *g.StripeCustomerID != customerID) {
+		if err := s.repo.SetStripeCustomerID(ctx, groupID, customerID); err != nil {
+			return httpx.Internal(err.Error())
+		}
+	}
+
+	invID, dueAt, err := s.stripe.CreateAndSendInvoice(
+		ctx, customerID, g.ID, priceIDs, int64(s.cfg.InvoiceDueDays))
+	if err != nil {
+		return httpx.Internal(err.Error())
+	}
+	if err := s.repo.SetInvoiceDetails(ctx, groupID, invID, dueAt); err != nil {
+		return httpx.Internal(err.Error())
+	}
+	return nil
+}
+
+// SendInvoicesBulk sends invoices for many groups; collects per-group errors.
+func (s *Service) SendInvoicesBulk(ctx context.Context, groupIDs []string) map[string]string {
+	errs := map[string]string{}
+	for _, id := range groupIDs {
+		if err := s.SendInvoice(ctx, id); err != nil {
+			errs[id] = err.Error()
+		}
+	}
+	return errs
+}
+
+// VoidAndRelease voids the Stripe invoice (if any) and clears allocations.
+func (s *Service) VoidAndRelease(ctx context.Context, groupID, reason string) error {
+	g, err := s.repo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		return httpx.Internal(err.Error())
+	}
+	if g == nil {
+		return httpx.NotFound("group not found")
+	}
+	if g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" &&
+		g.BillingStatus == registration.BillingInvoiced {
+		if err := s.stripe.VoidInvoice(ctx, *g.StripeInvoiceID); err != nil {
+			log.Printf("billing: void invoice %s for group %s: %v", *g.StripeInvoiceID, groupID, err)
+			// Continue — DB release still needed if Stripe already void/paid.
+		}
+	}
+	if err := s.repo.ClearInvoiceAndRelease(ctx, groupID); err != nil {
+		return httpx.Internal(err.Error())
+	}
+
+	campers, _ := s.repo.CampersForGroup(ctx, groupID)
+	names := camperNames(campers)
+	if err := s.mailer.SendAllocationReleased(ctx, email.AllocationReleased{
+		ToEmail:     g.ContactEmail,
+		ToName:      g.ContactFirstName,
+		CamperNames: names,
+		Reason:      reason,
+	}); err != nil {
+		log.Printf("billing: allocation released email to %s: %v", g.ContactEmail, err)
+	}
+	if s.cfg.WhiteTeamEmail != "" {
+		_ = s.mailer.SendWhiteTeamNotification(ctx, email.WhiteTeamNotification{
+			ToEmail: s.cfg.WhiteTeamEmail,
+			Subject: "Camp allocation released (unpaid)",
+			Body: fmt.Sprintf(
+				"Group %s (%s) — allocation released.\nReason: %s\nCampers: %s",
+				groupID, g.ContactEmail, reason, strings.Join(names, ", ")),
+		})
+	}
+	return nil
+}
+
+// ResendInvoice re-sends the Stripe invoice email.
+func (s *Service) ResendInvoice(ctx context.Context, groupID string) error {
+	g, err := s.repo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		return httpx.Internal(err.Error())
+	}
+	if g == nil {
+		return httpx.NotFound("group not found")
+	}
+	if g.StripeInvoiceID == nil || *g.StripeInvoiceID == "" {
+		return httpx.BadRequest("no invoice on file", nil)
+	}
+	if g.BillingStatus != registration.BillingInvoiced {
+		return httpx.BadRequest("invoice is not open", nil)
+	}
+	if err := s.stripe.ResendInvoice(ctx, *g.StripeInvoiceID); err != nil {
+		return httpx.Internal(err.Error())
+	}
+	return nil
+}
+
+// ExtendDueAt updates the stored due date (Stripe due date is informational after send).
+func (s *Service) ExtendDueAt(ctx context.Context, groupID string, dueAt time.Time) error {
+	return s.repo.ExtendInvoiceDueAt(ctx, groupID, dueAt)
+}
+
+// HandleInvoicePaid marks balance paid (idempotent).
+func (s *Service) HandleInvoicePaid(ctx context.Context, stripeInvoiceID, groupID string) error {
+	g, err := s.repo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	if g == nil {
+		g, err = s.repo.FindGroupByStripeInvoiceID(ctx, stripeInvoiceID)
+		if err != nil || g == nil {
+			return fmt.Errorf("group not found for invoice %s", stripeInvoiceID)
+		}
+	}
+	if g.BillingStatus == registration.BillingBalancePaid {
+		return nil
+	}
+	if err := s.repo.MarkBalancePaid(ctx, g.ID); err != nil {
+		return err
+	}
+	if s.cfg.WhiteTeamEmail != "" {
+		campers, _ := s.repo.CampersForGroup(ctx, g.ID)
+		_ = s.mailer.SendWhiteTeamNotification(ctx, email.WhiteTeamNotification{
+			ToEmail: s.cfg.WhiteTeamEmail,
+			Subject: "Camp balance paid",
+			Body: fmt.Sprintf(
+				"Group %s (%s %s) has paid their camp balance invoice.\nCampers: %s",
+				g.ID, g.ContactFirstName, g.ContactLastName, strings.Join(camperNames(campers), ", ")),
+		})
+	}
+	return nil
+}
+
+// HandleInvoiceFailed logs a failed balance payment attempt.
+func (s *Service) HandleInvoiceFailed(ctx context.Context, groupID string) {
+	log.Printf("billing: invoice payment failed for group %s", groupID)
+}
+
+// HandleInvoiceUncollectible flags an invoice as uncollectible.
+func (s *Service) HandleInvoiceUncollectible(ctx context.Context, groupID string) {
+	log.Printf("billing: invoice marked uncollectible for group %s", groupID)
+}
+
+// SweepOverdue releases all groups past invoice_due_at still in invoiced status.
+func (s *Service) SweepOverdue(ctx context.Context) (int, error) {
+	overdue, err := s.repo.ListOverdueInvoiced(ctx, time.Now().UTC())
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, g := range overdue {
+		if err := s.VoidAndRelease(ctx, g.ID, "unpaid after invoice due date"); err != nil {
+			log.Printf("billing: sweep release group %s: %v", g.ID, err)
+			continue
+		}
+		n++
+	}
+	return n, nil
+}
+
+func camperNames(campers []registration.Camper) []string {
+	var names []string
+	for _, c := range campers {
+		names = append(names, c.FirstName+" "+c.LastName)
+	}
+	return names
+}

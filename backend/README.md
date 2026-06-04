@@ -58,15 +58,20 @@ Copy the `whsec_…` it prints into `STRIPE_WEBHOOK_SECRET` in `.env`, then rest
 | POST   | `/api/payments/webhook`    | Stripe webhook (server-to-server)                |
 | GET    | `/api/consent-form`        | Downloads the Parental Consent Form PDF          |
 
-### Admin (not yet authenticated — internal use only)
+### Admin (session cookie — set `ADMIN_PASSWORD` + `ADMIN_SESSION_SECRET`)
 
-| Method | Path                              | Purpose                              |
-| ------ | --------------------------------- | ------------------------------------ |
-| GET    | `/admin/registrations`            | List registration groups (JSON)      |
-| GET    | `/admin/registrations.csv`        | Flat CSV, one row per camper         |
-| PATCH  | `/admin/registrations/{groupID}`  | Update payment_status manually       |
-| PUT    | `/admin/accommodations/{code}`    | Adjust capacity                      |
-| PUT    | `/admin/prices/{code}`            | Adjust price                         |
+| Method | Path                                        | Purpose                          |
+| ------ | ------------------------------------------- | -------------------------------- |
+| POST   | `/admin/login`                              | Shared-password login            |
+| GET    | `/admin/registrations`                      | List groups (`?status=`, `?billing_status=`) |
+| GET    | `/admin/accommodations`                     | Tiers + Stripe Price ids         |
+| PUT    | `/admin/registrations/{groupID}/allocation` | Save per-camper allocation       |
+| POST   | `/admin/registrations/{groupID}/invoice`    | Create & email Stripe Invoice    |
+| POST   | `/admin/registrations/invoice-bulk`         | Invoice all `allocated` groups   |
+| POST   | `/admin/registrations/{groupID}/release`      | Void invoice & release placement |
+| POST   | `/admin/billing/sweep`                      | Release overdue invoiced groups  |
+
+Frontend dashboard: `/admin` (Next.js). Stripe webhooks should also subscribe to `invoice.paid`, `invoice.payment_failed`, `invoice.marked_uncollectible` on the same `/api/payments/webhook` URL.
 
 ## Project layout
 
@@ -79,7 +84,8 @@ internal/camp    camp config + prices read endpoints
 internal/accommodation  capacity tracking
 internal/registration   form submit + Stripe session creation
 internal/payment        Stripe client + webhook
-internal/admin   admin endpoints
+internal/admin   admin endpoints + session auth
+internal/billing allocation + Stripe Invoices + overdue sweep
 internal/consent parental-consent PDF
 migrations       golang-migrate SQL files
 static           parental-consent-form.pdf (placeholder)

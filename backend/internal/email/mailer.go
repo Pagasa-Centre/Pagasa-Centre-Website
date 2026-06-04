@@ -13,6 +13,23 @@ import "context"
 // by SMTPMailer (production) and NoopMailer (local dev without SMTP creds).
 type Mailer interface {
 	SendDepositConfirmation(ctx context.Context, p DepositConfirmation) error
+	SendAllocationReleased(ctx context.Context, p AllocationReleased) error
+	SendWhiteTeamNotification(ctx context.Context, p WhiteTeamNotification) error
+}
+
+// AllocationReleased notifies a family their placement was released (unpaid).
+type AllocationReleased struct {
+	ToEmail     string
+	ToName      string
+	CamperNames []string
+	Reason      string
+}
+
+// WhiteTeamNotification is an internal ops email to WHITE_TEAM_EMAIL.
+type WhiteTeamNotification struct {
+	ToEmail string
+	Subject string
+	Body    string // plain text, wrapped in minimal HTML
 }
 
 // DepositConfirmation is the data the deposit-received email is built from.

@@ -39,6 +39,22 @@ type Config struct {
 	GoogleSheetsSpreadsheetID string
 	GoogleSheetsPendingTab    string // defaults to "Pending"
 	GoogleSheetsPaidTab       string // defaults to "Paid"
+
+	// Admin dashboard (shared password + HMAC session cookie).
+	AdminPassword       string
+	AdminSessionSecret  string
+	AdminSecureCookie   bool // ADMIN_SECURE_COOKIE=1 behind HTTPS
+	WhiteTeamEmail      string
+	StripePriceChildUnder3 string // Stripe Price for full-week under-3 balance (£0)
+	InvoiceDueDays      int    // defaults to 15
+
+	// Optional overrides for accommodation_types.stripe_price_id at boot.
+	StripePriceLodge          string
+	StripePriceCabin          string
+	StripePriceStaticCaravan  string
+	StripePricePod            string
+	StripePriceTent           string
+	StripePriceChild312       string // 3-12 child with parent
 }
 
 func Load() (Config, error) {
@@ -64,6 +80,18 @@ func Load() (Config, error) {
 		GoogleSheetsSpreadsheetID: os.Getenv("GOOGLE_SHEETS_SPREADSHEET_ID"),
 		GoogleSheetsPendingTab:    getEnv("GOOGLE_SHEETS_PENDING_TAB", "Pending"),
 		GoogleSheetsPaidTab:       getEnv("GOOGLE_SHEETS_PAID_TAB", "Paid"),
+		AdminPassword:             os.Getenv("ADMIN_PASSWORD"),
+		AdminSessionSecret:        os.Getenv("ADMIN_SESSION_SECRET"),
+		AdminSecureCookie:         os.Getenv("ADMIN_SECURE_COOKIE") == "1" || os.Getenv("ADMIN_SECURE_COOKIE") == "true",
+		WhiteTeamEmail:            os.Getenv("WHITE_TEAM_EMAIL"),
+		StripePriceChildUnder3:    os.Getenv("STRIPE_PRICE_CHILD_UNDER3"),
+		InvoiceDueDays:            getEnvInt("INVOICE_DUE_DAYS", 15),
+		StripePriceLodge:          os.Getenv("STRIPE_PRICE_LODGE"),
+		StripePriceCabin:          os.Getenv("STRIPE_PRICE_CABIN"),
+		StripePriceStaticCaravan:  os.Getenv("STRIPE_PRICE_STATIC_CARAVAN"),
+		StripePricePod:            os.Getenv("STRIPE_PRICE_POD"),
+		StripePriceTent:           os.Getenv("STRIPE_PRICE_TENT"),
+		StripePriceChild312:       os.Getenv("STRIPE_PRICE_CHILD_3_12"),
 	}
 
 	var missing []string
@@ -93,6 +121,18 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func getEnvInt(key string, fallback int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	var n int
+	if _, err := fmt.Sscanf(v, "%d", &n); err != nil || n <= 0 {
+		return fallback
+	}
+	return n
 }
 
 // ErrMissingRequired is returned when a required env var is unset.

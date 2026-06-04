@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	stripe "github.com/stripe/stripe-go/v79"
 
+	"pagasacentre/backend/internal/billing"
 	"pagasacentre/backend/internal/httpx"
 )
 
@@ -19,7 +20,7 @@ type WebhookVerifier interface {
 }
 
 // Mount registers POST /payments/webhook.
-func Mount(r chi.Router, svc *Service, verifier WebhookVerifier) {
+func Mount(r chi.Router, svc *Service, billSvc *billing.Service, verifier WebhookVerifier) {
 	r.Post("/payments/webhook", func(w http.ResponseWriter, req *http.Request) {
 		body, err := io.ReadAll(http.MaxBytesReader(w, req.Body, 1<<20))
 		if err != nil {
@@ -67,6 +68,36 @@ func Mount(r chi.Router, svc *Service, verifier WebhookVerifier) {
 				log.Printf("handle checkout.session.expired: %v", err)
 				http.Error(w, "internal", http.StatusInternalServerError)
 				return
+			}
+		case "invoice.paid":
+			if billSvc == nil {
+				break
+			}
+			var inv stripe.Invoice
+			if err := json.Unmarshal(event.Data.Raw, &inv); err != nil {
+				log.Printf("decode invoice: %v", err)
+				http.Error(w, "decode payload", http.StatusBadRequest)
+				return
+			}
+			groupID := inv.Metadata["group_id"]
+			if err := billSvc.HandleInvoicePaid(ctx, inv.ID, groupID); err != nil {
+				log.Printf("handle invoice.paid: %v", err)
+				http.Error(w, "internal", http.StatusInternalServerError)
+				return
+			}
+		case "invoice.payment_failed":
+			if billSvc != nil {
+				var inv stripe.Invoice
+				if err := json.Unmarshal(event.Data.Raw, &inv); err == nil {
+					billSvc.HandleInvoiceFailed(ctx, inv.Metadata["group_id"])
+				}
+			}
+		case "invoice.marked_uncollectible":
+			if billSvc != nil {
+				var inv stripe.Invoice
+				if err := json.Unmarshal(event.Data.Raw, &inv); err == nil {
+					billSvc.HandleInvoiceUncollectible(ctx, inv.Metadata["group_id"])
+				}
 			}
 		default:
 			// Ignore other event types; respond 200 so Stripe doesn't retry.

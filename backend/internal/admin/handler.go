@@ -1,7 +1,4 @@
-// Package admin exposes management endpoints for church staff.
-//
-// TODO(auth): these routes are intentionally unauthenticated for v1. Bolt a
-// single middleware in front of admin.Mount before any public deployment.
+// Package admin exposes management endpoints for church staff (White Team).
 package admin
 
 import (
@@ -10,24 +7,44 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"pagasacentre/backend/internal/billing"
 	"pagasacentre/backend/internal/camp"
 	"pagasacentre/backend/internal/httpx"
 	"pagasacentre/backend/internal/registration"
 )
 
-// Mount wires admin routes onto r.
-//
-// v2 dropped PUT /accommodations/{code}: there is no capacity to manage and
-// the price is a single deposit row in the prices table.
+// Mount wires admin routes onto r. Public login routes are outside the auth
+// middleware; everything else requires a valid session cookie.
 func Mount(
 	r chi.Router,
+	auth AuthConfig,
 	regRepo *registration.Repository,
 	campRepo *camp.Repository,
+	billSvc *billing.Service,
 ) {
-	r.Get("/registrations", listRegistrationsJSON(regRepo))
-	r.Get("/registrations.csv", listRegistrationsCSV(regRepo))
-	r.Patch("/registrations/{groupID}", patchRegistration(regRepo))
-	r.Put("/prices/{code}", putPrice(campRepo))
+	r.Post("/login", handleLogin(auth))
+	r.Post("/logout", handleLogout(auth))
+	r.Get("/session", handleSession(auth))
+
+	r.Group(func(r chi.Router) {
+		r.Use(func(next http.Handler) http.Handler {
+			return RequireAdmin(auth, next)
+		})
+
+		r.Get("/registrations", listRegistrationsJSON(regRepo))
+		r.Get("/registrations.csv", listRegistrationsCSV(regRepo))
+		r.Patch("/registrations/{groupID}", patchRegistration(regRepo))
+		r.Put("/prices/{code}", putPrice(campRepo))
+
+		r.Get("/accommodations", listAccommodationTypes(regRepo))
+		r.Put("/registrations/{groupID}/allocation", putAllocation(billSvc))
+		r.Post("/registrations/{groupID}/invoice", postInvoice(billSvc))
+		r.Post("/registrations/invoice-bulk", postInvoiceBulk(billSvc))
+		r.Post("/registrations/{groupID}/release", postRelease(billSvc))
+		r.Post("/registrations/{groupID}/invoice/resend", postResendInvoice(billSvc))
+		r.Patch("/registrations/{groupID}/invoice-due", patchInvoiceDue(billSvc))
+		r.Post("/billing/sweep", postBillingSweep(billSvc))
+	})
 }
 
 type groupView struct {
@@ -38,9 +55,11 @@ type groupView struct {
 func listRegistrationsJSON(repo *registration.Repository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		groups, err := repo.List(ctx, registration.ListFilter{
+		f := registration.ListFilterBilling{
 			PaymentStatus: r.URL.Query().Get("status"),
-		})
+			BillingStatus: r.URL.Query().Get("billing_status"),
+		}
+		groups, err := repo.ListWithBilling(ctx, f)
 		if err != nil {
 			httpx.WriteError(w, httpx.Internal(err.Error()))
 			return
@@ -73,8 +92,9 @@ func listRegistrationsJSON(repo *registration.Repository) http.HandlerFunc {
 func listRegistrationsCSV(repo *registration.Repository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		groups, err := repo.List(ctx, registration.ListFilter{
+		groups, err := repo.ListWithBilling(ctx, registration.ListFilterBilling{
 			PaymentStatus: r.URL.Query().Get("status"),
+			BillingStatus: r.URL.Query().Get("billing_status"),
 		})
 		if err != nil {
 			httpx.WriteError(w, httpx.Internal(err.Error()))
