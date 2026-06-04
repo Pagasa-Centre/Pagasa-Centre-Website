@@ -61,6 +61,21 @@ export default function ShirtSizeSelect({
           ))}
         </optgroup>
       </select>
+      {!disabled && (
+        <details className="text-xs text-neutral-500">
+          <summary className="cursor-pointer select-none font-semibold text-neutral-600">
+            Adult size guide (chest)
+          </summary>
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+            <span>S 34/36&quot;</span>
+            <span>M 38/40&quot;</span>
+            <span>L 42/44&quot;</span>
+            <span>XL 46/48&quot;</span>
+            <span>2XL 50/52&quot;</span>
+            <span>3XL 54/56&quot;</span>
+          </div>
+        </details>
+      )}
       {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   );
