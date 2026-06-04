@@ -13,6 +13,7 @@ import {
 } from "@/lib/api";
 import {
   ACCOMMODATION_CHILD_CODE,
+  ACCOMMODATION_TENT_CODE,
   type CamperState,
   computeTotalPence,
   emptyCamper,
@@ -124,6 +125,12 @@ function toSubmission(
       }
       const isChildSharing =
         c.accommodation_first_choice === ACCOMMODATION_CHILD_CODE;
+      // Tent and child-with-parent first choices have no meaningful 2nd
+      // choice — the picker hides the 2nd-choice field for both, so validation
+      // must skip the 2nd-choice requirement to match.
+      const skipsSecondChoice =
+        isChildSharing ||
+        c.accommodation_first_choice === ACCOMMODATION_TENT_CODE;
       if (
         (c.accommodation_first_choice === ACCOMMODATION_CHILD_CODE ||
           c.accommodation_second_choice === ACCOMMODATION_CHILD_CODE) &&
@@ -134,14 +141,14 @@ function toSubmission(
           error: `Camper ${i + 1}: child accommodation is only available for campers aged ${MAX_CHILD_ACCOMMODATION_AGE} or under.`,
         };
       }
-      if (!isChildSharing && !c.accommodation_second_choice) {
+      if (!skipsSecondChoice && !c.accommodation_second_choice) {
         return {
           ok: false,
           error: `Camper ${i + 1}: please pick a 2nd accommodation choice.`,
         };
       }
       if (
-        !isChildSharing &&
+        !skipsSecondChoice &&
         c.accommodation_first_choice === c.accommodation_second_choice
       ) {
         return {
