@@ -136,6 +136,8 @@ export default function AdminDashboard() {
   const [busy, setBusy] = useState<string | null>(null);
   const [tab, setTab] = useState<TabKey>("to_allocate");
   const [search, setSearch] = useState("");
+  // Group IDs whose (already-saved) allocation is being re-edited.
+  const [editing, setEditing] = useState<Record<string, boolean>>({});
 
   const accName = useCallback(
     (code: string | null | undefined): string => {
@@ -196,6 +198,31 @@ export default function AdminDashboard() {
     }));
   }
 
+  // Pre-fill the dropdowns with whatever is currently saved for the group.
+  function allocFromSaved(g: AdminGroup): AllocState {
+    const m: AllocState = {};
+    for (const c of g.campers) {
+      if (c.allocated_accommodation_code) {
+        m[c.id] = c.allocated_accommodation_code;
+      }
+    }
+    return m;
+  }
+
+  function startEdit(g: AdminGroup) {
+    setAlloc((prev) => ({ ...prev, [g.id]: allocFromSaved(g) }));
+    setEditing((e) => ({ ...e, [g.id]: true }));
+  }
+
+  function cancelEdit(g: AdminGroup) {
+    setAlloc((prev) => ({ ...prev, [g.id]: allocFromSaved(g) }));
+    setEditing((e) => {
+      const next = { ...e };
+      delete next[g.id];
+      return next;
+    });
+  }
+
   function allFullWeekAllocated(g: AdminGroup): boolean {
     const fw = fullWeekCampers(g);
     if (fw.length === 0) return false;
@@ -213,6 +240,11 @@ export default function AdminDashboard() {
         allocated_accommodation_code: alloc[g.id]?.[c.id] ?? "",
       }));
       await adminApi.saveAllocation(g.id, campers);
+      setEditing((e) => {
+        const next = { ...e };
+        delete next[g.id];
+        return next;
+      });
       setNotice(`Accommodation saved for ${g.contact_first_name}'s group.`);
       await load();
     } catch (err) {
@@ -615,8 +647,11 @@ export default function AdminDashboard() {
               alloc={alloc[g.id] ?? {}}
               allAllocated={allFullWeekAllocated(g)}
               busy={busy}
+              isEditing={!!editing[g.id]}
               onSetAlloc={(camperId, code) => setCamperAlloc(g.id, camperId, code)}
               onSave={() => saveAllocation(g)}
+              onEdit={() => startEdit(g)}
+              onCancelEdit={() => cancelEdit(g)}
               onInvoice={() => sendInvoice(g)}
               onResend={() => resendInvoice(g)}
               onExtend={() => extendDue(g)}
@@ -774,8 +809,11 @@ function GroupCard({
   alloc,
   allAllocated,
   busy,
+  isEditing,
   onSetAlloc,
   onSave,
+  onEdit,
+  onCancelEdit,
   onInvoice,
   onResend,
   onExtend,
@@ -787,8 +825,11 @@ function GroupCard({
   alloc: AllocState;
   allAllocated: boolean;
   busy: string | null;
+  isEditing: boolean;
   onSetAlloc: (camperId: string, code: string) => void;
   onSave: () => void;
+  onEdit: () => void;
+  onCancelEdit: () => void;
   onInvoice: () => void;
   onResend: () => void;
   onExtend: () => void;
@@ -798,7 +839,9 @@ function GroupCard({
   const cat = categorize(g);
   const overdue = isOverdue(g);
   const badge = statusBadge(g);
-  const canEditAlloc = cat === "to_allocate";
+  // Editable when the group still needs allocating, OR when the team has
+  // explicitly chosen to edit an already-saved (but not yet invoiced) group.
+  const canEditAlloc = cat === "to_allocate" || (cat === "to_invoice" && isEditing);
 
   return (
     <article
@@ -843,7 +886,9 @@ function GroupCard({
         ) : canEditAlloc ? (
           <div className="flex flex-col gap-3">
             <p className="text-sm font-semibold text-neutral-700">
-              Step 1 — choose accommodation for each person
+              {isEditing
+                ? "Edit accommodation — change any choice, then save"
+                : "Step 1 — choose accommodation for each person"}
             </p>
             <div className="flex flex-col divide-y divide-neutral-100 border border-neutral-200 rounded-lg">
               {fw.map((c) => {
@@ -904,7 +949,7 @@ function GroupCard({
                 );
               })}
             </div>
-            <div>
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 disabled={busy === `alloc-${g.id}` || !allAllocated}
@@ -913,8 +958,18 @@ function GroupCard({
               >
                 {busy === `alloc-${g.id}` ? "Saving…" : "Save accommodation"}
               </button>
+              {isEditing && (
+                <button
+                  type="button"
+                  disabled={busy === `alloc-${g.id}`}
+                  onClick={onCancelEdit}
+                  className="px-4 py-2.5 text-sm font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100"
+                >
+                  Cancel
+                </button>
+              )}
               {!allAllocated && (
-                <span className="ml-3 text-xs text-neutral-500">
+                <span className="text-xs text-neutral-500">
                   Choose accommodation for everyone to continue.
                 </span>
               )}
@@ -943,7 +998,7 @@ function GroupCard({
             </div>
 
             {cat === "to_invoice" && (
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   disabled={busy === `inv-${g.id}`}
@@ -953,6 +1008,13 @@ function GroupCard({
                   {busy === `inv-${g.id}`
                     ? "Sending…"
                     : "Send balance invoice"}
+                </button>
+                <button
+                  type="button"
+                  onClick={onEdit}
+                  className="px-4 py-2.5 text-sm font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100"
+                >
+                  Edit allocation
                 </button>
                 <span className="text-xs text-neutral-500">
                   Stripe will email a secure payment link.
