@@ -232,7 +232,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID string) error {
 			PayURL:      res.HostedURL,
 			DueDate:     res.DueAt.Format("2 Jan 2006"),
 			AmountLabel: formatAmountLabel(res.AmountDuePence, res.Currency),
-			CamperNames: fullWeekCamperNames(campers),
+			Items:       balanceInvoiceItems(campers, s.accommodationNames(ctx)),
 		}); err != nil {
 			log.Printf("billing: fallback balance invoice email to %s: %v", g.ContactEmail, err)
 		}
@@ -332,7 +332,7 @@ func (s *Service) ResendInvoice(ctx context.Context, groupID string) error {
 		PayURL:      res.HostedURL,
 		DueDate:     due,
 		AmountLabel: formatAmountLabel(res.AmountDuePence, res.Currency),
-		CamperNames: fullWeekCamperNames(campers),
+		Items:       balanceInvoiceItems(campers, s.accommodationNames(ctx)),
 	}); err != nil {
 		return httpx.Internal(err.Error())
 	}
@@ -410,14 +410,43 @@ func camperNames(campers []registration.Camper) []string {
 	return names
 }
 
-func fullWeekCamperNames(campers []registration.Camper) []string {
-	var names []string
-	for _, c := range campers {
-		if c.AttendanceType == registration.AttendanceFullWeek {
-			names = append(names, c.FirstName+" "+c.LastName)
-		}
+// accommodationNames returns a code->display_name lookup for invoice line items.
+func (s *Service) accommodationNames(ctx context.Context) map[string]string {
+	m := map[string]string{}
+	types, err := s.repo.ListAccommodationTypes(ctx)
+	if err != nil {
+		log.Printf("billing: load accommodation names: %v", err)
+		return m
 	}
-	return names
+	for _, t := range types {
+		m[t.Code] = t.DisplayName
+	}
+	return m
+}
+
+// balanceInvoiceItems produces one "Name — Accommodation" line per full-week
+// camper, for the invoice email body.
+func balanceInvoiceItems(campers []registration.Camper, accNames map[string]string) []string {
+	var items []string
+	for _, c := range campers {
+		if c.AttendanceType != registration.AttendanceFullWeek {
+			continue
+		}
+		name := c.FirstName + " " + c.LastName
+		if c.AllocatedAccommodationCode != nil {
+			code := strings.TrimSpace(*c.AllocatedAccommodationCode)
+			if code != "" {
+				display := accNames[code]
+				if display == "" {
+					display = code
+				}
+				items = append(items, name+" — "+display)
+				continue
+			}
+		}
+		items = append(items, name)
+	}
+	return items
 }
 
 func formatAmountLabel(pence int64, currency string) string {

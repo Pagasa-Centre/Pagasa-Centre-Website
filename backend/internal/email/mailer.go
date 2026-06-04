@@ -24,10 +24,12 @@ type Mailer interface {
 type BalanceInvoice struct {
 	ToEmail     string
 	ToName      string
-	PayURL      string   // Stripe hosted invoice URL
-	DueDate     string   // pre-formatted, e.g. "19 Jun 2026"
-	AmountLabel string   // optional, e.g. "£250.00" (blank if unknown)
-	CamperNames []string
+	PayURL      string // Stripe hosted invoice URL
+	DueDate     string // pre-formatted, e.g. "19 Jun 2026"
+	AmountLabel string // optional, e.g. "£250.00" (blank if unknown)
+	// Items is one line per thing being paid for, e.g.
+	// "Josh Basco — Lodge". Shown as a bullet list in the email.
+	Items []string
 }
 
 // AllocationReleased notifies a family their placement was released (unpaid).

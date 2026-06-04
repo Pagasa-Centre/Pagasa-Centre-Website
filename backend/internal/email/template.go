@@ -94,7 +94,7 @@ func renderAllocationReleased(p AllocationReleased) (subject, htmlBody string, e
 func renderBalanceInvoice(p BalanceInvoice) (subject, htmlBody string, err error) {
 	subject = "Your PC Summer Camp 2026 balance is ready to pay"
 	names := ""
-	for _, n := range p.CamperNames {
+	for _, n := range p.Items {
 		names += "<li>" + template.HTMLEscapeString(n) + "</li>"
 	}
 	due := ""
@@ -109,7 +109,7 @@ func renderBalanceInvoice(p BalanceInvoice) (subject, htmlBody string, err error
 	}
 	camperBlock := ""
 	if names != "" {
-		camperBlock = "<p>This covers:</p><ul>" + names + "</ul>"
+		camperBlock = "<p>This payment covers:</p><ul>" + names + "</ul>"
 	}
 	htmlBody = fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en"><body style="font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; color:#1a1a1a; line-height:1.55; max-width:600px; margin:0 auto; padding:24px;">
