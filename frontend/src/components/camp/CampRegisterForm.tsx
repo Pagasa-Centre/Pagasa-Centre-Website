@@ -68,7 +68,9 @@ function inputCls(hasError: boolean) {
 
 function toSubmission(
   state: FormState,
-): { ok: true; payload: SubmitRequest } | { ok: false; error: string } {
+):
+  | { ok: true; payload: SubmitRequest }
+  | { ok: false; error: string; fields?: Record<string, string> } {
   if (state.campers.length === 0) {
     return { ok: false, error: "Please add at least one camper." };
   }
@@ -77,6 +79,41 @@ function toSubmission(
     return {
       ok: false,
       error: "Main contact name is required.",
+    };
+  }
+
+  // Contact email + phone. These are required but were previously only
+  // enforced by the browser's native validation, which can silently block
+  // submission without showing a reason. Validate explicitly so the user
+  // always sees a clear message (top-of-form + inline under the field).
+  const email = state.contact.email.trim();
+  const phone = state.contact.phone.trim();
+  if (!email) {
+    return {
+      ok: false,
+      error: "Please enter a contact email address.",
+      fields: { "contact.email": "Email is required." },
+    };
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return {
+      ok: false,
+      error: "Please enter a valid email address (e.g. name@example.com).",
+      fields: { "contact.email": "Enter a valid email address." },
+    };
+  }
+  if (!phone) {
+    return {
+      ok: false,
+      error: "Please enter a contact phone number.",
+      fields: { "contact.phone": "Phone number is required." },
+    };
+  }
+  if ((phone.match(/\d/g) ?? []).length < 7) {
+    return {
+      ok: false,
+      error: "Please enter a valid phone number.",
+      fields: { "contact.phone": "Enter a valid phone number." },
     };
   }
 
@@ -323,6 +360,7 @@ export default function CampRegisterForm({
     const built = toSubmission(state);
     if (!built.ok) {
       setTopError(built.error);
+      setFieldErrors(built.fields ?? {});
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
@@ -420,7 +458,7 @@ export default function CampRegisterForm({
           </div>
         )}
 
-        <form onSubmit={onSubmit} className="flex flex-col gap-6">
+        <form onSubmit={onSubmit} noValidate className="flex flex-col gap-6">
           {state.campers.map((camper, i) => (
             <div key={i} className="flex flex-col gap-5">
               <CamperFieldset
