@@ -227,23 +227,25 @@ func (r *Repository) ListOverdueInvoiced(ctx context.Context, now time.Time) ([]
 
 // GetAccommodationType loads a tier including its Stripe Price id.
 func (r *Repository) GetAccommodationType(ctx context.Context, code string) (*AccommodationType, error) {
-	const q = `SELECT code, display_name, stripe_price_id FROM accommodation_types WHERE code = $1`
+	const q = `SELECT code, display_name, capacity, stripe_price_id FROM accommodation_types WHERE code = $1`
 	var t AccommodationType
+	var capacity *int
 	var priceID *string
-	err := r.pool.QueryRow(ctx, q, code).Scan(&t.Code, &t.DisplayName, &priceID)
+	err := r.pool.QueryRow(ctx, q, code).Scan(&t.Code, &t.DisplayName, &capacity, &priceID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get accommodation type: %w", err)
 	}
+	t.Capacity = capacity
 	t.StripePriceID = priceID
 	return &t, nil
 }
 
-// ListAccommodationTypes returns all tiers with Stripe Price ids.
+// ListAccommodationTypes returns all tiers with capacity and Stripe Price ids.
 func (r *Repository) ListAccommodationTypes(ctx context.Context) ([]AccommodationType, error) {
-	const q = `SELECT code, display_name, stripe_price_id FROM accommodation_types ORDER BY sort_order, code`
+	const q = `SELECT code, display_name, capacity, stripe_price_id FROM accommodation_types ORDER BY sort_order, code`
 	rows, err := r.pool.Query(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list accommodation types: %w", err)
@@ -253,10 +255,12 @@ func (r *Repository) ListAccommodationTypes(ctx context.Context) ([]Accommodatio
 	var out []AccommodationType
 	for rows.Next() {
 		var t AccommodationType
+		var capacity *int
 		var priceID *string
-		if err := rows.Scan(&t.Code, &t.DisplayName, &priceID); err != nil {
+		if err := rows.Scan(&t.Code, &t.DisplayName, &capacity, &priceID); err != nil {
 			return nil, err
 		}
+		t.Capacity = capacity
 		t.StripePriceID = priceID
 		out = append(out, t)
 	}

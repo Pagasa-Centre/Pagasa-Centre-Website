@@ -392,6 +392,20 @@ export default function AdminDashboard() {
     return c;
   }, [groups]);
 
+  // How many beds are currently held per accommodation code. A camper holds a
+  // spot once their allocation is saved; releasing a group clears the code, so
+  // this naturally only counts live allocations.
+  const usage = useMemo(() => {
+    const used: Record<string, number> = {};
+    for (const g of groups) {
+      for (const c of g.campers) {
+        const code = c.allocated_accommodation_code;
+        if (code) used[code] = (used[code] ?? 0) + 1;
+      }
+    }
+    return used;
+  }, [groups]);
+
   const visibleGroups = useMemo(() => {
     const q = search.trim().toLowerCase();
     return groups
@@ -527,6 +541,9 @@ export default function AdminDashboard() {
         />
       </div>
 
+      {/* Accommodation availability */}
+      <CapacityPanel accommodations={accommodations} usage={usage} />
+
       {notice && (
         <div className="p-3 bg-green-50 border border-green-300 text-green-800 text-sm rounded-lg">
           {notice}
@@ -629,6 +646,87 @@ export default function AdminDashboard() {
           </button>
         </div>
       </details>
+    </div>
+  );
+}
+
+function CapacityPanel({
+  accommodations,
+  usage,
+}: {
+  accommodations: AdminAccommodation[];
+  usage: Record<string, number>;
+}) {
+  if (accommodations.length === 0) return null;
+  return (
+    <div className="bg-white border border-neutral-300 rounded-xl p-4 sm:p-5">
+      <p className="text-sm font-bold text-neutral-800 mb-3">
+        Accommodation availability
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {accommodations.map((a) => {
+          const used = usage[a.code] ?? 0;
+          const cap = a.capacity ?? null;
+          const hasLimit = cap !== null && cap !== undefined;
+          const left = hasLimit ? Math.max(0, cap - used) : null;
+          const full = hasLimit && used >= cap;
+          const pct = hasLimit && cap > 0 ? Math.min(100, (used / cap) * 100) : 0;
+
+          let barColor = "bg-green-500";
+          let tag = `${left} space${left === 1 ? "" : "s"} left`;
+          let tagColor = "text-green-700 bg-green-100";
+          if (!hasLimit) {
+            tag = "No limit";
+            tagColor = "text-neutral-600 bg-neutral-100";
+          } else if (full) {
+            barColor = "bg-red-500";
+            tag = "Full";
+            tagColor = "text-red-700 bg-red-100";
+          } else if (left !== null && left <= Math.max(2, cap * 0.15)) {
+            barColor = "bg-amber-500";
+            tagColor = "text-amber-700 bg-amber-100";
+          }
+
+          return (
+            <div
+              key={a.code}
+              className="border border-neutral-200 rounded-lg p-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold text-neutral-800 truncate">
+                  {a.display_name}
+                </span>
+                <span
+                  className={`flex-none text-[11px] font-bold px-2 py-0.5 rounded-full ${tagColor}`}
+                >
+                  {tag}
+                </span>
+              </div>
+              <p className="text-xs text-neutral-500 mt-1">
+                {hasLimit ? (
+                  <>
+                    <span className="font-bold text-neutral-800">{used}</span> of{" "}
+                    {cap} allocated
+                  </>
+                ) : (
+                  <>
+                    <span className="font-bold text-neutral-800">{used}</span>{" "}
+                    allocated
+                  </>
+                )}
+              </p>
+              {hasLimit && (
+                <div className="mt-2 h-2 w-full rounded-full bg-neutral-100 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${barColor}`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -756,15 +854,23 @@ function GroupCard({
                     key={c.id}
                     className="flex flex-wrap items-center gap-3 p-3"
                   >
-                    <div className="min-w-[140px] flex-1">
+                    <div className="min-w-[160px] flex-1">
                       <p className="font-medium text-neutral-800">
                         {c.first_name} {c.last_name}
+                        <span className="ml-2 text-xs font-semibold text-neutral-600 bg-neutral-100 px-2 py-0.5 rounded-full">
+                          Age {c.age}
+                        </span>
                       </p>
-                      <p className="text-xs text-neutral-500">
-                        Age {c.age}
+                      <p className="text-xs text-neutral-500 mt-1">
+                        <span className="font-semibold">1st:</span>{" "}
                         {c.accommodation_first_choice
-                          ? ` · prefers ${accName(c.accommodation_first_choice)}`
-                          : ""}
+                          ? accName(c.accommodation_first_choice)
+                          : "—"}
+                        <span className="mx-1.5 text-neutral-300">|</span>
+                        <span className="font-semibold">2nd:</span>{" "}
+                        {c.accommodation_second_choice
+                          ? accName(c.accommodation_second_choice)
+                          : "—"}
                       </p>
                     </div>
                     <select
@@ -825,8 +931,8 @@ function GroupCard({
                 >
                   <span className="font-medium text-neutral-800">
                     {c.first_name} {c.last_name}{" "}
-                    <span className="text-xs text-neutral-400">
-                      (age {c.age})
+                    <span className="ml-1 text-xs font-semibold text-neutral-600 bg-neutral-100 px-2 py-0.5 rounded-full">
+                      Age {c.age}
                     </span>
                   </span>
                   <span className="text-sm text-neutral-700 font-semibold">
