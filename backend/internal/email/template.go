@@ -12,7 +12,7 @@ import (
 const (
 	KeyDatesRegistration  = "1 - 30 June"
 	KeyDatesAllocation    = "1 - 15 July"
-	KeyDatesFinalPayment  = "26 - 31 July"
+	KeyDatesFinalPayment  = "16 - 31 July"
 	AllocationContactName = "Bro Ash"
 )
 
