@@ -55,6 +55,17 @@ func postInvoiceBulk(svc *billing.Service) http.HandlerFunc {
 	}
 }
 
+func postUnallocate(svc *billing.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		groupID := chi.URLParam(r, "groupID")
+		if err := svc.Unallocate(r.Context(), groupID); err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 func postRelease(svc *billing.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		groupID := chi.URLParam(r, "groupID")

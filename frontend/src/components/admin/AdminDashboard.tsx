@@ -256,6 +256,35 @@ export default function AdminDashboard() {
     }
   }
 
+  async function resetAllocation(g: AdminGroup) {
+    if (
+      !confirm(
+        `Reset ${g.contact_first_name} ${g.contact_last_name}'s group back to "Needs accommodation"?\n\nThis clears their saved allocation. No invoice has been sent, so nothing is charged.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(`reset-${g.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await adminApi.unallocate(g.id);
+      setEditing((e) => {
+        const next = { ...e };
+        delete next[g.id];
+        return next;
+      });
+      setNotice(`${g.contact_first_name}'s group moved back to Needs accommodation.`);
+      await load();
+    } catch (err) {
+      setError(
+        err instanceof AdminApiError ? err.detail.message : "Reset failed.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function sendInvoice(g: AdminGroup) {
     setBusy(`inv-${g.id}`);
     setError(null);
@@ -652,6 +681,7 @@ export default function AdminDashboard() {
               onSave={() => saveAllocation(g)}
               onEdit={() => startEdit(g)}
               onCancelEdit={() => cancelEdit(g)}
+              onReset={() => resetAllocation(g)}
               onInvoice={() => sendInvoice(g)}
               onResend={() => resendInvoice(g)}
               onExtend={() => extendDue(g)}
@@ -814,6 +844,7 @@ function GroupCard({
   onSave,
   onEdit,
   onCancelEdit,
+  onReset,
   onInvoice,
   onResend,
   onExtend,
@@ -830,6 +861,7 @@ function GroupCard({
   onSave: () => void;
   onEdit: () => void;
   onCancelEdit: () => void;
+  onReset: () => void;
   onInvoice: () => void;
   onResend: () => void;
   onExtend: () => void;
@@ -1015,6 +1047,14 @@ function GroupCard({
                   className="px-4 py-2.5 text-sm font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100"
                 >
                   Edit allocation
+                </button>
+                <button
+                  type="button"
+                  disabled={busy === `reset-${g.id}`}
+                  onClick={onReset}
+                  className="px-4 py-2.5 text-sm font-semibold text-red-700 bg-white border border-red-200 rounded-lg hover:bg-red-50"
+                >
+                  Reset allocation
                 </button>
                 <span className="text-xs text-neutral-500">
                   Stripe will email a secure payment link.

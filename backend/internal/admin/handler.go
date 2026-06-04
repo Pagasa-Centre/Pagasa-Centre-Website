@@ -38,6 +38,7 @@ func Mount(
 
 		r.Get("/accommodations", listAccommodationTypes(regRepo))
 		r.Put("/registrations/{groupID}/allocation", putAllocation(billSvc))
+		r.Post("/registrations/{groupID}/unallocate", postUnallocate(billSvc))
 		r.Post("/registrations/{groupID}/invoice", postInvoice(billSvc))
 		r.Post("/registrations/invoice-bulk", postInvoiceBulk(billSvc))
 		r.Post("/registrations/{groupID}/release", postRelease(billSvc))

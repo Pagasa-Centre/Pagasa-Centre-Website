@@ -130,6 +130,11 @@ export const adminApi = {
       body: JSON.stringify({ campers }),
     }),
 
+  unallocate: (groupId: string) =>
+    adminFetch<void>(`/admin/registrations/${groupId}/unallocate`, {
+      method: "POST",
+    }),
+
   sendInvoice: (groupId: string) =>
     adminFetch<void>(`/admin/registrations/${groupId}/invoice`, {
       method: "POST",

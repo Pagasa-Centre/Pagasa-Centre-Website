@@ -109,6 +109,29 @@ func (s *Service) Allocate(ctx context.Context, groupID string, req AllocateRequ
 	return s.repo.SetBillingStatus(ctx, groupID, registration.BillingAllocated)
 }
 
+// Unallocate clears a group's placements and returns it to the unallocated
+// (needs-accommodation) state. Only valid before an invoice has been sent —
+// once invoiced, use VoidAndRelease so the open Stripe invoice is voided too.
+func (s *Service) Unallocate(ctx context.Context, groupID string) error {
+	g, err := s.repo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		return httpx.Internal(err.Error())
+	}
+	if g == nil {
+		return httpx.NotFound("group not found")
+	}
+	switch g.BillingStatus {
+	case registration.BillingInvoiced:
+		return httpx.BadRequest("invoice is open; use release instead", nil)
+	case registration.BillingBalancePaid:
+		return httpx.BadRequest("balance already paid", nil)
+	}
+	if err := s.repo.ClearCamperAllocations(ctx, groupID); err != nil {
+		return httpx.Internal(err.Error())
+	}
+	return s.repo.SetBillingStatus(ctx, groupID, registration.BillingNone)
+}
+
 func (s *Service) resolvePriceID(ctx context.Context, accommodationCode string, age int) (string, error) {
 	if accommodationCode == registration.AccommodationChild && age < registration.MinDepositAge {
 		if s.cfg.StripePriceChildUnder3 == "" {
