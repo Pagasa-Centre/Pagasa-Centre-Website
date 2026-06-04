@@ -49,3 +49,13 @@ func (NoopMailer) SendBalanceInvoice(_ context.Context, p BalanceInvoice) error 
 		p.ToEmail, subject, p.PayURL)
 	return nil
 }
+
+func (NoopMailer) SendBalancePaid(_ context.Context, p BalancePaid) error {
+	subject, _, err := renderBalancePaid(p)
+	if err != nil {
+		return err
+	}
+	log.Printf("[email noop] to=%s subject=%q amount=%s (balance paid)",
+		p.ToEmail, subject, p.AmountLabel)
+	return nil
+}

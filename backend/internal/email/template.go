@@ -135,6 +135,53 @@ func renderBalanceInvoice(p BalanceInvoice) (subject, htmlBody string, err error
 	return subject, htmlBody, nil
 }
 
+func renderBalancePaid(p BalancePaid) (subject, htmlBody string, err error) {
+	name := p.ContactName
+	if name == "" {
+		name = p.ContactEmail
+	}
+	subject = "Camp balance paid — " + name
+	items := ""
+	for _, it := range p.Items {
+		items += "<li>" + template.HTMLEscapeString(it) + "</li>"
+	}
+	itemsBlock := ""
+	if items != "" {
+		itemsBlock = "<p style=\"margin:0 0 4px;\"><strong>People covered:</strong></p><ul style=\"margin:0 0 16px;\">" + items + "</ul>"
+	}
+	amount := ""
+	if p.AmountLabel != "" {
+		amount = fmt.Sprintf(`<tr><td style="padding:2px 12px 2px 0;color:#555;">Amount paid</td><td style="padding:2px 0;font-weight:bold;">%s</td></tr>`,
+			template.HTMLEscapeString(p.AmountLabel))
+	}
+	paidDate := ""
+	if p.PaidDate != "" {
+		paidDate = fmt.Sprintf(`<tr><td style="padding:2px 12px 2px 0;color:#555;">Paid on</td><td style="padding:2px 0;">%s</td></tr>`,
+			template.HTMLEscapeString(p.PaidDate))
+	}
+	htmlBody = fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en"><body style="font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; color:#1a1a1a; line-height:1.55; max-width:600px; margin:0 auto; padding:24px;">
+  <h1 style="font-size:20px; margin:0 0 16px;">Balance paid in full ✅</h1>
+  <p><strong>%s</strong> has paid their PC Summer Camp 2026 balance.</p>
+  <table style="border-collapse:collapse; margin:8px 0 16px; font-size:14px;">
+    <tr><td style="padding:2px 12px 2px 0;color:#555;">Paid by</td><td style="padding:2px 0;">%s</td></tr>
+    <tr><td style="padding:2px 12px 2px 0;color:#555;">Email</td><td style="padding:2px 0;">%s</td></tr>
+    %s
+    %s
+  </table>
+  %s
+  <p style="color:#555;font-size:13px;">This is an automatic notification for the White Team.</p>
+</body></html>`,
+		template.HTMLEscapeString(name),
+		template.HTMLEscapeString(name),
+		template.HTMLEscapeString(p.ContactEmail),
+		amount,
+		paidDate,
+		itemsBlock,
+	)
+	return subject, htmlBody, nil
+}
+
 func renderWhiteTeamNotification(p WhiteTeamNotification) (subject, htmlBody string, err error) {
 	subject = p.Subject
 	body := template.HTMLEscapeString(p.Body)

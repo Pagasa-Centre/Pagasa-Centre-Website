@@ -66,6 +66,14 @@ func (s *SMTPMailer) SendBalanceInvoice(ctx context.Context, p BalanceInvoice) e
 	return s.send(ctx, p.ToEmail, subject, body)
 }
 
+func (s *SMTPMailer) SendBalancePaid(ctx context.Context, p BalancePaid) error {
+	subject, body, err := renderBalancePaid(p)
+	if err != nil {
+		return err
+	}
+	return s.send(ctx, p.ToEmail, subject, body)
+}
+
 func (s *SMTPMailer) send(_ context.Context, to, subject, htmlBody string) error {
 	if to == "" {
 		return fmt.Errorf("empty recipient")

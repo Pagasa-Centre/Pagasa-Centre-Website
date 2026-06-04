@@ -16,6 +16,19 @@ type Mailer interface {
 	SendAllocationReleased(ctx context.Context, p AllocationReleased) error
 	SendWhiteTeamNotification(ctx context.Context, p WhiteTeamNotification) error
 	SendBalanceInvoice(ctx context.Context, p BalanceInvoice) error
+	SendBalancePaid(ctx context.Context, p BalancePaid) error
+}
+
+// BalancePaid is the notification (to the White Team) that a group has paid
+// their balance invoice in full.
+type BalancePaid struct {
+	ToEmail      string // recipient (White Team ops inbox)
+	ContactName  string // who the payment was for
+	ContactEmail string
+	AmountLabel  string // e.g. "£200.00" (blank if unknown)
+	PaidDate     string // pre-formatted, e.g. "4 Jun 2026"
+	// Items is one line per person covered, e.g. "Josh Basco — Lodge".
+	Items []string
 }
 
 // BalanceInvoice emails the family their Stripe balance-invoice payment link.

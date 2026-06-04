@@ -80,7 +80,7 @@ func Mount(r chi.Router, svc *Service, billSvc *billing.Service, verifier Webhoo
 				return
 			}
 			groupID := inv.Metadata["group_id"]
-			if err := billSvc.HandleInvoicePaid(ctx, inv.ID, groupID); err != nil {
+			if err := billSvc.HandleInvoicePaid(ctx, inv.ID, groupID, inv.AmountPaid, string(inv.Currency)); err != nil {
 				log.Printf("handle invoice.paid: %v", err)
 				http.Error(w, "internal", http.StatusInternalServerError)
 				return

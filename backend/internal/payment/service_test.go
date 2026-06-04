@@ -30,6 +30,10 @@ func (m *recordingMailer) SendBalanceInvoice(context.Context, email.BalanceInvoi
 	return nil
 }
 
+func (m *recordingMailer) SendBalancePaid(context.Context, email.BalancePaid) error {
+	return nil
+}
+
 func (m *recordingMailer) SendDepositConfirmation(_ context.Context, p email.DepositConfirmation) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

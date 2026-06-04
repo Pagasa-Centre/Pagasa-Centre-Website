@@ -344,8 +344,9 @@ func (s *Service) ExtendDueAt(ctx context.Context, groupID string, dueAt time.Ti
 	return s.repo.ExtendInvoiceDueAt(ctx, groupID, dueAt)
 }
 
-// HandleInvoicePaid marks balance paid (idempotent).
-func (s *Service) HandleInvoicePaid(ctx context.Context, stripeInvoiceID, groupID string) error {
+// HandleInvoicePaid marks balance paid (idempotent) and notifies the White
+// Team with a detailed summary of who paid, what it covered, and how much.
+func (s *Service) HandleInvoicePaid(ctx context.Context, stripeInvoiceID, groupID string, amountPaidPence int64, currency string) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
 		return err
@@ -364,12 +365,13 @@ func (s *Service) HandleInvoicePaid(ctx context.Context, stripeInvoiceID, groupI
 	}
 	if s.cfg.WhiteTeamEmail != "" {
 		campers, _ := s.repo.CampersForGroup(ctx, g.ID)
-		_ = s.mailer.SendWhiteTeamNotification(ctx, email.WhiteTeamNotification{
-			ToEmail: s.cfg.WhiteTeamEmail,
-			Subject: "Camp balance paid",
-			Body: fmt.Sprintf(
-				"Group %s (%s %s) has paid their camp balance invoice.\nCampers: %s",
-				g.ID, g.ContactFirstName, g.ContactLastName, strings.Join(camperNames(campers), ", ")),
+		_ = s.mailer.SendBalancePaid(ctx, email.BalancePaid{
+			ToEmail:      s.cfg.WhiteTeamEmail,
+			ContactName:  strings.TrimSpace(g.ContactFirstName + " " + g.ContactLastName),
+			ContactEmail: g.ContactEmail,
+			AmountLabel:  formatAmountLabel(amountPaidPence, currency),
+			PaidDate:     time.Now().Format("2 Jan 2006"),
+			Items:        balanceInvoiceItems(campers, s.accommodationNames(ctx)),
 		})
 	}
 	return nil
