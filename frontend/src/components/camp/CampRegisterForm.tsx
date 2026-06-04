@@ -400,7 +400,7 @@ export default function CampRegisterForm({
             <li>• 3 × Lodges — sleeps 8 each</li>
             <li>• 8 × Cabins — sleeps 2 each</li>
             <li>• 1 × Caravan — sleeps 5</li>
-            <li>• 3 × Caravans — sleeps 5 each (includes one sofa bed)</li>
+            <li>• 3 × Caravans — sleeps 4 each </li>
             <li>• 4 × Caravans — sleeps 6 each</li>
             <li>• 10 × Pods — sleeps 2 each</li>
             <li>• Tents — unlimited</li>
