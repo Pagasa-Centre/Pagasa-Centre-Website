@@ -52,7 +52,9 @@ func (l *loginLimiter) allow(key string) bool {
 	return true
 }
 
-var globalLoginLimiter loginLimiter
+var globalLoginLimiter = loginLimiter{
+	attempts: make(map[string][]time.Time),
+}
 
 func clientKey(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
