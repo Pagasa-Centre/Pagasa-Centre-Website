@@ -159,10 +159,19 @@ func (s *Service) SendInvoice(ctx context.Context, groupID string) error {
 		if c.AttendanceType != registration.AttendanceFullWeek {
 			continue
 		}
-		if c.BilledStripePriceID == nil || strings.TrimSpace(*c.BilledStripePriceID) == "" {
-			return httpx.BadRequest(fmt.Sprintf("camper %s %s is not fully allocated", c.FirstName, c.LastName), nil)
+		if c.AllocatedAccommodationCode == nil || strings.TrimSpace(*c.AllocatedAccommodationCode) == "" {
+			return httpx.BadRequest(fmt.Sprintf("camper %s %s is not allocated", c.FirstName, c.LastName), nil)
 		}
-		priceIDs = append(priceIDs, strings.TrimSpace(*c.BilledStripePriceID))
+		// Re-resolve the Stripe Price from the CURRENT accommodation config at
+		// send time rather than replaying the value stored when the allocation
+		// was first saved. This self-heals when Price IDs are corrected after
+		// allocation (e.g. env vars set later), instead of erroring on a stale
+		// "No such price".
+		priceID, err := s.resolvePriceID(ctx, strings.TrimSpace(*c.AllocatedAccommodationCode), c.Age)
+		if err != nil {
+			return httpx.BadRequest(err.Error(), nil)
+		}
+		priceIDs = append(priceIDs, priceID)
 	}
 	if len(priceIDs) == 0 {
 		return httpx.BadRequest("no full-week campers to invoice", nil)
