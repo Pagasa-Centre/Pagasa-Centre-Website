@@ -39,3 +39,13 @@ func (NoopMailer) SendWhiteTeamNotification(_ context.Context, p WhiteTeamNotifi
 	log.Printf("[email noop] to=%s subject=%q (white team)", p.ToEmail, p.Subject)
 	return nil
 }
+
+func (NoopMailer) SendBalanceInvoice(_ context.Context, p BalanceInvoice) error {
+	subject, _, err := renderBalanceInvoice(p)
+	if err != nil {
+		return err
+	}
+	log.Printf("[email noop] to=%s subject=%q pay_url=%s (balance invoice)",
+		p.ToEmail, subject, p.PayURL)
+	return nil
+}

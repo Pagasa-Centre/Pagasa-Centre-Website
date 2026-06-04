@@ -3,6 +3,7 @@ package billing
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/stripe/stripe-go/v79"
@@ -36,16 +37,28 @@ func (s *StripeBilling) EnsureCustomer(ctx context.Context, existingID, email, n
 	return c.ID, nil
 }
 
-// CreateAndSendInvoice builds line items from Stripe Price ids, creates an
-// invoice with send_invoice collection, and returns the finalized invoice id
-// and due time.
-func (s *StripeBilling) CreateAndSendInvoice(
+// InvoiceResult is the outcome of creating/looking up a balance invoice.
+type InvoiceResult struct {
+	ID             string
+	HostedURL      string // Stripe hosted invoice page (where the family pays)
+	DueAt          time.Time
+	AmountDuePence int64
+	Currency       string
+	StripeEmailed  bool // true if Stripe successfully emailed the invoice
+}
+
+// CreateInvoice builds line items from Stripe Price ids, finalizes a
+// send_invoice-collection invoice, and asks Stripe to email it. If Stripe's
+// email send fails (e.g. the account's invoice-email capability is restricted),
+// the invoice is still finalized and payable — StripeEmailed is returned false
+// so the caller can fall back to emailing the hosted link itself.
+func (s *StripeBilling) CreateInvoice(
 	ctx context.Context,
 	customerID string,
 	groupID string,
 	priceIDs []string,
 	daysUntilDue int64,
-) (invoiceID string, dueAt time.Time, err error) {
+) (InvoiceResult, error) {
 	for _, priceID := range priceIDs {
 		if priceID == "" {
 			continue
@@ -56,7 +69,7 @@ func (s *StripeBilling) CreateAndSendInvoice(
 		}
 		itemParams.Context = ctx
 		if _, err := invoiceitem.New(itemParams); err != nil {
-			return "", time.Time{}, fmt.Errorf("create invoice item for price %s: %w", priceID, err)
+			return InvoiceResult{}, fmt.Errorf("create invoice item for price %s: %w", priceID, err)
 		}
 	}
 
@@ -72,29 +85,70 @@ func (s *StripeBilling) CreateAndSendInvoice(
 	invParams.Context = ctx
 	inv, err := invoice.New(invParams)
 	if err != nil {
-		return "", time.Time{}, fmt.Errorf("create invoice: %w", err)
+		return InvoiceResult{}, fmt.Errorf("create invoice: %w", err)
 	}
 
-	// Finalize and send (auto_advance may finalize async; explicit finalize+send is reliable).
 	finalParams := &stripe.InvoiceFinalizeInvoiceParams{}
 	finalParams.Context = ctx
 	inv, err = invoice.FinalizeInvoice(inv.ID, finalParams)
 	if err != nil {
-		return "", time.Time{}, fmt.Errorf("finalize invoice: %w", err)
+		return InvoiceResult{}, fmt.Errorf("finalize invoice: %w", err)
 	}
 
+	// Primary delivery: ask Stripe to email the invoice. Non-fatal on failure —
+	// the caller falls back to our own email.
+	stripeEmailed := true
 	sendParams := &stripe.InvoiceSendInvoiceParams{}
 	sendParams.Context = ctx
-	inv, err = invoice.SendInvoice(inv.ID, sendParams)
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("send invoice: %w", err)
+	if _, sendErr := invoice.SendInvoice(inv.ID, sendParams); sendErr != nil {
+		stripeEmailed = false
+		log.Printf("billing: Stripe could not email invoice %s; falling back to Resend: %v", inv.ID, sendErr)
 	}
 
 	due := time.Now().UTC().Add(time.Duration(daysUntilDue) * 24 * time.Hour)
 	if inv.DueDate > 0 {
 		due = time.Unix(inv.DueDate, 0).UTC()
 	}
-	return inv.ID, due, nil
+	return InvoiceResult{
+		ID:             inv.ID,
+		HostedURL:      inv.HostedInvoiceURL,
+		DueAt:          due,
+		AmountDuePence: inv.AmountDue,
+		Currency:       string(inv.Currency),
+		StripeEmailed:  stripeEmailed,
+	}, nil
+}
+
+// SendInvoiceEmail asks Stripe to (re-)email an existing invoice. Returns an
+// error if Stripe declines (caller may then fall back to its own email).
+func (s *StripeBilling) SendInvoiceEmail(ctx context.Context, invoiceID string) error {
+	params := &stripe.InvoiceSendInvoiceParams{}
+	params.Context = ctx
+	if _, err := invoice.SendInvoice(invoiceID, params); err != nil {
+		return fmt.Errorf("stripe send invoice: %w", err)
+	}
+	return nil
+}
+
+// GetInvoice fetches an existing invoice (used to re-email its payment link).
+func (s *StripeBilling) GetInvoice(ctx context.Context, invoiceID string) (InvoiceResult, error) {
+	params := &stripe.InvoiceParams{}
+	params.Context = ctx
+	inv, err := invoice.Get(invoiceID, params)
+	if err != nil {
+		return InvoiceResult{}, fmt.Errorf("get invoice: %w", err)
+	}
+	due := time.Time{}
+	if inv.DueDate > 0 {
+		due = time.Unix(inv.DueDate, 0).UTC()
+	}
+	return InvoiceResult{
+		ID:             inv.ID,
+		HostedURL:      inv.HostedInvoiceURL,
+		DueAt:          due,
+		AmountDuePence: inv.AmountDue,
+		Currency:       string(inv.Currency),
+	}, nil
 }
 
 // VoidInvoice voids an open invoice in Stripe.
@@ -104,17 +158,6 @@ func (s *StripeBilling) VoidInvoice(ctx context.Context, invoiceID string) error
 	_, err := invoice.VoidInvoice(invoiceID, params)
 	if err != nil {
 		return fmt.Errorf("void invoice: %w", err)
-	}
-	return nil
-}
-
-// ResendInvoice re-sends an existing invoice email.
-func (s *StripeBilling) ResendInvoice(ctx context.Context, invoiceID string) error {
-	params := &stripe.InvoiceSendInvoiceParams{}
-	params.Context = ctx
-	_, err := invoice.SendInvoice(invoiceID, params)
-	if err != nil {
-		return fmt.Errorf("resend invoice: %w", err)
 	}
 	return nil
 }

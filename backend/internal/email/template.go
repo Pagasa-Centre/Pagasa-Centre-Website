@@ -91,6 +91,50 @@ func renderAllocationReleased(p AllocationReleased) (subject, htmlBody string, e
 	return subject, htmlBody, nil
 }
 
+func renderBalanceInvoice(p BalanceInvoice) (subject, htmlBody string, err error) {
+	subject = "Your PC Summer Camp 2026 balance is ready to pay"
+	names := ""
+	for _, n := range p.CamperNames {
+		names += "<li>" + template.HTMLEscapeString(n) + "</li>"
+	}
+	due := ""
+	if p.DueDate != "" {
+		due = fmt.Sprintf(
+			`<p>Please pay by <strong>%s</strong>. If the balance is unpaid by then, the accommodation may be released.</p>`,
+			template.HTMLEscapeString(p.DueDate))
+	}
+	amount := ""
+	if p.AmountLabel != "" {
+		amount = fmt.Sprintf(`<p>Amount due: <strong>%s</strong></p>`, template.HTMLEscapeString(p.AmountLabel))
+	}
+	camperBlock := ""
+	if names != "" {
+		camperBlock = "<p>This covers:</p><ul>" + names + "</ul>"
+	}
+	htmlBody = fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en"><body style="font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; color:#1a1a1a; line-height:1.55; max-width:600px; margin:0 auto; padding:24px;">
+  <h1 style="font-size:22px; margin:0 0 16px;">Your camp balance is ready to pay</h1>
+  <p>Hi %s,</p>
+  <p>Your accommodation for <strong>PC Summer Camp 2026</strong> has been allocated. Please pay your remaining balance to confirm your place.</p>
+  %s
+  %s
+  <p style="margin:24px 0;">
+    <a href="%s" style="display:inline-block; background:#3ea463; color:#fff; padding:12px 22px; text-decoration:none; font-weight:bold; border-radius:8px;">Pay your balance</a>
+  </p>
+  <p style="font-size:13px; color:#666;">Or copy this link into your browser:<br>%s</p>
+  %s
+  <p style="margin-top:32px;">God bless,<br>The PC Summer Camp 2026 team</p>
+</body></html>`,
+		template.HTMLEscapeString(p.ToName),
+		amount,
+		due,
+		template.HTMLEscapeString(p.PayURL),
+		template.HTMLEscapeString(p.PayURL),
+		camperBlock,
+	)
+	return subject, htmlBody, nil
+}
+
 func renderWhiteTeamNotification(p WhiteTeamNotification) (subject, htmlBody string, err error) {
 	subject = p.Subject
 	body := template.HTMLEscapeString(p.Body)

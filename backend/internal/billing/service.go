@@ -215,13 +215,27 @@ func (s *Service) SendInvoice(ctx context.Context, groupID string) error {
 		}
 	}
 
-	invID, dueAt, err := s.stripe.CreateAndSendInvoice(
+	res, err := s.stripe.CreateInvoice(
 		ctx, customerID, g.ID, priceIDs, int64(s.cfg.InvoiceDueDays))
 	if err != nil {
 		return httpx.Internal(err.Error())
 	}
-	if err := s.repo.SetInvoiceDetails(ctx, groupID, invID, dueAt); err != nil {
+	if err := s.repo.SetInvoiceDetails(ctx, groupID, res.ID, res.DueAt); err != nil {
 		return httpx.Internal(err.Error())
+	}
+	// Stripe is the primary sender. Only if Stripe couldn't email the invoice
+	// (e.g. restricted account) do we fall back to emailing the link ourselves.
+	if !res.StripeEmailed {
+		if err := s.mailer.SendBalanceInvoice(ctx, email.BalanceInvoice{
+			ToEmail:     g.ContactEmail,
+			ToName:      g.ContactFirstName,
+			PayURL:      res.HostedURL,
+			DueDate:     res.DueAt.Format("2 Jan 2006"),
+			AmountLabel: formatAmountLabel(res.AmountDuePence, res.Currency),
+			CamperNames: fullWeekCamperNames(campers),
+		}); err != nil {
+			log.Printf("billing: fallback balance invoice email to %s: %v", g.ContactEmail, err)
+		}
 	}
 	return nil
 }
@@ -294,7 +308,32 @@ func (s *Service) ResendInvoice(ctx context.Context, groupID string) error {
 	if g.BillingStatus != registration.BillingInvoiced {
 		return httpx.BadRequest("invoice is not open", nil)
 	}
-	if err := s.stripe.ResendInvoice(ctx, *g.StripeInvoiceID); err != nil {
+	// Primary: ask Stripe to re-email. If it succeeds, we're done.
+	if err := s.stripe.SendInvoiceEmail(ctx, *g.StripeInvoiceID); err == nil {
+		return nil
+	} else {
+		log.Printf("billing: Stripe re-send failed for group %s; falling back to Resend: %v", groupID, err)
+	}
+	// Fallback: email the hosted payment link ourselves.
+	res, err := s.stripe.GetInvoice(ctx, *g.StripeInvoiceID)
+	if err != nil {
+		return httpx.Internal(err.Error())
+	}
+	due := ""
+	if g.InvoiceDueAt != nil {
+		due = g.InvoiceDueAt.Format("2 Jan 2006")
+	} else if !res.DueAt.IsZero() {
+		due = res.DueAt.Format("2 Jan 2006")
+	}
+	campers, _ := s.repo.CampersForGroup(ctx, groupID)
+	if err := s.mailer.SendBalanceInvoice(ctx, email.BalanceInvoice{
+		ToEmail:     g.ContactEmail,
+		ToName:      g.ContactFirstName,
+		PayURL:      res.HostedURL,
+		DueDate:     due,
+		AmountLabel: formatAmountLabel(res.AmountDuePence, res.Currency),
+		CamperNames: fullWeekCamperNames(campers),
+	}); err != nil {
 		return httpx.Internal(err.Error())
 	}
 	return nil
@@ -369,4 +408,25 @@ func camperNames(campers []registration.Camper) []string {
 		names = append(names, c.FirstName+" "+c.LastName)
 	}
 	return names
+}
+
+func fullWeekCamperNames(campers []registration.Camper) []string {
+	var names []string
+	for _, c := range campers {
+		if c.AttendanceType == registration.AttendanceFullWeek {
+			names = append(names, c.FirstName+" "+c.LastName)
+		}
+	}
+	return names
+}
+
+func formatAmountLabel(pence int64, currency string) string {
+	if pence <= 0 {
+		return ""
+	}
+	symbol := "£"
+	if cur := strings.ToUpper(currency); cur != "GBP" && cur != "" {
+		symbol = cur + " "
+	}
+	return fmt.Sprintf("%s%d.%02d", symbol, pence/100, pence%100)
 }

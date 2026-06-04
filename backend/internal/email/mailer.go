@@ -15,6 +15,19 @@ type Mailer interface {
 	SendDepositConfirmation(ctx context.Context, p DepositConfirmation) error
 	SendAllocationReleased(ctx context.Context, p AllocationReleased) error
 	SendWhiteTeamNotification(ctx context.Context, p WhiteTeamNotification) error
+	SendBalanceInvoice(ctx context.Context, p BalanceInvoice) error
+}
+
+// BalanceInvoice emails the family their Stripe balance-invoice payment link.
+// We email the link ourselves (rather than relying on Stripe to send it) so it
+// works regardless of the Stripe account's invoice-email capability.
+type BalanceInvoice struct {
+	ToEmail     string
+	ToName      string
+	PayURL      string   // Stripe hosted invoice URL
+	DueDate     string   // pre-formatted, e.g. "19 Jun 2026"
+	AmountLabel string   // optional, e.g. "£250.00" (blank if unknown)
+	CamperNames []string
 }
 
 // AllocationReleased notifies a family their placement was released (unpaid).

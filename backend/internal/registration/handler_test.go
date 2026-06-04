@@ -57,6 +57,10 @@ func (m *recordingMailer) SendWhiteTeamNotification(context.Context, email.White
 	return nil
 }
 
+func (m *recordingMailer) SendBalanceInvoice(context.Context, email.BalanceInvoice) error {
+	return nil
+}
+
 func (m *recordingMailer) SendDepositConfirmation(_ context.Context, p email.DepositConfirmation) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

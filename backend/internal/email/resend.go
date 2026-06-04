@@ -59,6 +59,14 @@ func (r *ResendMailer) SendWhiteTeamNotification(ctx context.Context, p WhiteTea
 	return r.send(ctx, p.ToEmail, subject, body)
 }
 
+func (r *ResendMailer) SendBalanceInvoice(ctx context.Context, p BalanceInvoice) error {
+	subject, body, err := renderBalanceInvoice(p)
+	if err != nil {
+		return err
+	}
+	return r.send(ctx, p.ToEmail, subject, body)
+}
+
 type resendRequest struct {
 	From    string   `json:"from"`
 	To      []string `json:"to"`
