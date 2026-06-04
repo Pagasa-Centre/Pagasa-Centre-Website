@@ -7,7 +7,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	stripe "github.com/stripe/stripe-go/v79"
+	stripe "github.com/stripe/stripe-go/v85"
 
 	"pagasacentre/backend/internal/billing"
 	"pagasacentre/backend/internal/httpx"

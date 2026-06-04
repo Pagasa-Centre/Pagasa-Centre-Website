@@ -143,11 +143,20 @@ func main() {
 	cronScheduler.Start()
 	defer cronScheduler.Stop()
 
+	// Build/deploy marker. Railway injects RAILWAY_GIT_COMMIT_SHA at build time,
+	// so /health reports exactly which commit is live. This removes all guesswork
+	// about whether a push actually deployed.
+	commit := os.Getenv("RAILWAY_GIT_COMMIT_SHA")
+	if commit == "" {
+		commit = "unknown"
+	}
+	log.Printf("build: running commit %s", commit)
+
 	r := chi.NewRouter()
 	httpx.UseDefaults(r, cfg.AllowedOrigin)
 
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
-		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "commit": commit})
 	})
 
 	r.Route("/api", func(r chi.Router) {

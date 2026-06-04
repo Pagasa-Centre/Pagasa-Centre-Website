@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	stripe "github.com/stripe/stripe-go/v79"
-	checkoutsession "github.com/stripe/stripe-go/v79/checkout/session"
-	"github.com/stripe/stripe-go/v79/webhook"
+	stripe "github.com/stripe/stripe-go/v85"
+	checkoutsession "github.com/stripe/stripe-go/v85/checkout/session"
+	"github.com/stripe/stripe-go/v85/webhook"
 
 	"pagasacentre/backend/internal/registration"
 )

@@ -6,10 +6,10 @@ import (
 	"log"
 	"time"
 
-	"github.com/stripe/stripe-go/v79"
-	"github.com/stripe/stripe-go/v79/customer"
-	"github.com/stripe/stripe-go/v79/invoice"
-	"github.com/stripe/stripe-go/v79/invoiceitem"
+	"github.com/stripe/stripe-go/v85"
+	"github.com/stripe/stripe-go/v85/customer"
+	"github.com/stripe/stripe-go/v85/invoice"
+	"github.com/stripe/stripe-go/v85/invoiceitem"
 )
 
 // StripeBilling wraps Stripe Invoice operations.
@@ -87,8 +87,10 @@ func (s *StripeBilling) CreateInvoice(
 		}
 		itemParams := &stripe.InvoiceItemParams{
 			Customer: stripe.String(customerID),
-			Price:    stripe.String(priceID),
-			Invoice:  stripe.String(inv.ID),
+			Pricing: &stripe.InvoiceItemPricingParams{
+				Price: stripe.String(priceID),
+			},
+			Invoice: stripe.String(inv.ID),
 		}
 		itemParams.Context = ctx
 		if _, err := invoiceitem.New(itemParams); err != nil {
