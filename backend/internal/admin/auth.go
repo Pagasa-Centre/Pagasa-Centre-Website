@@ -87,6 +87,19 @@ func verifySession(secret []byte, token string) bool {
 	return subtle.ConstantTimeCompare([]byte(expected), []byte(token)) == 1
 }
 
+// sameSiteMode picks the cookie SameSite policy. In production the admin
+// dashboard (frontend domain) and the API (backend domain) are different
+// Railway subdomains, so the session cookie is cross-site: it must be
+// SameSite=None (which requires Secure=true) or the browser silently drops
+// it on cross-origin fetches and every post-login request looks logged-out.
+// Locally everything is same-origin on localhost, so Lax is fine.
+func sameSiteMode(cfg AuthConfig) http.SameSite {
+	if cfg.SecureCookie {
+		return http.SameSiteNoneMode
+	}
+	return http.SameSiteLaxMode
+}
+
 func setSessionCookie(w http.ResponseWriter, cfg AuthConfig) {
 	exp := time.Now().Add(sessionDuration).Unix()
 	token := signSession(cfg.SessionSecret, exp)
@@ -96,7 +109,7 @@ func setSessionCookie(w http.ResponseWriter, cfg AuthConfig) {
 		Path:     "/admin",
 		HttpOnly: true,
 		Secure:   cfg.SecureCookie,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: sameSiteMode(cfg),
 		MaxAge:   int(sessionDuration.Seconds()),
 	})
 }
@@ -108,7 +121,7 @@ func clearSessionCookie(w http.ResponseWriter, cfg AuthConfig) {
 		Path:     "/admin",
 		HttpOnly: true,
 		Secure:   cfg.SecureCookie,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: sameSiteMode(cfg),
 		MaxAge:   -1,
 	})
 }
