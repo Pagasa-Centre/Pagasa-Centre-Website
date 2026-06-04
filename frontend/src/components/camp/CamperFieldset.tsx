@@ -3,6 +3,7 @@
 import type { Accommodation, DayCode, ShirtSize } from "@/lib/api";
 import {
   ACCOMMODATION_CHILD_CODE,
+  ACCOMMODATION_TENT_CODE,
   type CamperState,
   DAY_PASS_DAYS,
   isMinor,
@@ -333,10 +334,20 @@ export default function CamperFieldset({
           </div>
           <div className="flex flex-col gap-2 pt-2">
             <p className="text-sm text-neutral-700 leading-relaxed">
-              Pick a <strong>1st</strong> and <strong>2nd</strong> accommodation
-              preference. The White Team will place every camper after
-              registrations close — priority goes to women, elderly, and
-              families, so we can&apos;t guarantee your first choice.
+              {value.accommodation_first_choice === ACCOMMODATION_TENT_CODE ? (
+                <>
+                  You&apos;ve chosen a <strong>tent</strong> — no 2nd choice
+                  needed, as there&apos;s always room to pitch your own.
+                </>
+              ) : (
+                <>
+                  Pick a <strong>1st</strong> and <strong>2nd</strong>{" "}
+                  accommodation preference. The White Team will place every
+                  camper after registrations close — priority goes to women,
+                  elderly, and families, so we can&apos;t guarantee your first
+                  choice.
+                </>
+              )}
             </p>
           </div>
           <AccommodationPicker
@@ -350,9 +361,12 @@ export default function CamperFieldset({
               const patch: Partial<CamperState> = {
                 accommodation_first_choice: code,
               };
-              if (code === ACCOMMODATION_CHILD_CODE) {
-                // Child-with-parent has no meaningful 2nd choice; wipe any
-                // stale value so we don't accidentally submit it.
+              if (
+                code === ACCOMMODATION_CHILD_CODE ||
+                code === ACCOMMODATION_TENT_CODE
+              ) {
+                // Child-with-parent and tent have no meaningful 2nd choice;
+                // wipe any stale value so we don't accidentally submit it.
                 patch.accommodation_second_choice = "";
               } else if (value.accommodation_second_choice === code) {
                 // Picking the same code as 2nd; clear 2nd to force a re-pick.
@@ -361,7 +375,8 @@ export default function CamperFieldset({
               onChange(patch);
             }}
           />
-          {value.accommodation_first_choice !== ACCOMMODATION_CHILD_CODE && (
+          {value.accommodation_first_choice !== ACCOMMODATION_CHILD_CODE &&
+            value.accommodation_first_choice !== ACCOMMODATION_TENT_CODE && (
             <AccommodationPicker
               name={`${prefix}.accommodation_second_choice`}
               label="2nd choice accommodation"

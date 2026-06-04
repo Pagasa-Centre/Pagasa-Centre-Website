@@ -88,6 +88,12 @@ const maxRoommateRequestLen = 500
 // 'child' row seeded in migration 0001.
 const AccommodationChild = "child"
 
+// AccommodationTent is the code for "Tent (bring your own)". Like the
+// child-with-parent option, picking a tent as the 1st choice makes a 2nd
+// choice meaningless: tents have no hard cap, so there's no realistic chance
+// of being bumped to a fallback tier. Kept in sync with the 'tent' row.
+const AccommodationTent = "tent"
+
 // MaxChildAccommodationAge caps the child-with-parent accommodation option.
 // Anyone older sleeps in their own bed in a regular tier (lodge/cabin/etc.).
 // Mirrors frontend MAX_CHILD_ACCOMMODATION_AGE.
@@ -110,9 +116,9 @@ func validateFullWeek(prefix string, a AttendanceDTO, age int, fields map[string
 		fields[prefix+".accommodation_second_choice"] = fmt.Sprintf(
 			"child accommodation is only available for campers aged %d or under", MaxChildAccommodationAge)
 	}
-	// 2nd choice is required for everything EXCEPT the child-with-parent
-	// option, which by definition has no meaningful fallback.
-	if first != AccommodationChild && second == "" {
+	// 2nd choice is required for everything EXCEPT the child-with-parent and
+	// tent options, which by definition have no meaningful fallback.
+	if first != AccommodationChild && first != AccommodationTent && second == "" {
 		fields[prefix+".accommodation_second_choice"] = "is required for full week attendance"
 	}
 	if first != "" && second != "" && first == second {

@@ -16,6 +16,12 @@ export const MIN_DEPOSIT_AGE = 3;
 // Mirrors backend AccommodationChild.
 export const ACCOMMODATION_CHILD_CODE = "child";
 
+// Code for "Tent (bring your own)". When chosen as the 1st preference the
+// 2nd-choice picker is hidden/optional: tents have no hard cap, so there's no
+// realistic chance of being bumped to a fallback tier. Mirrors backend
+// AccommodationTent.
+export const ACCOMMODATION_TENT_CODE = "tent";
+
 // Oldest age that can pick the child-with-parent accommodation. Anyone older
 // has to pick a regular tier (lodge/cabin/etc.). Mirrors backend
 // MaxChildAccommodationAge.

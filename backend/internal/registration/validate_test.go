@@ -105,6 +105,15 @@ func TestValidate_FullWeekChildAccommodationDoesNotRequireSecondChoice(t *testin
 	}
 }
 
+func TestValidate_FullWeekTentDoesNotRequireSecondChoice(t *testing.T) {
+	req := validRequest()
+	req.Campers[0].Attendance.AccommodationFirstChoice = AccommodationTent
+	req.Campers[0].Attendance.AccommodationSecondChoice = ""
+	if err := Validate(req); err != nil {
+		t.Fatalf("expected nil error when tent + empty 2nd choice, got %v", err)
+	}
+}
+
 func TestValidate_FullWeekChildAccommodationRejectedOverAgeLimit(t *testing.T) {
 	req := validRequest()
 	req.Campers[0].Age = MaxChildAccommodationAge + 1
