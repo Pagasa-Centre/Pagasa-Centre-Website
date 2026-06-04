@@ -41,49 +41,49 @@ const (
 
 // Group is the persisted form of a registration_groups row.
 type Group struct {
-	ID                    string
-	ContactFirstName      string
-	ContactLastName       string
-	ContactEmail          string
-	ContactPhone          string
-	PaymentStatus         string
-	StripeSessionID       *string
-	StripePaymentIntentID *string
-	TotalAmountPence      int
-	Currency              string
-	CreatedAt             time.Time
-	PaidAt                *time.Time
-	StripeCustomerID      *string
-	StripeInvoiceID       *string
-	BillingStatus         string
-	InvoiceDueAt          *time.Time
-	BalancePaidAt         *time.Time
+	ID                    string     `json:"id"`
+	ContactFirstName      string     `json:"contact_first_name"`
+	ContactLastName       string     `json:"contact_last_name"`
+	ContactEmail          string     `json:"contact_email"`
+	ContactPhone          string     `json:"contact_phone"`
+	PaymentStatus         string     `json:"payment_status"`
+	StripeSessionID       *string    `json:"stripe_session_id,omitempty"`
+	StripePaymentIntentID *string    `json:"stripe_payment_intent_id,omitempty"`
+	TotalAmountPence      int        `json:"total_amount_pence"`
+	Currency              string     `json:"currency"`
+	CreatedAt             time.Time  `json:"created_at"`
+	PaidAt                *time.Time `json:"paid_at,omitempty"`
+	StripeCustomerID      *string    `json:"stripe_customer_id,omitempty"`
+	StripeInvoiceID       *string    `json:"stripe_invoice_id,omitempty"`
+	BillingStatus         string     `json:"billing_status"`
+	InvoiceDueAt          *time.Time `json:"invoice_due_at,omitempty"`
+	BalancePaidAt         *time.Time `json:"balance_paid_at,omitempty"`
 }
 
 // Camper is the persisted form of a registrations row.
 type Camper struct {
-	ID                        string
-	GroupID                   string
-	IsMainContact             bool
-	FirstName                 string
-	LastName                  string
-	Gender                    string
-	Age                       int
-	CellLeaderName            string
-	IsCellLeader              bool
-	AttendanceType            string
-	ShirtSize                 *string
-	DietaryRequirements       *string
-	NeedsCoach                *bool
-	AccommodationFirstChoice  *string
-	AccommodationSecondChoice *string
-	RoommateRequests          *string
-	DayPassDays               []string
-	DayPassTshirtOption       *string
-	DayPassNeedsCatering       *bool
-	AllocatedAccommodationCode *string
-	BilledStripePriceID        *string
-	CreatedAt                  time.Time
+	ID                         string     `json:"id"`
+	GroupID                    string     `json:"group_id"`
+	IsMainContact              bool       `json:"is_main_contact"`
+	FirstName                  string     `json:"first_name"`
+	LastName                   string     `json:"last_name"`
+	Gender                     string     `json:"gender"`
+	Age                        int        `json:"age"`
+	CellLeaderName             string     `json:"cell_leader_name"`
+	IsCellLeader               bool       `json:"is_cell_leader"`
+	AttendanceType             string     `json:"attendance_type"`
+	ShirtSize                  *string    `json:"shirt_size,omitempty"`
+	DietaryRequirements        *string    `json:"dietary_requirements,omitempty"`
+	NeedsCoach                 *bool      `json:"needs_coach,omitempty"`
+	AccommodationFirstChoice   *string    `json:"accommodation_first_choice,omitempty"`
+	AccommodationSecondChoice  *string    `json:"accommodation_second_choice,omitempty"`
+	RoommateRequests           *string    `json:"roommate_requests,omitempty"`
+	DayPassDays                []string   `json:"day_pass_days,omitempty"`
+	DayPassTshirtOption        *string    `json:"day_pass_tshirt_option,omitempty"`
+	DayPassNeedsCatering       *bool      `json:"day_pass_needs_catering,omitempty"`
+	AllocatedAccommodationCode *string    `json:"allocated_accommodation_code,omitempty"`
+	BilledStripePriceID        *string    `json:"billed_stripe_price_id,omitempty"`
+	CreatedAt                  time.Time  `json:"created_at"`
 }
 
 // AccommodationType mirrors accommodation_types for billing lookups.
