@@ -55,6 +55,7 @@ async function adminFetch<T>(
 export type AdminAccommodation = {
   code: string;
   display_name: string;
+  capacity?: number | null;
   stripe_price_id?: string | null;
 };
 
@@ -66,6 +67,7 @@ export type AdminCamper = {
   attendance_type: string;
   age: number;
   accommodation_first_choice?: string | null;
+  accommodation_second_choice?: string | null;
   allocated_accommodation_code?: string | null;
   billed_stripe_price_id?: string | null;
 };
