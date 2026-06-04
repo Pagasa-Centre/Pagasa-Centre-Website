@@ -59,30 +59,18 @@ func (s *StripeBilling) CreateInvoice(
 	priceIDs []string,
 	daysUntilDue int64,
 ) (InvoiceResult, error) {
-	for _, priceID := range priceIDs {
-		if priceID == "" {
-			continue
-		}
-		itemParams := &stripe.InvoiceItemParams{
-			Customer: stripe.String(customerID),
-			Price:    stripe.String(priceID),
-		}
-		itemParams.Context = ctx
-		if _, err := invoiceitem.New(itemParams); err != nil {
-			return InvoiceResult{}, fmt.Errorf("create invoice item for price %s: %w", priceID, err)
-		}
-	}
-
+	// Create the draft invoice FIRST, then attach each line item directly to it
+	// by invoice id. This is deliberately NOT the "create pending items, then
+	// create invoice" pattern: Stripe defaults pending_invoice_items_behavior
+	// to "exclude", which silently produced empty £0 invoices. Setting it to
+	// "include" would instead sweep in any stale pending items left on the
+	// customer from earlier failed attempts. Attaching by invoice id bills
+	// exactly the items we intend — nothing more, nothing less.
 	invParams := &stripe.InvoiceParams{
 		Customer:         stripe.String(customerID),
 		CollectionMethod: stripe.String(string(stripe.InvoiceCollectionMethodSendInvoice)),
 		DaysUntilDue:     stripe.Int64(daysUntilDue),
 		AutoAdvance:      stripe.Bool(true),
-		// Stripe defaults pending_invoice_items_behavior to "exclude", which
-		// would create an EMPTY (£0) invoice even though we just created the
-		// line items above. We must explicitly pull them in, or the invoice is
-		// £0, auto-finalizes, and is instantly marked paid.
-		PendingInvoiceItemsBehavior: stripe.String("include"),
 		Metadata: map[string]string{
 			"group_id": groupID,
 		},
@@ -91,6 +79,21 @@ func (s *StripeBilling) CreateInvoice(
 	inv, err := invoice.New(invParams)
 	if err != nil {
 		return InvoiceResult{}, fmt.Errorf("create invoice: %w", err)
+	}
+
+	for _, priceID := range priceIDs {
+		if priceID == "" {
+			continue
+		}
+		itemParams := &stripe.InvoiceItemParams{
+			Customer: stripe.String(customerID),
+			Price:    stripe.String(priceID),
+			Invoice:  stripe.String(inv.ID),
+		}
+		itemParams.Context = ctx
+		if _, err := invoiceitem.New(itemParams); err != nil {
+			return InvoiceResult{}, fmt.Errorf("create invoice item for price %s: %w", priceID, err)
+		}
 	}
 
 	finalParams := &stripe.InvoiceFinalizeInvoiceParams{}
