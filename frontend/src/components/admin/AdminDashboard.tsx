@@ -857,12 +857,11 @@ function GroupCard({
                     <div className="min-w-[160px] flex-1">
                       <p className="font-medium text-neutral-800">
                         {c.first_name} {c.last_name}
-                        <span className="text-xs text-neutral-400 font-normal">
-                          {" "}
-                          · age {c.age}
+                        <span className="ml-2 text-xs font-semibold text-neutral-600 bg-neutral-100 px-2 py-0.5 rounded-full">
+                          Age {c.age}
                         </span>
                       </p>
-                      <p className="text-xs text-neutral-500 mt-0.5">
+                      <p className="text-xs text-neutral-500 mt-1">
                         <span className="font-semibold">1st:</span>{" "}
                         {c.accommodation_first_choice
                           ? accName(c.accommodation_first_choice)
@@ -932,8 +931,8 @@ function GroupCard({
                 >
                   <span className="font-medium text-neutral-800">
                     {c.first_name} {c.last_name}{" "}
-                    <span className="text-xs text-neutral-400">
-                      (age {c.age})
+                    <span className="ml-1 text-xs font-semibold text-neutral-600 bg-neutral-100 px-2 py-0.5 rounded-full">
+                      Age {c.age}
                     </span>
                   </span>
                   <span className="text-sm text-neutral-700 font-semibold">
