@@ -930,22 +930,40 @@ function CapacityPanel({
                     const stats = unitUsage[u.code];
                     const uUsed = stats?.used ?? 0;
                     const over = uUsed > u.capacity;
+                    const full = !over && uUsed >= u.capacity;
                     const mixed = (stats?.groupIds.size ?? 0) > 1;
+                    let rowClass = "";
+                    if (over) rowClass = "bg-red-50 border border-red-200";
+                    else if (full) rowClass = "bg-green-50 border border-green-200";
                     return (
                       <li
                         key={u.code}
-                        className="flex flex-wrap items-center justify-between gap-1 text-[11px]"
+                        className={`flex flex-wrap items-center justify-between gap-1 text-[11px] rounded px-1.5 py-1 ${rowClass}`}
                       >
-                        <span className="text-neutral-600">
+                        <span
+                          className={
+                            over
+                              ? "text-red-800 font-semibold"
+                              : full
+                                ? "text-green-800 font-semibold"
+                                : "text-neutral-600"
+                          }
+                        >
                           {u.display_name}{" "}
-                          <span className="text-neutral-400">
+                          <span
+                            className={over || full ? "opacity-70" : "text-neutral-400"}
+                          >
                             (sleeps {u.capacity})
                           </span>
                         </span>
                         <span className="flex items-center gap-1">
                           <span
                             className={`font-semibold ${
-                              over ? "text-red-700" : "text-neutral-700"
+                              over
+                                ? "text-red-700"
+                                : full
+                                  ? "text-green-700"
+                                  : "text-neutral-700"
                             }`}
                           >
                             {uUsed}/{u.capacity}
@@ -953,6 +971,11 @@ function CapacityPanel({
                           {over && (
                             <span className="font-bold text-red-700 bg-red-100 px-1.5 py-0.5 rounded">
                               Over capacity
+                            </span>
+                          )}
+                          {full && (
+                            <span className="font-bold text-green-700 bg-green-100 px-1.5 py-0.5 rounded">
+                              Full
                             </span>
                           )}
                           {mixed && (
