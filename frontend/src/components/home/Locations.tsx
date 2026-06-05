@@ -1,5 +1,6 @@
 import Image from "next/image";
 import { locations } from "@/lib/locations";
+import { googleMapsUrl } from "@/lib/maps";
 
 function MapPinIcon() {
   return (
@@ -90,7 +91,13 @@ export default function Locations() {
                 <div className="space-y-2 text-sm flex-1">
                   <div className="flex gap-2">
                     <MapPinIcon />
-                    <p className="text-neutral-600 leading-relaxed">
+                    <a
+                      href={googleMapsUrl(loc.venue, loc.address)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`Open ${loc.name} in Google Maps`}
+                      className="text-neutral-600 leading-relaxed hover:text-primary hover:underline transition-colors"
+                    >
                       {loc.venue ? (
                         <>
                           <span className="font-medium text-neutral-700">
@@ -103,7 +110,7 @@ export default function Locations() {
                       ) : (
                         loc.address
                       )}
-                    </p>
+                    </a>
                   </div>
                   <div className="flex gap-2">
                     <ClockIcon />

@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { events } from "@/lib/events";
+import { googleMapsUrl } from "@/lib/maps";
 import type { Event } from "@/types";
 
 function CalendarIcon() {
@@ -102,10 +103,16 @@ function EventCard({ event }: { event: Event }) {
           </p>
         )}
         {event.location && (
-          <p className="flex items-start gap-2 text-neutral-500 text-sm leading-relaxed mb-4">
+          <a
+            href={googleMapsUrl(event.location)}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Open ${event.location} in Google Maps`}
+            className="flex items-start gap-2 text-neutral-500 text-sm leading-relaxed mb-4 hover:text-primary hover:underline transition-colors"
+          >
             <MapPinIcon />
             <span>{event.location}</span>
-          </p>
+          </a>
         )}
         <div className="flex-1" />
         {event.cta && (

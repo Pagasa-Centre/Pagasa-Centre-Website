@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
+import { googleMapsUrl } from "@/lib/maps";
 
 const menuLinks = [
   { label: "Home", href: "/" },
@@ -103,7 +104,14 @@ export default function Footer() {
             <h4 className="text-white font-bold text-base mb-6">Locations</h4>
             <div className="flex flex-col gap-5 max-h-[520px] overflow-y-auto pr-1 scrollbar-thin">
               {locations.map((loc) => (
-                <div key={loc.city} className="flex gap-4 items-start">
+                <a
+                  key={loc.city}
+                  href={googleMapsUrl(`${loc.city}, ${loc.country}`, loc.address)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={`Open ${loc.city}, ${loc.country} in Google Maps`}
+                  className="flex gap-4 items-start group/loc"
+                >
                   {/* Thumbnail */}
                   <div className="relative w-24 h-16 shrink-0 overflow-hidden bg-neutral-700">
                     {loc.image ? (
@@ -124,14 +132,14 @@ export default function Footer() {
                   </div>
                   {/* Text */}
                   <div>
-                    <p className="font-bold text-white text-sm leading-snug">
+                    <p className="font-bold text-white text-sm leading-snug group-hover/loc:text-primary transition-colors">
                       {loc.city}, {loc.country}
                     </p>
-                    <p className="text-white/55 text-xs mt-1 leading-relaxed">
+                    <p className="text-white/55 text-xs mt-1 leading-relaxed group-hover/loc:text-white/80 transition-colors">
                       {loc.address}
                     </p>
                   </div>
-                </div>
+                </a>
               ))}
             </div>
           </div>
