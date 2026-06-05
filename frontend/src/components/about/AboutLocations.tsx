@@ -80,6 +80,25 @@ function MailIcon() {
   );
 }
 
+function ExternalLinkIcon() {
+  return (
+    <svg
+      className="inline-block w-3 h-3 ml-1 align-baseline opacity-60"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+      />
+    </svg>
+  );
+}
+
 export default function AboutLocations() {
   return (
     <section className="py-20 lg:py-28 bg-white" id="more-locations">
@@ -142,6 +161,7 @@ export default function AboutLocations() {
                       )}
                       <p className="text-neutral-600 group-hover/addr:underline">
                         {loc.address}
+                        <ExternalLinkIcon />
                       </p>
                     </a>
                   </div>

@@ -64,6 +64,25 @@ function MapPinIcon() {
   );
 }
 
+function ExternalLinkIcon() {
+  return (
+    <svg
+      className="inline-block w-3 h-3 ml-0.5 align-baseline opacity-60 shrink-0"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+      />
+    </svg>
+  );
+}
+
 function EventCard({ event }: { event: Event }) {
   return (
     <article className="group flex flex-col bg-white rounded-xl shadow-sm border border-neutral-300 overflow-hidden hover:shadow-md hover:border-primary/30 transition-all">
@@ -111,7 +130,10 @@ function EventCard({ event }: { event: Event }) {
             className="flex items-start gap-2 text-neutral-500 text-sm leading-relaxed mb-4 hover:text-primary hover:underline transition-colors"
           >
             <MapPinIcon />
-            <span>{event.location}</span>
+            <span>
+              {event.location}
+              <ExternalLinkIcon />
+            </span>
           </a>
         )}
         <div className="flex-1" />

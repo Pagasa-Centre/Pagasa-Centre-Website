@@ -44,6 +44,25 @@ function ClockIcon() {
   );
 }
 
+function ExternalLinkIcon() {
+  return (
+    <svg
+      className="inline-block w-3 h-3 ml-1 align-baseline opacity-60"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+      />
+    </svg>
+  );
+}
+
 export default function Locations() {
   return (
     <section className="py-20 lg:py-24 bg-white" id="locations">
@@ -105,10 +124,14 @@ export default function Locations() {
                           </span>
                           <span className="block text-neutral-500">
                             {loc.address}
+                            <ExternalLinkIcon />
                           </span>
                         </>
                       ) : (
-                        loc.address
+                        <>
+                          {loc.address}
+                          <ExternalLinkIcon />
+                        </>
                       )}
                     </a>
                   </div>

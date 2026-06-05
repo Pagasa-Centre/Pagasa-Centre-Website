@@ -134,6 +134,20 @@ export default function Footer() {
                   <div>
                     <p className="font-bold text-white text-sm leading-snug group-hover/loc:text-primary transition-colors">
                       {loc.city}, {loc.country}
+                      <svg
+                        className="inline-block w-3 h-3 ml-1 align-baseline opacity-50"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                        />
+                      </svg>
                     </p>
                     <p className="text-white/55 text-xs mt-1 leading-relaxed group-hover/loc:text-white/80 transition-colors">
                       {loc.address}
