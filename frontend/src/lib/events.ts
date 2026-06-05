@@ -6,17 +6,6 @@ import type { Event } from "@/types";
 // /event-pc-christmas.jpg.
 export const events: Event[] = [
   {
-    id: "g12-uk-conference",
-    title: "G12 UK Conference: Go and Make Disciples of All Nations",
-    date: "May 29–30th",
-    time: "May 29–30th",
-    description:
-      "A powerful opportunity for people across the UK to gather for worship, teaching, inspiring talks, interviews, and more — as we see lives transformed by the love and power of Jesus Christ.",
-    location: "Braywick Leisure Centre, Braywick Rd, Maidenhead, SL6 1BN",
-    cta: { label: "More info", href: "#" },
-    imageUrl: "/event-g12-uk.png",
-  },
-  {
     id: "pc-19th-anniversary",
     title: "PC 19yrs Anniversary",
     date: "July 19th",
