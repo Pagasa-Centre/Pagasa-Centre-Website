@@ -4,6 +4,8 @@ package billing
 type AllocateCamper struct {
 	CamperID                   string `json:"camper_id"`
 	AllocatedAccommodationCode string `json:"allocated_accommodation_code"`
+	// Optional physical unit within the tier (e.g. caravan_5).
+	AllocatedUnitCode string `json:"allocated_unit_code,omitempty"`
 	// Optional override; if empty, resolved from tier + age.
 	BilledStripePriceID string `json:"billed_stripe_price_id,omitempty"`
 }

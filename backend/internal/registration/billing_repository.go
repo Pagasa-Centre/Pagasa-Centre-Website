@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -84,18 +85,24 @@ func (r *Repository) FindGroupByStripeInvoiceID(ctx context.Context, invoiceID s
 type CamperAllocation struct {
 	CamperID                   string
 	AllocatedAccommodationCode string
+	AllocatedUnitCode          string
 	BilledStripePriceID        string
 }
 
 // SetCamperAllocations updates allocation fields for campers in a group.
 func (r *Repository) SetCamperAllocations(ctx context.Context, groupID string, allocs []CamperAllocation) error {
 	for _, a := range allocs {
+		var unitCode any
+		if strings.TrimSpace(a.AllocatedUnitCode) != "" {
+			unitCode = strings.TrimSpace(a.AllocatedUnitCode)
+		}
 		tag, err := r.pool.Exec(ctx,
 			`UPDATE registrations
 			    SET allocated_accommodation_code = $1,
-			        billed_stripe_price_id = $2
-			  WHERE id = $3 AND group_id = $4`,
-			a.AllocatedAccommodationCode, a.BilledStripePriceID, a.CamperID, groupID)
+			        allocated_unit_code = $2,
+			        billed_stripe_price_id = $3
+			  WHERE id = $4 AND group_id = $5`,
+			a.AllocatedAccommodationCode, unitCode, a.BilledStripePriceID, a.CamperID, groupID)
 		if err != nil {
 			return fmt.Errorf("set allocation for camper %s: %w", a.CamperID, err)
 		}
@@ -111,6 +118,7 @@ func (r *Repository) ClearCamperAllocations(ctx context.Context, groupID string)
 	_, err := r.pool.Exec(ctx,
 		`UPDATE registrations
 		    SET allocated_accommodation_code = NULL,
+		        allocated_unit_code = NULL,
 		        billed_stripe_price_id = NULL
 		  WHERE group_id = $1`, groupID)
 	if err != nil {
@@ -193,6 +201,7 @@ func (r *Repository) ClearInvoiceAndRelease(ctx context.Context, groupID string)
 	_, err = tx.Exec(ctx,
 		`UPDATE registrations
 		    SET allocated_accommodation_code = NULL,
+		        allocated_unit_code = NULL,
 		        billed_stripe_price_id = NULL
 		  WHERE group_id = $1`, groupID)
 	if err != nil {
@@ -265,6 +274,44 @@ func (r *Repository) ListAccommodationTypes(ctx context.Context) ([]Accommodatio
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+// ListAccommodationUnits returns all physical units for admin allocation.
+func (r *Repository) ListAccommodationUnits(ctx context.Context) ([]AccommodationUnit, error) {
+	const q = `SELECT code, accommodation_code, display_name, capacity, sort_order
+		  FROM accommodation_units
+		 ORDER BY accommodation_code, sort_order, code`
+	rows, err := r.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("list accommodation units: %w", err)
+	}
+	defer rows.Close()
+
+	var out []AccommodationUnit
+	for rows.Next() {
+		var u AccommodationUnit
+		if err := rows.Scan(&u.Code, &u.AccommodationCode, &u.DisplayName, &u.Capacity, &u.SortOrder); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// GetAccommodationUnit loads a single unit by code.
+func (r *Repository) GetAccommodationUnit(ctx context.Context, code string) (*AccommodationUnit, error) {
+	const q = `SELECT code, accommodation_code, display_name, capacity, sort_order
+		  FROM accommodation_units WHERE code = $1`
+	var u AccommodationUnit
+	err := r.pool.QueryRow(ctx, q, code).Scan(
+		&u.Code, &u.AccommodationCode, &u.DisplayName, &u.Capacity, &u.SortOrder)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get accommodation unit: %w", err)
+	}
+	return &u, nil
 }
 
 // UpdateAccommodationStripePrice sets stripe_price_id for a tier (admin/setup).

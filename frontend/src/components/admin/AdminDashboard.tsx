@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   adminApi,
   type AdminAccommodation,
+  type AdminAccommodationUnit,
   type AdminGroup,
   type AdminCamper,
   type AllocateCamper,
@@ -17,7 +18,8 @@ import {
   formatPence,
 } from "@/lib/camp";
 
-type AllocState = Record<string, string>; // camperId -> accommodation code
+type AllocState = Record<string, string>; // camperId -> accommodation tier code
+type UnitAllocState = Record<string, string>; // camperId -> unit code
 
 // The single source of truth for "what should the White Team do next" with a
 // group. Everything (tabs, tiles, badges, action buttons) keys off this.
@@ -129,7 +131,9 @@ export default function AdminDashboard() {
   const router = useRouter();
   const [groups, setGroups] = useState<AdminGroup[]>([]);
   const [accommodations, setAccommodations] = useState<AdminAccommodation[]>([]);
+  const [units, setUnits] = useState<AdminAccommodationUnit[]>([]);
   const [alloc, setAlloc] = useState<Record<string, AllocState>>({});
+  const [unitAlloc, setUnitAlloc] = useState<Record<string, UnitAllocState>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -147,18 +151,30 @@ export default function AdminDashboard() {
     [accommodations],
   );
 
+  const unitName = useCallback(
+    (code: string | null | undefined): string => {
+      if (!code) return "";
+      return units.find((u) => u.code === code)?.display_name ?? code;
+    },
+    [units],
+  );
+
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [reg, acc] = await Promise.all([
+      const [reg, acc, unitRes] = await Promise.all([
         adminApi.listRegistrations(),
         adminApi.accommodations(),
+        adminApi.accommodationUnits(),
       ]);
       setGroups(reg.groups);
       setAccommodations(acc.accommodations);
+      setUnits(unitRes.units);
       const next: Record<string, AllocState> = {};
+      const nextUnits: Record<string, UnitAllocState> = {};
       for (const g of reg.groups) {
         const m: AllocState = {};
+        const um: UnitAllocState = {};
         for (const c of g.campers) {
           if (c.allocated_accommodation_code) {
             m[c.id] = c.allocated_accommodation_code;
@@ -168,10 +184,15 @@ export default function AdminDashboard() {
           ) {
             m[c.id] = c.accommodation_first_choice;
           }
+          if (c.allocated_unit_code) {
+            um[c.id] = c.allocated_unit_code;
+          }
         }
         next[g.id] = m;
+        nextUnits[g.id] = um;
       }
       setAlloc(next);
+      setUnitAlloc(nextUnits);
     } catch (err) {
       if (err instanceof AdminApiError && err.status === 401) {
         router.replace("/admin/login");
@@ -196,6 +217,19 @@ export default function AdminDashboard() {
       ...prev,
       [groupId]: { ...prev[groupId], [camperId]: code },
     }));
+    // Changing tier invalidates the previously chosen unit.
+    setUnitAlloc((prev) => {
+      const groupUnits = { ...(prev[groupId] ?? {}) };
+      delete groupUnits[camperId];
+      return { ...prev, [groupId]: groupUnits };
+    });
+  }
+
+  function setCamperUnit(groupId: string, camperId: string, unitCode: string) {
+    setUnitAlloc((prev) => ({
+      ...prev,
+      [groupId]: { ...prev[groupId], [camperId]: unitCode },
+    }));
   }
 
   // Pre-fill the dropdowns with whatever is currently saved for the group.
@@ -209,13 +243,25 @@ export default function AdminDashboard() {
     return m;
   }
 
+  function unitAllocFromSaved(g: AdminGroup): UnitAllocState {
+    const m: UnitAllocState = {};
+    for (const c of g.campers) {
+      if (c.allocated_unit_code) {
+        m[c.id] = c.allocated_unit_code;
+      }
+    }
+    return m;
+  }
+
   function startEdit(g: AdminGroup) {
     setAlloc((prev) => ({ ...prev, [g.id]: allocFromSaved(g) }));
+    setUnitAlloc((prev) => ({ ...prev, [g.id]: unitAllocFromSaved(g) }));
     setEditing((e) => ({ ...e, [g.id]: true }));
   }
 
   function cancelEdit(g: AdminGroup) {
     setAlloc((prev) => ({ ...prev, [g.id]: allocFromSaved(g) }));
+    setUnitAlloc((prev) => ({ ...prev, [g.id]: unitAllocFromSaved(g) }));
     setEditing((e) => {
       const next = { ...e };
       delete next[g.id];
@@ -235,10 +281,15 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      const campers: AllocateCamper[] = fullWeekCampers(g).map((c) => ({
-        camper_id: c.id,
-        allocated_accommodation_code: alloc[g.id]?.[c.id] ?? "",
-      }));
+      const campers: AllocateCamper[] = fullWeekCampers(g).map((c) => {
+        const payload: AllocateCamper = {
+          camper_id: c.id,
+          allocated_accommodation_code: alloc[g.id]?.[c.id] ?? "",
+        };
+        const unit = unitAlloc[g.id]?.[c.id];
+        if (unit) payload.allocated_unit_code = unit;
+        return payload;
+      });
       await adminApi.saveAllocation(g.id, campers);
       setEditing((e) => {
         const next = { ...e };
@@ -467,6 +518,20 @@ export default function AdminDashboard() {
     return used;
   }, [groups]);
 
+  const unitUsage = useMemo(() => {
+    const byUnit: Record<string, { used: number; groupIds: Set<string> }> = {};
+    for (const g of groups) {
+      for (const c of g.campers) {
+        const code = c.allocated_unit_code;
+        if (!code) continue;
+        if (!byUnit[code]) byUnit[code] = { used: 0, groupIds: new Set() };
+        byUnit[code].used++;
+        byUnit[code].groupIds.add(g.id);
+      }
+    }
+    return byUnit;
+  }, [groups]);
+
   const visibleGroups = useMemo(() => {
     const q = search.trim().toLowerCase();
     return groups
@@ -603,7 +668,12 @@ export default function AdminDashboard() {
       </div>
 
       {/* Accommodation availability */}
-      <CapacityPanel accommodations={accommodations} usage={usage} />
+      <CapacityPanel
+        accommodations={accommodations}
+        units={units}
+        usage={usage}
+        unitUsage={unitUsage}
+      />
 
       {notice && (
         <div className="p-3 bg-green-50 border border-green-300 text-green-800 text-sm rounded-lg">
@@ -672,12 +742,16 @@ export default function AdminDashboard() {
               key={g.id}
               g={g}
               accommodations={accommodations}
+              units={units}
               accName={accName}
+              unitName={unitName}
               alloc={alloc[g.id] ?? {}}
+              unitAlloc={unitAlloc[g.id] ?? {}}
               allAllocated={allFullWeekAllocated(g)}
               busy={busy}
               isEditing={!!editing[g.id]}
               onSetAlloc={(camperId, code) => setCamperAlloc(g.id, camperId, code)}
+              onSetUnit={(camperId, code) => setCamperUnit(g.id, camperId, code)}
               onSave={() => saveAllocation(g)}
               onEdit={() => startEdit(g)}
               onCancelEdit={() => cancelEdit(g)}
@@ -717,12 +791,29 @@ export default function AdminDashboard() {
 
 function CapacityPanel({
   accommodations,
+  units,
   usage,
+  unitUsage,
 }: {
   accommodations: AdminAccommodation[];
+  units: AdminAccommodationUnit[];
   usage: Record<string, number>;
+  unitUsage: Record<string, { used: number; groupIds: Set<string> }>;
 }) {
   if (accommodations.length === 0) return null;
+
+  const unitsByTier = useMemo(() => {
+    const m: Record<string, AdminAccommodationUnit[]> = {};
+    for (const u of units) {
+      if (!m[u.accommodation_code]) m[u.accommodation_code] = [];
+      m[u.accommodation_code].push(u);
+    }
+    for (const list of Object.values(m)) {
+      list.sort((a, b) => a.sort_order - b.sort_order || a.code.localeCompare(b.code));
+    }
+    return m;
+  }, [units]);
+
   return (
     <div className="bg-white border border-neutral-300 rounded-xl p-4 sm:p-5">
       <p className="text-sm font-bold text-neutral-800 mb-3">
@@ -736,6 +827,7 @@ function CapacityPanel({
           const left = hasLimit ? Math.max(0, cap - used) : null;
           const full = hasLimit && used >= cap;
           const pct = hasLimit && cap > 0 ? Math.min(100, (used / cap) * 100) : 0;
+          const tierUnits = unitsByTier[a.code] ?? [];
 
           let barColor = "bg-green-500";
           let tag = `${left} space${left === 1 ? "" : "s"} left`;
@@ -788,6 +880,48 @@ function CapacityPanel({
                   />
                 </div>
               )}
+              {tierUnits.length > 0 && (
+                <ul className="mt-3 flex flex-col gap-1.5 border-t border-neutral-100 pt-2">
+                  {tierUnits.map((u) => {
+                    const stats = unitUsage[u.code];
+                    const uUsed = stats?.used ?? 0;
+                    const over = uUsed > u.capacity;
+                    const mixed = (stats?.groupIds.size ?? 0) > 1;
+                    return (
+                      <li
+                        key={u.code}
+                        className="flex flex-wrap items-center justify-between gap-1 text-[11px]"
+                      >
+                        <span className="text-neutral-600">
+                          {u.display_name}{" "}
+                          <span className="text-neutral-400">
+                            ({u.capacity} berth{u.capacity === 1 ? "" : "s"})
+                          </span>
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <span
+                            className={`font-semibold ${
+                              over ? "text-red-700" : "text-neutral-700"
+                            }`}
+                          >
+                            {uUsed}/{u.capacity}
+                          </span>
+                          {over && (
+                            <span className="font-bold text-red-700 bg-red-100 px-1.5 py-0.5 rounded">
+                              Over capacity
+                            </span>
+                          )}
+                          {mixed && (
+                            <span className="font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded">
+                              Mixed groups
+                            </span>
+                          )}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </div>
           );
         })}
@@ -832,15 +966,35 @@ function StatTile({
   );
 }
 
+function tierHasUnits(
+  tierCode: string,
+  units: AdminAccommodationUnit[],
+): boolean {
+  return units.some((u) => u.accommodation_code === tierCode);
+}
+
+function unitsForTier(
+  tierCode: string,
+  units: AdminAccommodationUnit[],
+): AdminAccommodationUnit[] {
+  return units
+    .filter((u) => u.accommodation_code === tierCode)
+    .sort((a, b) => a.sort_order - b.sort_order || a.code.localeCompare(b.code));
+}
+
 function GroupCard({
   g,
   accommodations,
+  units,
   accName,
+  unitName,
   alloc,
+  unitAlloc,
   allAllocated,
   busy,
   isEditing,
   onSetAlloc,
+  onSetUnit,
   onSave,
   onEdit,
   onCancelEdit,
@@ -852,12 +1006,16 @@ function GroupCard({
 }: {
   g: AdminGroup;
   accommodations: AdminAccommodation[];
+  units: AdminAccommodationUnit[];
   accName: (code: string | null | undefined) => string;
+  unitName: (code: string | null | undefined) => string;
   alloc: AllocState;
+  unitAlloc: UnitAllocState;
   allAllocated: boolean;
   busy: string | null;
   isEditing: boolean;
   onSetAlloc: (camperId: string, code: string) => void;
+  onSetUnit: (camperId: string, code: string) => void;
   onSave: () => void;
   onEdit: () => void;
   onCancelEdit: () => void;
@@ -925,7 +1083,10 @@ function GroupCard({
             <div className="flex flex-col divide-y divide-neutral-100 border border-neutral-200 rounded-lg">
               {fw.map((c) => {
                 const selected = alloc[c.id] ?? "";
+                const selectedUnit = unitAlloc[c.id] ?? "";
                 const childAge = c.age <= MAX_CHILD_ACCOMMODATION_AGE;
+                const showUnits = selected && tierHasUnits(selected, units);
+                const tierUnits = showUnits ? unitsForTier(selected, units) : [];
                 return (
                   <div
                     key={c.id}
@@ -953,9 +1114,9 @@ function GroupCard({
                     <select
                       value={selected}
                       onChange={(e) => onSetAlloc(c.id, e.target.value)}
-                      className="px-3 py-2 text-sm bg-white border border-neutral-300 rounded-lg min-w-[200px] focus:outline-none focus:ring-2 focus:ring-primary"
+                      className="px-3 py-2 text-sm bg-white border border-neutral-300 rounded-lg min-w-[180px] focus:outline-none focus:ring-2 focus:ring-primary"
                     >
-                      <option value="">— Choose —</option>
+                      <option value="">— Choose tier —</option>
                       {accommodations.map((a) => {
                         const disabled =
                           a.code === ACCOMMODATION_CHILD_CODE && !childAge;
@@ -971,6 +1132,21 @@ function GroupCard({
                         );
                       })}
                     </select>
+                    {showUnits && (
+                      <select
+                        value={selectedUnit}
+                        onChange={(e) => onSetUnit(c.id, e.target.value)}
+                        className="px-3 py-2 text-sm bg-white border border-neutral-300 rounded-lg min-w-[180px] focus:outline-none focus:ring-2 focus:ring-primary"
+                      >
+                        <option value="">— Unit (optional) —</option>
+                        {tierUnits.map((u) => (
+                          <option key={u.code} value={u.code}>
+                            {u.display_name} ({u.capacity} berth
+                            {u.capacity === 1 ? "" : "s"})
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     {c.age < MIN_DEPOSIT_AGE &&
                       selected === ACCOMMODATION_CHILD_CODE && (
                         <span className="text-xs text-neutral-500">
@@ -1022,8 +1198,13 @@ function GroupCard({
                       Age {c.age}
                     </span>
                   </span>
-                  <span className="text-sm text-neutral-700 font-semibold">
+                  <span className="text-sm text-neutral-700 font-semibold text-right">
                     {accName(c.allocated_accommodation_code)}
+                    {c.allocated_unit_code && (
+                      <span className="block text-xs font-medium text-neutral-500">
+                        {unitName(c.allocated_unit_code)}
+                      </span>
+                    )}
                   </span>
                 </div>
               ))}

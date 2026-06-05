@@ -59,6 +59,14 @@ export type AdminAccommodation = {
   stripe_price_id?: string | null;
 };
 
+export type AdminAccommodationUnit = {
+  code: string;
+  accommodation_code: string;
+  display_name: string;
+  capacity: number;
+  sort_order: number;
+};
+
 export type AdminCamper = {
   id: string;
   group_id: string;
@@ -69,6 +77,7 @@ export type AdminCamper = {
   accommodation_first_choice?: string | null;
   accommodation_second_choice?: string | null;
   allocated_accommodation_code?: string | null;
+  allocated_unit_code?: string | null;
   billed_stripe_price_id?: string | null;
 };
 
@@ -90,6 +99,7 @@ export type AdminGroup = {
 export type AllocateCamper = {
   camper_id: string;
   allocated_accommodation_code: string;
+  allocated_unit_code?: string;
   billed_stripe_price_id?: string;
 };
 
@@ -122,6 +132,11 @@ export const adminApi = {
   accommodations: () =>
     adminFetch<{ accommodations: AdminAccommodation[] }>(
       "/admin/accommodations",
+    ),
+
+  accommodationUnits: () =>
+    adminFetch<{ units: AdminAccommodationUnit[] }>(
+      "/admin/accommodation-units",
     ),
 
   saveAllocation: (groupId: string, campers: AllocateCamper[]) =>

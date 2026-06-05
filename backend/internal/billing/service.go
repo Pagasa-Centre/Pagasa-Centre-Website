@@ -77,9 +77,14 @@ func (s *Service) Allocate(ctx context.Context, groupID string, req AllocateRequ
 				return httpx.BadRequest(err.Error(), nil)
 			}
 		}
+		unitCode := strings.TrimSpace(a.AllocatedUnitCode)
+		if err := s.validateAllocatedUnit(ctx, code, unitCode); err != nil {
+			return err
+		}
 		allocs = append(allocs, registration.CamperAllocation{
 			CamperID:                   a.CamperID,
 			AllocatedAccommodationCode: code,
+			AllocatedUnitCode:          unitCode,
 			BilledStripePriceID:        priceID,
 		})
 	}
@@ -130,6 +135,28 @@ func (s *Service) Unallocate(ctx context.Context, groupID string) error {
 		return httpx.Internal(err.Error())
 	}
 	return s.repo.SetBillingStatus(ctx, groupID, registration.BillingNone)
+}
+
+// validateAllocatedUnit checks referential integrity between tier and unit.
+// Blank unit is allowed (warn-only model). Mismatched or unknown units reject.
+func (s *Service) validateAllocatedUnit(ctx context.Context, tierCode, unitCode string) error {
+	if unitCode == "" {
+		return nil
+	}
+	u, err := s.repo.GetAccommodationUnit(ctx, unitCode)
+	if err != nil {
+		return httpx.Internal(err.Error())
+	}
+	if u == nil {
+		return httpx.BadRequest("unknown unit "+unitCode, nil)
+	}
+	if u.AccommodationCode != tierCode {
+		return httpx.BadRequest(
+			fmt.Sprintf("unit %q belongs to %q, not %q", unitCode, u.AccommodationCode, tierCode),
+			nil,
+		)
+	}
+	return nil
 }
 
 func (s *Service) resolvePriceID(ctx context.Context, accommodationCode string, age int) (string, error) {
@@ -232,7 +259,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID string) error {
 			PayURL:      res.HostedURL,
 			DueDate:     res.DueAt.Format("2 Jan 2006"),
 			AmountLabel: formatAmountLabel(res.AmountDuePence, res.Currency),
-			Items:       balanceInvoiceItems(campers, s.accommodationNames(ctx)),
+			Items:       balanceInvoiceItems(campers, s.accommodationNames(ctx), s.unitNames(ctx)),
 		}); err != nil {
 			log.Printf("billing: fallback balance invoice email to %s: %v", g.ContactEmail, err)
 		}
@@ -332,7 +359,7 @@ func (s *Service) ResendInvoice(ctx context.Context, groupID string) error {
 		PayURL:      res.HostedURL,
 		DueDate:     due,
 		AmountLabel: formatAmountLabel(res.AmountDuePence, res.Currency),
-		Items:       balanceInvoiceItems(campers, s.accommodationNames(ctx)),
+		Items:       balanceInvoiceItems(campers, s.accommodationNames(ctx), s.unitNames(ctx)),
 	}); err != nil {
 		return httpx.Internal(err.Error())
 	}
@@ -371,7 +398,7 @@ func (s *Service) HandleInvoicePaid(ctx context.Context, stripeInvoiceID, groupI
 			ContactEmail: g.ContactEmail,
 			AmountLabel:  formatAmountLabel(amountPaidPence, currency),
 			PaidDate:     time.Now().Format("2 Jan 2006"),
-			Items:        balanceInvoiceItems(campers, s.accommodationNames(ctx)),
+			Items:        balanceInvoiceItems(campers, s.accommodationNames(ctx), s.unitNames(ctx)),
 		})
 	}
 	return nil
@@ -426,9 +453,23 @@ func (s *Service) accommodationNames(ctx context.Context) map[string]string {
 	return m
 }
 
-// balanceInvoiceItems produces one "Name — Accommodation" line per full-week
-// camper, for the invoice email body.
-func balanceInvoiceItems(campers []registration.Camper, accNames map[string]string) []string {
+// unitNames returns a unit code->display_name lookup for invoice line items.
+func (s *Service) unitNames(ctx context.Context) map[string]string {
+	m := map[string]string{}
+	units, err := s.repo.ListAccommodationUnits(ctx)
+	if err != nil {
+		log.Printf("billing: load unit names: %v", err)
+		return m
+	}
+	for _, u := range units {
+		m[u.Code] = u.DisplayName
+	}
+	return m
+}
+
+// balanceInvoiceItems produces one "Name — Accommodation [Unit]" line per
+// full-week camper, for the invoice email body.
+func balanceInvoiceItems(campers []registration.Camper, accNames, unitNames map[string]string) []string {
 	var items []string
 	for _, c := range campers {
 		if c.AttendanceType != registration.AttendanceFullWeek {
@@ -442,7 +483,18 @@ func balanceInvoiceItems(campers []registration.Camper, accNames map[string]stri
 				if display == "" {
 					display = code
 				}
-				items = append(items, name+" — "+display)
+				line := name + " — " + display
+				if c.AllocatedUnitCode != nil {
+					unitCode := strings.TrimSpace(*c.AllocatedUnitCode)
+					if unitCode != "" {
+						unitDisplay := unitNames[unitCode]
+						if unitDisplay == "" {
+							unitDisplay = unitCode
+						}
+						line += " (" + unitDisplay + ")"
+					}
+				}
+				items = append(items, line)
 				continue
 			}
 		}

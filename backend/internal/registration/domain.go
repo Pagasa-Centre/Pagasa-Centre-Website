@@ -82,8 +82,18 @@ type Camper struct {
 	DayPassTshirtOption        *string    `json:"day_pass_tshirt_option,omitempty"`
 	DayPassNeedsCatering       *bool      `json:"day_pass_needs_catering,omitempty"`
 	AllocatedAccommodationCode *string    `json:"allocated_accommodation_code,omitempty"`
+	AllocatedUnitCode          *string    `json:"allocated_unit_code,omitempty"`
 	BilledStripePriceID        *string    `json:"billed_stripe_price_id,omitempty"`
 	CreatedAt                  time.Time  `json:"created_at"`
+}
+
+// AccommodationUnit is one physical unit within a tier (e.g. "Caravan 5").
+type AccommodationUnit struct {
+	Code              string `json:"code"`
+	AccommodationCode string `json:"accommodation_code"`
+	DisplayName       string `json:"display_name"`
+	Capacity          int    `json:"capacity"`
+	SortOrder         int    `json:"sort_order"`
 }
 
 // AccommodationType mirrors accommodation_types for billing lookups.

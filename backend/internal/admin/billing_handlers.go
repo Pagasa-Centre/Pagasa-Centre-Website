@@ -132,6 +132,21 @@ func listAccommodationTypes(repo accommodationLister) http.HandlerFunc {
 	}
 }
 
+func listAccommodationUnits(repo unitsLister) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		units, err := repo.ListAccommodationUnits(r.Context())
+		if err != nil {
+			httpx.WriteError(w, httpx.Internal(err.Error()))
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"units": units})
+	}
+}
+
 type accommodationLister interface {
 	ListAccommodationTypes(context.Context) ([]registration.AccommodationType, error)
+}
+
+type unitsLister interface {
+	ListAccommodationUnits(context.Context) ([]registration.AccommodationUnit, error)
 }
