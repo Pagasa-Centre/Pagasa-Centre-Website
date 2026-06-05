@@ -276,7 +276,51 @@ export default function AdminDashboard() {
     return fw.every((c) => !!state[c.id]);
   }
 
+  // Projected per-unit occupancy if group g's current draft were saved.
+  // Baseline = every OTHER group's saved units (g's own saved units are
+  // replaced by its draft), plus g's draft selections.
+  function overCapacityUnitsAfterSave(
+    g: AdminGroup,
+  ): { name: string; used: number; cap: number }[] {
+    const counts: Record<string, number> = {};
+    for (const other of groups) {
+      if (other.id === g.id) continue;
+      for (const c of other.campers) {
+        const code = c.allocated_unit_code;
+        if (code) counts[code] = (counts[code] ?? 0) + 1;
+      }
+    }
+    const draft = unitAlloc[g.id] ?? {};
+    for (const c of fullWeekCampers(g)) {
+      const code = draft[c.id];
+      if (code) counts[code] = (counts[code] ?? 0) + 1;
+    }
+    const over: { name: string; used: number; cap: number }[] = [];
+    for (const [code, used] of Object.entries(counts)) {
+      const u = units.find((x) => x.code === code);
+      if (u && used > u.capacity) {
+        over.push({ name: u.display_name, used, cap: u.capacity });
+      }
+    }
+    return over;
+  }
+
   async function saveAllocation(g: AdminGroup) {
+    const over = overCapacityUnitsAfterSave(g);
+    if (over.length > 0) {
+      const lines = over
+        .map((o) => `• ${o.name}: ${o.used} people, but it only sleeps ${o.cap}`)
+        .join("\n");
+      if (
+        !confirm(
+          `⚠️ Some accommodation will be over its limit:\n\n${lines}\n\n` +
+            `This usually means too many people are sharing one unit. ` +
+            `Do you want to save anyway?`,
+        )
+      ) {
+        return;
+      }
+    }
     setBusy(`alloc-${g.id}`);
     setError(null);
     setNotice(null);
