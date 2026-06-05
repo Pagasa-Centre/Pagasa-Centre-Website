@@ -9,13 +9,13 @@ CREATE TABLE accommodation_units (
     sort_order         INT  NOT NULL DEFAULT 0
 );
 
--- Lodges: 3 × 8 berths
+-- Lodges: 3 × sleeps 8
 INSERT INTO accommodation_units (code, accommodation_code, display_name, capacity, sort_order) VALUES
     ('lodge_1', 'lodge', 'Lodge 1', 8, 1),
     ('lodge_2', 'lodge', 'Lodge 2', 8, 2),
     ('lodge_3', 'lodge', 'Lodge 3', 8, 3);
 
--- Cabins: 8 × 2 berths
+-- Cabins: 8 × sleeps 2
 INSERT INTO accommodation_units (code, accommodation_code, display_name, capacity, sort_order) VALUES
     ('cabin_1', 'cabin', 'Cabin 1', 2, 1),
     ('cabin_2', 'cabin', 'Cabin 2', 2, 2),
@@ -26,7 +26,7 @@ INSERT INTO accommodation_units (code, accommodation_code, display_name, capacit
     ('cabin_7', 'cabin', 'Cabin 7', 2, 7),
     ('cabin_8', 'cabin', 'Cabin 8', 2, 8);
 
--- Static caravans: 4 × 4 berths + 4 × 6 berths = 40
+-- Static caravans: 4 × sleeps 4 + 4 × sleeps 6 = 40
 INSERT INTO accommodation_units (code, accommodation_code, display_name, capacity, sort_order) VALUES
     ('caravan_1', 'static_caravan', 'Caravan 1', 4, 1),
     ('caravan_2', 'static_caravan', 'Caravan 2', 4, 2),
@@ -37,7 +37,7 @@ INSERT INTO accommodation_units (code, accommodation_code, display_name, capacit
     ('caravan_7', 'static_caravan', 'Caravan 7', 6, 7),
     ('caravan_8', 'static_caravan', 'Caravan 8', 6, 8);
 
--- Pods: 10 × 2 berths
+-- Pods: 10 × sleeps 2
 INSERT INTO accommodation_units (code, accommodation_code, display_name, capacity, sort_order) VALUES
     ('pod_1', 'pod', 'Pod 1', 2, 1),
     ('pod_2', 'pod', 'Pod 2', 2, 2),

@@ -895,7 +895,7 @@ function CapacityPanel({
                         <span className="text-neutral-600">
                           {u.display_name}{" "}
                           <span className="text-neutral-400">
-                            ({u.capacity} berth{u.capacity === 1 ? "" : "s"})
+                            (sleeps {u.capacity})
                           </span>
                         </span>
                         <span className="flex items-center gap-1">
@@ -1141,8 +1141,7 @@ function GroupCard({
                         <option value="">— Unit (optional) —</option>
                         {tierUnits.map((u) => (
                           <option key={u.code} value={u.code}>
-                            {u.display_name} ({u.capacity} berth
-                            {u.capacity === 1 ? "" : "s"})
+                            {u.display_name} (sleeps {u.capacity})
                           </option>
                         ))}
                       </select>
