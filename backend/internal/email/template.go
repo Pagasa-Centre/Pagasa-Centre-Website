@@ -10,7 +10,7 @@ import (
 // don't need to edit these mid-campaign. If we run another camp in a future
 // year these should move to the camp_config table.
 const (
-	KeyDatesRegistration  = "1 - 30 June"
+	KeyDatesRegistration  = "15 - 30 June"
 	KeyDatesAllocation    = "1 - 15 July"
 	KeyDatesFinalPayment  = "16 - 31 July"
 	AllocationContactName = "Bro Ash"

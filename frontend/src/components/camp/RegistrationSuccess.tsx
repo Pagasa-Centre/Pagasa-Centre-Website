@@ -180,7 +180,7 @@ function SuccessBody({ apiBase }: Props) {
               </span>
               <div>
                 <p className="font-semibold text-neutral-900 text-sm">
-                  1 – 30 June: Registration window
+                  15 – 30 June: Registration window
                 </p>
                 <p className="text-sm text-neutral-600">
                   Tell friends and family before registrations close.
