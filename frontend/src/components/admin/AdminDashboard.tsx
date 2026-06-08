@@ -132,6 +132,9 @@ export default function AdminDashboard() {
   const [groups, setGroups] = useState<AdminGroup[]>([]);
   const [accommodations, setAccommodations] = useState<AdminAccommodation[]>([]);
   const [units, setUnits] = useState<AdminAccommodationUnit[]>([]);
+  const [registrationsOpen, setRegistrationsOpen] = useState<boolean | null>(
+    null,
+  );
   const [alloc, setAlloc] = useState<Record<string, AllocState>>({});
   const [unitAlloc, setUnitAlloc] = useState<Record<string, UnitAllocState>>({});
   const [loading, setLoading] = useState(true);
@@ -162,14 +165,16 @@ export default function AdminDashboard() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [reg, acc, unitRes] = await Promise.all([
+      const [reg, acc, unitRes, cfg] = await Promise.all([
         adminApi.listRegistrations(),
         adminApi.accommodations(),
         adminApi.accommodationUnits(),
+        adminApi.campConfig(),
       ]);
       setGroups(reg.groups);
       setAccommodations(acc.accommodations);
       setUnits(unitRes.units);
+      setRegistrationsOpen(cfg.registrations_open);
       const next: Record<string, AllocState> = {};
       const nextUnits: Record<string, UnitAllocState> = {};
       for (const g of reg.groups) {
@@ -522,6 +527,41 @@ export default function AdminDashboard() {
     }
   }
 
+  async function toggleRegistrations() {
+    if (registrationsOpen === null) return;
+    const next = !registrationsOpen;
+    const verb = next ? "OPEN" : "CLOSE";
+    if (
+      !window.confirm(
+        next
+          ? "Open camp registration to the public? People will be able to sign up immediately."
+          : "Close camp registration? The website will show a 'Registrations Closed' notice and no new sign-ups will be accepted.",
+      )
+    ) {
+      return;
+    }
+    setBusy("reg-toggle");
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await adminApi.setRegistrationsOpen(next);
+      setRegistrationsOpen(res.registrations_open);
+      setNotice(
+        res.registrations_open
+          ? "Registration is now OPEN — the public can sign up."
+          : "Registration is now CLOSED — the public sees the closed notice.",
+      );
+    } catch (err) {
+      setError(
+        err instanceof AdminApiError
+          ? err.detail.message
+          : `Could not ${verb.toLowerCase()} registration.`,
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function logout() {
     await adminApi.logout();
     router.replace("/admin/login");
@@ -638,6 +678,53 @@ export default function AdminDashboard() {
           </button>
         </div>
       </div>
+
+      {/* Registration open/closed control */}
+      {registrationsOpen !== null && (
+        <div
+          className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4 sm:p-5 ${
+            registrationsOpen
+              ? "bg-green-50 border-green-200"
+              : "bg-amber-50 border-amber-200"
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <span
+              className={`flex-none w-2.5 h-2.5 rounded-full ${
+                registrationsOpen ? "bg-green-500" : "bg-amber-500"
+              }`}
+              aria-hidden
+            />
+            <div>
+              <p className="text-sm font-bold text-neutral-800">
+                Public registration is{" "}
+                {registrationsOpen ? "OPEN" : "CLOSED"}
+              </p>
+              <p className="text-xs text-neutral-600 mt-0.5">
+                {registrationsOpen
+                  ? "Anyone can sign up on the website right now."
+                  : "The website shows a “Registrations Closed” notice — no new sign-ups are accepted."}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={toggleRegistrations}
+            disabled={busy === "reg-toggle"}
+            className={`px-4 py-2 text-sm font-semibold rounded-lg text-white disabled:opacity-60 ${
+              registrationsOpen
+                ? "bg-amber-600 hover:bg-amber-700"
+                : "bg-green-600 hover:bg-green-700"
+            }`}
+          >
+            {busy === "reg-toggle"
+              ? "Saving…"
+              : registrationsOpen
+                ? "Close registration"
+                : "Open registration"}
+          </button>
+        </div>
+      )}
 
       {/* How it works */}
       <div className="bg-white border border-neutral-300 rounded-xl p-4 sm:p-5">

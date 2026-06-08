@@ -38,6 +38,20 @@ func (r *Repository) RegistrationsOpen(ctx context.Context) (bool, error) {
 	return open, nil
 }
 
+// SetRegistrationsOpen flips the public registration window on or off. Used by
+// the admin dashboard so the White Team can open/close registration themselves.
+func (r *Repository) SetRegistrationsOpen(ctx context.Context, open bool) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE camp_config SET registrations_open = $1 WHERE id = 1`, open)
+	if err != nil {
+		return fmt.Errorf("set registrations_open: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("camp_config row not found")
+	}
+	return nil
+}
+
 func (r *Repository) ListPrices(ctx context.Context) ([]Price, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT code, display_name, amount_pence, currency FROM prices ORDER BY code`)

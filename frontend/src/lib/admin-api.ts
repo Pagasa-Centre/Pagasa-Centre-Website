@@ -103,6 +103,16 @@ export type AllocateCamper = {
   billed_stripe_price_id?: string;
 };
 
+export type AdminCampConfig = {
+  name: string;
+  location_name: string;
+  location_addr: string;
+  website_url: string;
+  start_date: string;
+  end_date: string;
+  registrations_open: boolean;
+};
+
 export const adminApi = {
   login: (password: string) =>
     adminFetch<void>("/admin/login", {
@@ -183,5 +193,13 @@ export const adminApi = {
   sweep: () =>
     adminFetch<{ released: number }>("/admin/billing/sweep", {
       method: "POST",
+    }),
+
+  campConfig: () => adminFetch<AdminCampConfig>("/admin/camp-config"),
+
+  setRegistrationsOpen: (open: boolean) =>
+    adminFetch<{ registrations_open: boolean }>("/admin/registrations-open", {
+      method: "PUT",
+      body: JSON.stringify({ open }),
     }),
 };

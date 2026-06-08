@@ -36,6 +36,9 @@ func Mount(
 		r.Patch("/registrations/{groupID}", patchRegistration(regRepo))
 		r.Put("/prices/{code}", putPrice(campRepo))
 
+		r.Get("/camp-config", getCampConfig(campRepo))
+		r.Put("/registrations-open", putRegistrationsOpen(campRepo))
+
 		r.Get("/accommodations", listAccommodationTypes(regRepo))
 		r.Get("/accommodation-units", listAccommodationUnits(regRepo))
 		r.Put("/registrations/{groupID}/allocation", putAllocation(billSvc))
@@ -148,6 +151,39 @@ func patchRegistration(repo *registration.Repository) http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func getCampConfig(repo *camp.Repository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cfg, err := repo.GetConfig(r.Context())
+		if err != nil {
+			httpx.WriteError(w, httpx.Internal(err.Error()))
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, cfg)
+	}
+}
+
+func putRegistrationsOpen(repo *camp.Repository) http.HandlerFunc {
+	type body struct {
+		Open *bool `json:"open"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		var b body
+		if err := httpx.DecodeJSON(r, &b); err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		if b.Open == nil {
+			httpx.WriteError(w, httpx.BadRequest("missing 'open' boolean", nil))
+			return
+		}
+		if err := repo.SetRegistrationsOpen(r.Context(), *b.Open); err != nil {
+			httpx.WriteError(w, httpx.Internal(err.Error()))
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]bool{"registrations_open": *b.Open})
 	}
 }
 

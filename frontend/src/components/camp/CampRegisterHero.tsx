@@ -1,5 +1,6 @@
 import Image from "next/image";
 import type { CampConfig } from "@/lib/api";
+import { CAMP_REGISTRATION_CLOSED_LABEL } from "@/lib/events";
 
 function formatDateRange(startISO: string, endISO: string): string {
   try {
@@ -32,7 +33,9 @@ export default function CampRegisterHero({ config }: { config: CampConfig }) {
       <div className="absolute inset-0 bg-black/65" />
       <div className="relative z-10 text-center text-white px-4 sm:px-6 max-w-3xl mx-auto py-16 lg:py-20">
         <p className="text-primary-light uppercase tracking-widest text-sm font-semibold mb-4">
-          Register Now
+          {config.registrations_open
+            ? "Register Now"
+            : CAMP_REGISTRATION_CLOSED_LABEL}
         </p>
         <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight mb-5 tracking-tight">
           {config.name}

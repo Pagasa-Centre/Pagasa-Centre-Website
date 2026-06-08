@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { events } from "@/lib/events";
+import { events, CAMP_REGISTRATION_CLOSED_LABEL } from "@/lib/events";
 import { googleMapsUrl } from "@/lib/maps";
 import type { Event } from "@/types";
 
@@ -83,7 +83,16 @@ function ExternalLinkIcon() {
   );
 }
 
-function EventCard({ event }: { event: Event }) {
+function EventCard({
+  event,
+  registrationsOpen,
+}: {
+  event: Event;
+  registrationsOpen: boolean;
+}) {
+  // The Summer Camp card is the only CTA that points at the registration form.
+  const isCampRegistration = event.cta?.href === "/camp/register";
+  const showClosedCta = isCampRegistration && !registrationsOpen;
   return (
     <article className="group flex flex-col bg-white rounded-xl shadow-sm border border-neutral-300 overflow-hidden hover:shadow-md hover:border-primary/30 transition-all">
       <div className="relative h-48 bg-neutral-200 overflow-hidden">
@@ -137,20 +146,29 @@ function EventCard({ event }: { event: Event }) {
           </a>
         )}
         <div className="flex-1" />
-        {event.cta && (
-          <Link
-            href={event.cta.href}
-            className="inline-flex items-center justify-center px-5 py-2.5 bg-primary text-white text-xs uppercase tracking-widest font-bold hover:bg-primary-dark transition-colors self-start"
-          >
-            {event.cta.label}
-          </Link>
-        )}
+        {event.cta &&
+          (showClosedCta ? (
+            <span className="inline-flex items-center justify-center px-5 py-2.5 bg-neutral-200 text-neutral-600 text-xs uppercase tracking-widest font-bold self-start cursor-default">
+              {CAMP_REGISTRATION_CLOSED_LABEL}
+            </span>
+          ) : (
+            <Link
+              href={event.cta.href}
+              className="inline-flex items-center justify-center px-5 py-2.5 bg-primary text-white text-xs uppercase tracking-widest font-bold hover:bg-primary-dark transition-colors self-start"
+            >
+              {event.cta.label}
+            </Link>
+          ))}
       </div>
     </article>
   );
 }
 
-export default function EventsGrid() {
+export default function EventsGrid({
+  registrationsOpen = true,
+}: {
+  registrationsOpen?: boolean;
+}) {
   return (
     <section id="events" className="py-20 lg:py-24 bg-surface">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -168,7 +186,11 @@ export default function EventsGrid() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {events.map((e) => (
-            <EventCard key={e.id} event={e} />
+            <EventCard
+              key={e.id}
+              event={e}
+              registrationsOpen={registrationsOpen}
+            />
           ))}
         </div>
       </div>
