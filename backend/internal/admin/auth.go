@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -100,9 +101,13 @@ func sameSiteMode(cfg AuthConfig) http.SameSite {
 	return http.SameSiteLaxMode
 }
 
-func setSessionCookie(w http.ResponseWriter, cfg AuthConfig) {
+// newSessionToken mints a fresh signed session token valid for sessionDuration.
+func newSessionToken(cfg AuthConfig) string {
 	exp := time.Now().Add(sessionDuration).Unix()
-	token := signSession(cfg.SessionSecret, exp)
+	return signSession(cfg.SessionSecret, exp)
+}
+
+func setSessionCookie(w http.ResponseWriter, cfg AuthConfig, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    token,
@@ -130,6 +135,18 @@ func isAuthenticated(r *http.Request, cfg AuthConfig) bool {
 	if len(cfg.SessionSecret) == 0 {
 		return false
 	}
+	// Bearer token (preferred): the admin dashboard lives on a different domain
+	// than the API, so the session cookie is cross-site. Browsers in incognito
+	// mode and on iOS/Safari block third-party cookies, which silently logs the
+	// user out. A bearer token in the Authorization header sidesteps cookies
+	// entirely and works everywhere.
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		token := strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
+		if token != "" && verifySession(cfg.SessionSecret, token) {
+			return true
+		}
+	}
+	// Cookie fallback (same-origin / local dev).
 	c, err := r.Cookie(sessionCookieName)
 	if err != nil || c.Value == "" {
 		return false
@@ -171,8 +188,13 @@ func handleLogin(cfg AuthConfig) http.HandlerFunc {
 			http.Error(w, "invalid credentials", http.StatusUnauthorized)
 			return
 		}
-		setSessionCookie(w, cfg)
-		w.WriteHeader(http.StatusNoContent)
+		token := newSessionToken(cfg)
+		// Set the cookie too (helps same-origin/local dev), but the token in the
+		// body is what the dashboard actually uses cross-site.
+		setSessionCookie(w, cfg, token)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{"token": token})
 	}
 }
 

@@ -1,6 +1,27 @@
-// Admin API client — uses session cookies (credentials: include).
+// Admin API client.
+//
+// Auth uses a bearer token stored in localStorage rather than a cookie. The
+// dashboard and the API live on different domains, so a session cookie is
+// "third-party" and gets silently blocked by incognito mode and mobile Safari.
+// Sending the token in the Authorization header works everywhere.
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+
+const TOKEN_KEY = "pc_admin_token";
+
+function getToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(TOKEN_KEY);
+}
+
+function setToken(token: string | null) {
+  if (typeof window === "undefined") return;
+  if (token) {
+    window.localStorage.setItem(TOKEN_KEY, token);
+  } else {
+    window.localStorage.removeItem(TOKEN_KEY);
+  }
+}
 
 export type ApiError = {
   code: string;
@@ -22,11 +43,13 @@ async function adminFetch<T>(
   path: string,
   options?: RequestInit,
 ): Promise<T> {
+  const token = getToken();
   const res = await fetch(`${API_BASE}${path}`, {
     cache: "no-store",
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options?.headers,
     },
     ...options,
@@ -114,14 +137,23 @@ export type AdminCampConfig = {
 };
 
 export const adminApi = {
-  login: (password: string) =>
-    adminFetch<void>("/admin/login", {
+  login: async (password: string) => {
+    const res = await adminFetch<{ token?: string }>("/admin/login", {
       method: "POST",
       body: JSON.stringify({ password }),
-    }),
+    });
+    if (res?.token) {
+      setToken(res.token);
+    }
+  },
 
-  logout: () =>
-    adminFetch<void>("/admin/logout", { method: "POST" }),
+  logout: async () => {
+    try {
+      await adminFetch<void>("/admin/logout", { method: "POST" });
+    } finally {
+      setToken(null);
+    }
+  },
 
   checkSession: () =>
     adminFetch<void>("/admin/session", { method: "GET" }),
