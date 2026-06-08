@@ -114,6 +114,7 @@ export type AdminGroup = {
   billing_status: string;
   total_amount_pence: number;
   currency: string;
+  created_at: string;
   invoice_due_at?: string | null;
   balance_paid_at?: string | null;
   campers: AdminCamper[];

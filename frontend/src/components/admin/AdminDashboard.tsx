@@ -41,6 +41,31 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "all", label: "Everyone" },
 ];
 
+type SortKey = "date_desc" | "date_asc" | "name_asc" | "name_desc";
+
+const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: "date_desc", label: "Newest first" },
+  { key: "date_asc", label: "Oldest first" },
+  { key: "name_asc", label: "Name A–Z" },
+  { key: "name_desc", label: "Name Z–A" },
+];
+
+// Sort by surname, then first name, case-insensitively.
+function compareByName(a: AdminGroup, b: AdminGroup): number {
+  return (
+    a.contact_last_name.localeCompare(b.contact_last_name, undefined, {
+      sensitivity: "base",
+    }) ||
+    a.contact_first_name.localeCompare(b.contact_first_name, undefined, {
+      sensitivity: "base",
+    })
+  );
+}
+
+function compareByDate(a: AdminGroup, b: AdminGroup): number {
+  return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+}
+
 function fullWeekCampers(g: AdminGroup): AdminCamper[] {
   return g.campers.filter((c) => c.attendance_type === "full_week");
 }
@@ -127,6 +152,21 @@ function formatDate(iso: string | null | undefined): string {
   }
 }
 
+function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
+
 export default function AdminDashboard() {
   const router = useRouter();
   const [groups, setGroups] = useState<AdminGroup[]>([]);
@@ -143,6 +183,7 @@ export default function AdminDashboard() {
   const [busy, setBusy] = useState<string | null>(null);
   const [tab, setTab] = useState<TabKey>("to_allocate");
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<SortKey>("date_desc");
   // Group IDs whose (already-saved) allocation is being re-edited.
   const [editing, setEditing] = useState<Record<string, boolean>>({});
 
@@ -633,13 +674,20 @@ export default function AdminDashboard() {
         return hay.includes(q);
       })
       .sort((a, b) => {
-        // Overdue first, then by surname.
-        const ao = isOverdue(a) ? 0 : 1;
-        const bo = isOverdue(b) ? 0 : 1;
-        if (ao !== bo) return ao - bo;
-        return a.contact_last_name.localeCompare(b.contact_last_name);
+        switch (sort) {
+          case "date_asc":
+            return compareByDate(a, b);
+          case "date_desc":
+            return compareByDate(b, a);
+          case "name_asc":
+            return compareByName(a, b);
+          case "name_desc":
+            return compareByName(b, a);
+          default:
+            return 0;
+        }
       });
-  }, [groups, tab, search]);
+  }, [groups, tab, search, sort]);
 
   if (loading) {
     return (
@@ -847,6 +895,20 @@ export default function AdminDashboard() {
           placeholder="Search by name or email…"
           className="flex-1 min-w-[180px] px-3 py-2 text-sm bg-white border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
         />
+        <label className="flex items-center gap-2 text-sm text-neutral-600">
+          <span className="font-semibold text-neutral-700">Sort</span>
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as SortKey)}
+            className="px-3 py-2 text-sm bg-white border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            {SORT_OPTIONS.map((o) => (
+              <option key={o.key} value={o.key}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
         {tab === "to_invoice" && counts.to_invoice > 0 && (
           <button
             type="button"
@@ -1213,6 +1275,9 @@ function GroupCard({
             ) : (
               <span className="text-neutral-500">{g.payment_status}</span>
             )}
+          </p>
+          <p className="text-xs text-neutral-400 mt-0.5">
+            Registered {formatDateTime(g.created_at)}
           </p>
         </div>
         <span
