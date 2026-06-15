@@ -172,6 +172,21 @@ export const adminApi = {
     );
   },
 
+  updateContact: (
+    groupId: string,
+    data: {
+      first_name: string;
+      last_name: string;
+      email: string;
+      phone: string;
+      resend_confirmation: boolean;
+    },
+  ) =>
+    adminFetch<void>(`/admin/registrations/${groupId}/contact`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
   accommodations: () =>
     adminFetch<{ accommodations: AdminAccommodation[] }>(
       "/admin/accommodations",

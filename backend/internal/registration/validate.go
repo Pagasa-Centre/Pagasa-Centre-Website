@@ -10,6 +10,13 @@ import (
 
 var emailRE = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 
+// ValidEmail reports whether s is a structurally valid email address. Exposed
+// so other packages (e.g. admin contact editing) validate consistently with
+// the registration form.
+func ValidEmail(s string) bool {
+	return emailRE.MatchString(strings.TrimSpace(s))
+}
+
 // Validate enforces the structural and business rules from the camp form.
 // Returns httpx.APIError with per-field messages, or nil on success.
 func Validate(req SubmitRequest) error {

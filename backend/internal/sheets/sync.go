@@ -19,6 +19,21 @@ type Sync interface {
 	// transitions from pending → paid (via Stripe webhook or zero-total
 	// instant-paid path).
 	AppendPaidAndRemovePending(ctx context.Context, groupID string, rows []Row) error
+
+	// UpdateContactByGroupID rewrites the contact_* columns for every row
+	// (in either tab) whose group_id matches. Called when staff correct a
+	// group's contact details (e.g. a mistyped email) after registration.
+	UpdateContactByGroupID(ctx context.Context, groupID string, c ContactUpdate) error
+}
+
+// ContactUpdate carries the group-level contact fields that can be corrected
+// after the fact. Only these four columns are rewritten in the sheet; camper
+// rows are otherwise left untouched.
+type ContactUpdate struct {
+	FirstName string
+	LastName  string
+	Email     string
+	Phone     string
 }
 
 // NoopSync is used when no Sheets credentials are configured. It logs each
@@ -41,5 +56,11 @@ func (NoopSync) AppendPending(_ context.Context, rows []Row) error {
 // AppendPaidAndRemovePending logs the call and returns nil.
 func (NoopSync) AppendPaidAndRemovePending(_ context.Context, groupID string, rows []Row) error {
 	log.Printf("sheets noop: would move group %s to paid (%d row(s))", groupID, len(rows))
+	return nil
+}
+
+// UpdateContactByGroupID logs the call and returns nil.
+func (NoopSync) UpdateContactByGroupID(_ context.Context, groupID string, c ContactUpdate) error {
+	log.Printf("sheets noop: would update contact for group %s (%s)", groupID, c.Email)
 	return nil
 }

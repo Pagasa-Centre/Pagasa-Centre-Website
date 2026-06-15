@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"pagasacentre/backend/internal/email"
+	"pagasacentre/backend/internal/httpx"
 	"pagasacentre/backend/internal/registration"
 	"pagasacentre/backend/internal/sheets"
 )
@@ -177,13 +178,22 @@ func (s *Service) HandleCheckoutExpired(ctx context.Context, sessionID string) e
 // whole HandleCheckoutCompleted (which is fine, but doesn't help if SMTP is
 // down — we'd just rack up retries).
 func (s *Service) sendConfirmationEmail(ctx context.Context, g *registration.Group) {
+	if err := s.sendDepositConfirmation(ctx, g); err != nil {
+		log.Printf("send confirmation email to %s failed: %v", g.ContactEmail, err)
+	}
+}
+
+// sendDepositConfirmation builds and sends the deposit-received email from the
+// group's current data. Returns any error so callers that need to surface
+// failure (e.g. an admin re-send) can, while the webhook path keeps logging
+// and swallowing via sendConfirmationEmail.
+func (s *Service) sendDepositConfirmation(ctx context.Context, g *registration.Group) error {
 	if s.mailer == nil {
-		return
+		return nil
 	}
 	campers, err := s.regRepo.CampersForGroup(ctx, g.ID)
 	if err != nil {
-		log.Printf("load campers for email (group %s): %v", g.ID, err)
-		return
+		return fmt.Errorf("load campers for email (group %s): %w", g.ID, err)
 	}
 	hasMinor := false
 	for _, c := range campers {
@@ -196,7 +206,7 @@ func (s *Service) sendConfirmationEmail(ctx context.Context, g *registration.Gro
 	if hasMinor {
 		consentURL = s.publicBaseURL + "/api/consent-form"
 	}
-	if err := s.mailer.SendDepositConfirmation(ctx, email.DepositConfirmation{
+	return s.mailer.SendDepositConfirmation(ctx, email.DepositConfirmation{
 		ToEmail:        g.ContactEmail,
 		ToName:         g.ContactFirstName,
 		AmountPence:    g.TotalAmountPence,
@@ -204,9 +214,59 @@ func (s *Service) sendConfirmationEmail(ctx context.Context, g *registration.Gro
 		CamperCount:    len(campers),
 		HasMinor:       hasMinor,
 		ConsentFormURL: consentURL,
-	}); err != nil {
-		log.Printf("send confirmation email to %s failed: %v", g.ContactEmail, err)
+	})
+}
+
+// UpdateGroupContact corrects a group's contact details (e.g. a mistyped email
+// captured at registration). It updates the database, mirrors the change into
+// the Google Sheet, and optionally re-sends the deposit confirmation email to
+// the corrected address.
+//
+// The DB update is the only hard requirement. The sheet update is best-effort
+// (logged, not fatal — the DB is the source of truth). When resend is true the
+// email failure IS surfaced, so the White Team knows whether the family was
+// actually re-notified.
+func (s *Service) UpdateGroupContact(ctx context.Context, groupID, firstName, lastName, emailAddr, phone string, resend bool) error {
+	g, err := s.regRepo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		return fmt.Errorf("load group: %w", err)
 	}
+	if g == nil {
+		return httpx.NotFound("registration not found")
+	}
+	if resend && g.PaymentStatus != registration.PaymentPaid {
+		return httpx.BadRequest(
+			"the confirmation email can only be re-sent once the deposit is paid", nil)
+	}
+
+	if err := s.regRepo.UpdateContact(ctx, groupID, firstName, lastName, emailAddr, phone); err != nil {
+		return fmt.Errorf("update contact: %w", err)
+	}
+
+	if s.sheets != nil {
+		if err := s.sheets.UpdateContactByGroupID(ctx, groupID, sheets.ContactUpdate{
+			FirstName: firstName,
+			LastName:  lastName,
+			Email:     emailAddr,
+			Phone:     phone,
+		}); err != nil {
+			log.Printf("sheets: update contact for group %s failed: %v", groupID, err)
+		}
+	}
+
+	if resend {
+		// Reflect the corrected details in-memory so the email is addressed
+		// and personalised correctly.
+		g.ContactFirstName = firstName
+		g.ContactLastName = lastName
+		g.ContactEmail = emailAddr
+		g.ContactPhone = phone
+		if err := s.sendDepositConfirmation(ctx, g); err != nil {
+			return fmt.Errorf(
+				"details were updated, but the confirmation email failed to send: %w", err)
+		}
+	}
+	return nil
 }
 
 // ErrUnhandledEvent is returned by the handler for event types it ignores.

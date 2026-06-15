@@ -135,6 +135,63 @@ func (g *GoogleSync) AppendPaidAndRemovePending(ctx context.Context, groupID str
 	return nil
 }
 
+// UpdateContactByGroupID rewrites the four contact_* columns (G:J) for every
+// row whose group_id (column A) matches, across both tabs. The Paid tab is the
+// usual target once a deposit is in, but we also scan Pending so a correction
+// made before payment isn't lost.
+func (g *GoogleSync) UpdateContactByGroupID(ctx context.Context, groupID string, c ContactUpdate) error {
+	for _, tab := range []string{g.paidTab, g.pendingTab} {
+		if err := g.updateContactInTab(ctx, tab, groupID, c); err != nil {
+			return fmt.Errorf("update contact in %s: %w", tab, err)
+		}
+	}
+	return nil
+}
+
+// updateContactInTab finds matching group rows in one tab and rewrites their
+// contact columns. Columns G:J map to contact_first_name, contact_last_name,
+// contact_email, contact_phone (positions 7-10, matching Headers above).
+func (g *GoogleSync) updateContactInTab(ctx context.Context, tab, groupID string, c ContactUpdate) error {
+	resp, err := g.svc.Spreadsheets.Values.
+		Get(g.spreadsheetID, tab+"!A:A").
+		Context(ctx).
+		Do()
+	if err != nil {
+		return fmt.Errorf("read column A: %w", err)
+	}
+
+	var data []*sheetsapi.ValueRange
+	for i, row := range resp.Values {
+		if len(row) == 0 {
+			continue
+		}
+		if v, ok := row[0].(string); ok && v == groupID {
+			rowNum := i + 1 // sheet rows are 1-based
+			data = append(data, &sheetsapi.ValueRange{
+				Range:  fmt.Sprintf("%s!G%d:J%d", tab, rowNum, rowNum),
+				Values: [][]any{{c.FirstName, c.LastName, c.Email, c.Phone}},
+			})
+		}
+	}
+	if len(data) == 0 {
+		return nil
+	}
+
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	_, err = g.svc.Spreadsheets.Values.
+		BatchUpdate(g.spreadsheetID, &sheetsapi.BatchUpdateValuesRequest{
+			ValueInputOption: "USER_ENTERED",
+			Data:             data,
+		}).
+		Context(ctxWithTimeout).
+		Do()
+	if err != nil {
+		return fmt.Errorf("batch update contact: %w", err)
+	}
+	return nil
+}
+
 // appendRows lazily writes headers (if the tab is empty) and then appends
 // the row values. Uses USER_ENTERED so Sheet auto-parses dates/numbers.
 func (g *GoogleSync) appendRows(ctx context.Context, tab string, rows []Row) error {

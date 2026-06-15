@@ -2,7 +2,9 @@
 package admin
 
 import (
+	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -13,6 +15,12 @@ import (
 	"pagasacentre/backend/internal/registration"
 )
 
+// contactService corrects a group's contact details (and optionally re-sends
+// the deposit confirmation). Satisfied by *payment.Service.
+type contactService interface {
+	UpdateGroupContact(ctx context.Context, groupID, firstName, lastName, email, phone string, resendConfirmation bool) error
+}
+
 // Mount wires admin routes onto r. Public login routes are outside the auth
 // middleware; everything else requires a valid session cookie.
 func Mount(
@@ -21,6 +29,7 @@ func Mount(
 	regRepo *registration.Repository,
 	campRepo *camp.Repository,
 	billSvc *billing.Service,
+	contactSvc contactService,
 ) {
 	r.Post("/login", handleLogin(auth))
 	r.Post("/logout", handleLogout(auth))
@@ -34,6 +43,7 @@ func Mount(
 		r.Get("/registrations", listRegistrationsJSON(regRepo))
 		r.Get("/registrations.csv", listRegistrationsCSV(regRepo))
 		r.Patch("/registrations/{groupID}", patchRegistration(regRepo))
+		r.Patch("/registrations/{groupID}/contact", patchContact(contactSvc))
 		r.Put("/prices/{code}", putPrice(campRepo))
 
 		r.Get("/camp-config", getCampConfig(campRepo))
@@ -148,6 +158,56 @@ func patchRegistration(repo *registration.Repository) http.HandlerFunc {
 		}
 		if err := repo.MarkStatus(r.Context(), chi.URLParam(r, "groupID"), b.PaymentStatus); err != nil {
 			httpx.WriteError(w, httpx.Internal(err.Error()))
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// patchContact corrects a group's contact details and, if requested, re-sends
+// the deposit confirmation email to the corrected address. Used when someone
+// mistypes their email at registration.
+func patchContact(svc contactService) http.HandlerFunc {
+	type body struct {
+		FirstName          string `json:"first_name"`
+		LastName           string `json:"last_name"`
+		Email              string `json:"email"`
+		Phone              string `json:"phone"`
+		ResendConfirmation bool   `json:"resend_confirmation"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		var b body
+		if err := httpx.DecodeJSON(r, &b); err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		b.FirstName = strings.TrimSpace(b.FirstName)
+		b.LastName = strings.TrimSpace(b.LastName)
+		b.Email = strings.TrimSpace(b.Email)
+		b.Phone = strings.TrimSpace(b.Phone)
+
+		fields := map[string]string{}
+		if b.FirstName == "" {
+			fields["first_name"] = "is required"
+		}
+		if b.LastName == "" {
+			fields["last_name"] = "is required"
+		}
+		if !registration.ValidEmail(b.Email) {
+			fields["email"] = "must be a valid email"
+		}
+		if b.Phone == "" {
+			fields["phone"] = "is required"
+		}
+		if len(fields) > 0 {
+			httpx.WriteError(w, httpx.ValidationFailed(fields))
+			return
+		}
+
+		err := svc.UpdateGroupContact(r.Context(), chi.URLParam(r, "groupID"),
+			b.FirstName, b.LastName, b.Email, b.Phone, b.ResendConfirmation)
+		if err != nil {
+			httpx.WriteError(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)

@@ -222,6 +222,27 @@ func (r *Repository) MarkStatus(ctx context.Context, groupID, status string) err
 	return nil
 }
 
+// UpdateContact corrects the group's contact details (name, email, phone).
+// Used by the admin dashboard when, e.g., someone mistyped their email at
+// registration. Does not touch payment or billing state.
+func (r *Repository) UpdateContact(ctx context.Context, groupID, firstName, lastName, email, phone string) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE registration_groups
+		    SET contact_first_name = $1,
+		        contact_last_name  = $2,
+		        contact_email      = $3,
+		        contact_phone      = $4
+		  WHERE id = $5`,
+		firstName, lastName, email, phone, groupID)
+	if err != nil {
+		return fmt.Errorf("update contact: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("group %q not found", groupID)
+	}
+	return nil
+}
+
 // MarkStatusInTx is MarkStatus but inside an existing transaction.
 func (r *Repository) MarkStatusInTx(ctx context.Context, tx pgx.Tx, groupID, status string) error {
 	_, err := tx.Exec(ctx,

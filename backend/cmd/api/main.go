@@ -168,7 +168,7 @@ func main() {
 	})
 
 	r.Route("/admin", func(r chi.Router) {
-		admin.Mount(r, adminAuth, regRepo, campRepo, billSvc)
+		admin.Mount(r, adminAuth, regRepo, campRepo, billSvc, paySvc)
 	})
 
 	srv := &http.Server{

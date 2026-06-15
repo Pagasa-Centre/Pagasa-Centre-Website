@@ -544,6 +544,40 @@ export default function AdminDashboard() {
     }
   }
 
+  async function saveContact(
+    g: AdminGroup,
+    data: {
+      first_name: string;
+      last_name: string;
+      email: string;
+      phone: string;
+      resend_confirmation: boolean;
+    },
+  ): Promise<boolean> {
+    setBusy(`contact-${g.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await adminApi.updateContact(g.id, data);
+      setNotice(
+        data.resend_confirmation
+          ? `Contact details updated. Confirmation email re-sent to ${data.email}.`
+          : `Contact details updated for ${data.first_name} ${data.last_name}.`,
+      );
+      await load();
+      return true;
+    } catch (err) {
+      setError(
+        err instanceof AdminApiError
+          ? err.detail.message
+          : "Could not update contact details.",
+      );
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function runSweep() {
     if (
       !confirm(
@@ -943,6 +977,7 @@ export default function AdminDashboard() {
               allAllocated={allFullWeekAllocated(g)}
               busy={busy}
               isEditing={!!editing[g.id]}
+              onUpdateContact={(data) => saveContact(g, data)}
               onSetAlloc={(camperId, code) => setCamperAlloc(g.id, camperId, code)}
               onSetUnit={(camperId, code) => setCamperUnit(g.id, camperId, code)}
               onSave={() => saveAllocation(g)}
@@ -1209,6 +1244,7 @@ function GroupCard({
   allAllocated,
   busy,
   isEditing,
+  onUpdateContact,
   onSetAlloc,
   onSetUnit,
   onSave,
@@ -1230,6 +1266,13 @@ function GroupCard({
   allAllocated: boolean;
   busy: string | null;
   isEditing: boolean;
+  onUpdateContact: (data: {
+    first_name: string;
+    last_name: string;
+    email: string;
+    phone: string;
+    resend_confirmation: boolean;
+  }) => Promise<boolean>;
   onSetAlloc: (camperId: string, code: string) => void;
   onSetUnit: (camperId: string, code: string) => void;
   onSave: () => void;
@@ -1249,6 +1292,34 @@ function GroupCard({
   // explicitly chosen to edit an already-saved (but not yet invoiced) group.
   const canEditAlloc = cat === "to_allocate" || (cat === "to_invoice" && isEditing);
 
+  const [contactOpen, setContactOpen] = useState(false);
+  const [cFirst, setCFirst] = useState(g.contact_first_name);
+  const [cLast, setCLast] = useState(g.contact_last_name);
+  const [cEmail, setCEmail] = useState(g.contact_email);
+  const [cPhone, setCPhone] = useState(g.contact_phone);
+  const [cResend, setCResend] = useState(g.payment_status === "paid");
+  const contactBusy = busy === `contact-${g.id}`;
+
+  function openContact() {
+    setCFirst(g.contact_first_name);
+    setCLast(g.contact_last_name);
+    setCEmail(g.contact_email);
+    setCPhone(g.contact_phone);
+    setCResend(g.payment_status === "paid");
+    setContactOpen(true);
+  }
+
+  async function submitContact() {
+    const ok = await onUpdateContact({
+      first_name: cFirst,
+      last_name: cLast,
+      email: cEmail,
+      phone: cPhone,
+      resend_confirmation: cResend,
+    });
+    if (ok) setContactOpen(false);
+  }
+
   return (
     <article
       className={`bg-white border rounded-xl overflow-hidden ${
@@ -1256,35 +1327,125 @@ function GroupCard({
       }`}
     >
       {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-3 p-4 sm:p-5 border-b border-neutral-200">
-        <div className="min-w-0">
-          <p className="text-lg font-bold text-neutral-800">
-            {g.contact_first_name} {g.contact_last_name}
-          </p>
-          <p className="text-sm text-neutral-600 break-all">
-            {g.contact_email}
-            {g.contact_phone ? ` · ${g.contact_phone}` : ""}
-          </p>
-          <p className="text-xs text-neutral-400 mt-1">
-            {g.campers.length} {g.campers.length === 1 ? "person" : "people"}
-            {" · Deposit "}
-            {g.payment_status === "paid" ? (
-              <span className="text-green-700 font-semibold">
-                paid {formatPence(g.total_amount_pence, g.currency)}
-              </span>
-            ) : (
-              <span className="text-neutral-500">{g.payment_status}</span>
+      <div className="p-4 sm:p-5 border-b border-neutral-200">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-lg font-bold text-neutral-800">
+              {g.contact_first_name} {g.contact_last_name}
+            </p>
+            <p className="text-sm text-neutral-600 break-all">
+              {g.contact_email}
+              {g.contact_phone ? ` · ${g.contact_phone}` : ""}
+            </p>
+            <p className="text-xs text-neutral-400 mt-1">
+              {g.campers.length} {g.campers.length === 1 ? "person" : "people"}
+              {" · Deposit "}
+              {g.payment_status === "paid" ? (
+                <span className="text-green-700 font-semibold">
+                  paid {formatPence(g.total_amount_pence, g.currency)}
+                </span>
+              ) : (
+                <span className="text-neutral-500">{g.payment_status}</span>
+              )}
+            </p>
+            <p className="text-xs text-neutral-400 mt-0.5">
+              Registered {formatDateTime(g.created_at)}
+            </p>
+            {!contactOpen && (
+              <button
+                type="button"
+                onClick={openContact}
+                className="mt-2 text-xs font-semibold text-primary hover:underline"
+              >
+                Edit contact / fix email
+              </button>
             )}
-          </p>
-          <p className="text-xs text-neutral-400 mt-0.5">
-            Registered {formatDateTime(g.created_at)}
-          </p>
+          </div>
+          <span
+            className={`flex-none px-3 py-1 text-xs font-bold rounded-full border ${badge.className}`}
+          >
+            {badge.label}
+          </span>
         </div>
-        <span
-          className={`flex-none px-3 py-1 text-xs font-bold rounded-full border ${badge.className}`}
-        >
-          {badge.label}
-        </span>
+
+        {contactOpen && (
+          <div className="mt-4 border-t border-neutral-200 pt-4 flex flex-col gap-3">
+            <p className="text-sm font-semibold text-neutral-700">
+              Edit contact details
+            </p>
+            <div className="grid sm:grid-cols-2 gap-3">
+              <label className="flex flex-col gap-1 text-xs font-semibold text-neutral-600">
+                First name
+                <input
+                  value={cFirst}
+                  onChange={(e) => setCFirst(e.target.value)}
+                  className="px-3 py-2 text-sm font-normal text-neutral-800 bg-white border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-semibold text-neutral-600">
+                Last name
+                <input
+                  value={cLast}
+                  onChange={(e) => setCLast(e.target.value)}
+                  className="px-3 py-2 text-sm font-normal text-neutral-800 bg-white border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-semibold text-neutral-600">
+                Email
+                <input
+                  type="email"
+                  value={cEmail}
+                  onChange={(e) => setCEmail(e.target.value)}
+                  className="px-3 py-2 text-sm font-normal text-neutral-800 bg-white border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-semibold text-neutral-600">
+                Phone
+                <input
+                  value={cPhone}
+                  onChange={(e) => setCPhone(e.target.value)}
+                  className="px-3 py-2 text-sm font-normal text-neutral-800 bg-white border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </label>
+            </div>
+            {g.payment_status === "paid" ? (
+              <label className="flex items-start gap-2 text-sm text-neutral-700">
+                <input
+                  type="checkbox"
+                  checked={cResend}
+                  onChange={(e) => setCResend(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  Re-send the deposit confirmation email to this address
+                </span>
+              </label>
+            ) : (
+              <p className="text-xs text-neutral-500">
+                The confirmation email can only be re-sent once the deposit is
+                paid.
+              </p>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={contactBusy}
+                onClick={submitContact}
+                className="px-5 py-2.5 text-sm font-bold text-white bg-neutral-800 rounded-lg hover:bg-neutral-700 disabled:opacity-40"
+              >
+                {contactBusy ? "Saving…" : "Save changes"}
+              </button>
+              <button
+                type="button"
+                disabled={contactBusy}
+                onClick={() => setContactOpen(false)}
+                className="px-4 py-2.5 text-sm font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="p-4 sm:p-5">
