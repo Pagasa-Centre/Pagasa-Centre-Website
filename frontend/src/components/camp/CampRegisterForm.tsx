@@ -419,7 +419,7 @@ export default function CampRegisterForm({
           <p className="mt-4 text-neutral-600 max-w-xl mx-auto text-sm">
             Full-week campers pay a flat{" "}
             <strong>£50 non-refundable deposit per person</strong> at
-            registration. Campers under 3 years old and day visitors are not
+            registration. Campers under 4 years old and day visitors are not
             required to pay a deposit at this stage.
           </p>
           <p className="mt-3 text-neutral-600 max-w-xl mx-auto text-sm">

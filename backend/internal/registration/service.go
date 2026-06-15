@@ -280,7 +280,7 @@ func (s *Service) sendConfirmationEmail(ctx context.Context, req SubmitRequest, 
 
 // MinDepositAge is the youngest age that has to pay the deposit. Campers
 // under this age attend free (cot / lap-of-parent etc.).
-const MinDepositAge = 3
+const MinDepositAge = 4
 
 // Summary loads a public-facing summary of a registration for display on the
 // success page. Lookup is by sessionID OR groupID — exactly one of those

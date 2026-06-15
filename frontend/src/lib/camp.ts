@@ -8,7 +8,7 @@ export const SHIRT_SIZE_NOT_APPLICABLE = "n/a";
 
 // Youngest age that has to pay the deposit. Campers under this attend free
 // (cot / lap-of-parent). Mirrors backend MinDepositAge.
-export const MIN_DEPOSIT_AGE = 3;
+export const MIN_DEPOSIT_AGE = 4;
 
 // Code for "Child accommodation (sharing with parent)". When chosen as the
 // 1st preference, the 2nd-choice picker is hidden because a child is by

@@ -19,8 +19,8 @@ func TestDepositPayingCount(t *testing.T) {
 		{Age: 30, Attendance: AttendanceDTO{Type: AttendanceFullWeek}}, // pays
 		{Age: 25, Attendance: AttendanceDTO{Type: AttendanceDayPass}},  // free (day pass)
 		{Age: 10, Attendance: AttendanceDTO{Type: AttendanceFullWeek}}, // pays
-		{Age: 2, Attendance: AttendanceDTO{Type: AttendanceFullWeek}},  // free (under 3)
-		{Age: 3, Attendance: AttendanceDTO{Type: AttendanceFullWeek}},  // pays (3 == threshold)
+		{Age: 3, Attendance: AttendanceDTO{Type: AttendanceFullWeek}},  // free (under 4)
+		{Age: 4, Attendance: AttendanceDTO{Type: AttendanceFullWeek}},  // pays (4 == threshold)
 	}}
 	if got := depositPayingCount(req); got != 3 {
 		t.Errorf("depositPayingCount = %d, want 3", got)
@@ -50,7 +50,7 @@ func TestComputeTotal_UnderThreesAreFree(t *testing.T) {
 	svc := &Service{prices: fakePriceLookup{amount: 5000}}
 	req := SubmitRequest{Campers: []CamperDTO{
 		{Age: 30, Attendance: AttendanceDTO{Type: AttendanceFullWeek}}, // £50
-		{Age: 2, Attendance: AttendanceDTO{Type: AttendanceFullWeek}},  // free (under 3)
+		{Age: 3, Attendance: AttendanceDTO{Type: AttendanceFullWeek}},  // free (under 4)
 		{Age: 1, Attendance: AttendanceDTO{Type: AttendanceFullWeek}},  // free
 	}}
 	total, _, err := svc.computeTotal(context.Background(), req)
