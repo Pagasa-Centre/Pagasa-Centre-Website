@@ -139,6 +139,23 @@ function SuccessBody({ apiBase }: Props) {
           . Check your spam folder if you don&apos;t see it within a few
           minutes.
         </p>
+
+        <div className="p-4 sm:p-5 bg-amber-50 border border-amber-300 rounded-xl text-sm text-amber-900 mb-8">
+          <p className="font-bold mb-1">⚠️ Please double-check your email address</p>
+          <p>
+            Make sure{" "}
+            <span className="font-semibold">
+              {contactEmail ?? "the email you entered"}
+            </span>{" "}
+            is spelled correctly. This is the address we&apos;ll use to send
+            your room allocation and balance invoice. If it&apos;s wrong,
+            please contact <span className="font-semibold">Aliyah</span> or any
+            member of the White Team as soon as possible to get it corrected —
+            it&apos;s much harder to fix once allocation and invoicing have
+            started.
+          </p>
+        </div>
+
         {sessionId && (
           <p className="text-xs text-neutral-400 mb-8 text-center">
             Stripe reference: <span className="font-mono">{sessionId}</span>
