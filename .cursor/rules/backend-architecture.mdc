@@ -1,0 +1,37 @@
+---
+description: Pag-Asa backend layered architecture — handlers, services, storage, DTOs
+globs: backend/**/*.go
+alwaysApply: false
+---
+
+# Backend architecture (required)
+
+Before editing Go under `backend/`, read [backend/AGENTS.md](backend/AGENTS.md).
+
+## Structure (do not collapse layers)
+
+- **Handlers:** `internal/api/{domain}/handler.go` + `dto/` + `dto/mapper/`
+- **Services:** `internal/{domain}/service.go` + `domain/`
+- **Repos:** `internal/{domain}/storage/repository.go` (exported `Repository`, raw pgx SQL)
+- **Router:** register routes in `internal/http/router/router.go` — not per-feature `Mount()`
+- **DI:** wire in `cmd/api/main.go` only
+- **Shared:** `pkg/commonlibrary/{render,request,errors,db}`, `internal/middleware/`
+
+## Non-negotiables
+
+- API errors must stay `{ "code", "message", "fields"? }` via `pkg/commonlibrary/errors`
+- No flat `internal/foo/` packages mixing handler + service + repo
+- No sqlboiler/goose/viper/zap unless explicitly requested
+- `/admin/stream` stays outside request-timeout middleware
+
+## New work checklist
+
+1. Domain types → `internal/{domain}/domain/`
+2. Service method → `internal/{domain}/service.go`
+3. Storage (if needed) → `internal/{domain}/storage/`
+4. DTOs + mappers → `internal/api/{domain}/dto/`
+5. Handler method → `internal/api/{domain}/handler.go`
+6. Route → `internal/http/router/router.go`
+7. `go build ./... && go test ./...`
+
+Reference implementations: `registration` (full), `camp` (minimal reads).
