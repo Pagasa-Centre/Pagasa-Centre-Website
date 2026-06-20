@@ -1,9 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   adminApi,
+  openAdminEventStream,
   type AdminAccommodation,
   type AdminAccommodationUnit,
   type AdminGroup,
@@ -167,6 +169,26 @@ function formatDateTime(iso: string | null | undefined): string {
   }
 }
 
+const LAST_ACTION_LABELS: Record<string, string> = {
+  allocate: "Allocated",
+  unallocate: "Unallocated",
+  invoice_sent: "Invoiced",
+  invoice_resent: "Invoice re-sent",
+  release: "Released",
+  extend_due: "Due date extended",
+  contact_updated: "Contact updated",
+  balance_paid: "Balance paid",
+};
+
+function formatLastAction(g: AdminGroup): string | null {
+  if (!g.last_action_by || !g.last_action_at) return null;
+  const label =
+    (g.last_action && LAST_ACTION_LABELS[g.last_action]) ||
+    g.last_action ||
+    "Updated";
+  return `${label} by ${g.last_action_by} · ${formatDateTime(g.last_action_at)}`;
+}
+
 export default function AdminDashboard() {
   const router = useRouter();
   const [groups, setGroups] = useState<AdminGroup[]>([]);
@@ -184,6 +206,8 @@ export default function AdminDashboard() {
   const [tab, setTab] = useState<TabKey>("to_allocate");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("date_desc");
+  const [actorName, setActorName] = useState<string | null>(null);
+  const [streamReconnecting, setStreamReconnecting] = useState(false);
   // Group IDs whose (already-saved) allocation is being re-edited.
   const [editing, setEditing] = useState<Record<string, boolean>>({});
 
@@ -254,9 +278,38 @@ export default function AdminDashboard() {
     setLoading(true);
     adminApi
       .checkSession()
-      .then(() => load())
+      .then((session) => {
+        setActorName(session.name);
+        return load();
+      })
       .catch(() => router.replace("/admin/login"));
   }, [load, router]);
+
+  useEffect(() => {
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const es = openAdminEventStream({
+      onOpen: () => {
+        setStreamReconnecting(false);
+        void load();
+      },
+      onError: () => setStreamReconnecting(true),
+      onEvent: () => {
+        if (debounce) clearTimeout(debounce);
+        debounce = setTimeout(() => void load(), 400);
+      },
+    });
+    return () => {
+      if (debounce) clearTimeout(debounce);
+      es?.close();
+    };
+  }, [load]);
+
+  async function handleAdminError(err: unknown, fallback: string) {
+    setError(err instanceof AdminApiError ? err.detail.message : fallback);
+    if (err instanceof AdminApiError && err.status === 409) {
+      await load();
+    }
+  }
 
   function setCamperAlloc(groupId: string, camperId: string, code: string) {
     setAlloc((prev) => ({
@@ -380,7 +433,7 @@ export default function AdminDashboard() {
         if (unit) payload.allocated_unit_code = unit;
         return payload;
       });
-      await adminApi.saveAllocation(g.id, campers);
+      await adminApi.saveAllocation(g.id, campers, g.version);
       setEditing((e) => {
         const next = { ...e };
         delete next[g.id];
@@ -389,9 +442,7 @@ export default function AdminDashboard() {
       setNotice(`Accommodation saved for ${g.contact_first_name}'s group.`);
       await load();
     } catch (err) {
-      setError(
-        err instanceof AdminApiError ? err.detail.message : "Save failed.",
-      );
+      await handleAdminError(err, "Save failed.");
     } finally {
       setBusy(null);
     }
@@ -409,7 +460,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.unallocate(g.id);
+      await adminApi.unallocate(g.id, g.version);
       setEditing((e) => {
         const next = { ...e };
         delete next[g.id];
@@ -418,9 +469,7 @@ export default function AdminDashboard() {
       setNotice(`${g.contact_first_name}'s group moved back to Needs accommodation.`);
       await load();
     } catch (err) {
-      setError(
-        err instanceof AdminApiError ? err.detail.message : "Reset failed.",
-      );
+      await handleAdminError(err, "Reset failed.");
     } finally {
       setBusy(null);
     }
@@ -431,13 +480,11 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.sendInvoice(g.id);
+      await adminApi.sendInvoice(g.id, g.version);
       setNotice(`Invoice emailed to ${g.contact_email}.`);
       await load();
     } catch (err) {
-      setError(
-        err instanceof AdminApiError ? err.detail.message : "Invoice failed.",
-      );
+      await handleAdminError(err, "Invoice failed.");
     } finally {
       setBusy(null);
     }
@@ -470,9 +517,7 @@ export default function AdminDashboard() {
       }
       await load();
     } catch (err) {
-      setError(
-        err instanceof AdminApiError ? err.detail.message : "Bulk send failed.",
-      );
+      await handleAdminError(err, "Bulk send failed.");
     } finally {
       setBusy(null);
     }
@@ -490,13 +535,11 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.release(g.id);
+      await adminApi.release(g.id, g.version);
       setNotice(`Released ${g.contact_first_name}'s accommodation.`);
       await load();
     } catch (err) {
-      setError(
-        err instanceof AdminApiError ? err.detail.message : "Release failed.",
-      );
+      await handleAdminError(err, "Release failed.");
     } finally {
       setBusy(null);
     }
@@ -507,12 +550,10 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.resendInvoice(g.id);
+      await adminApi.resendInvoice(g.id, g.version);
       setNotice(`Reminder re-sent to ${g.contact_email}.`);
     } catch (err) {
-      setError(
-        err instanceof AdminApiError ? err.detail.message : "Resend failed.",
-      );
+      await handleAdminError(err, "Resend failed.");
     } finally {
       setBusy(null);
     }
@@ -532,13 +573,11 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.extendDue(g.id, due.toISOString());
+      await adminApi.extendDue(g.id, due.toISOString(), g.version);
       setNotice(`New due date set to ${formatDate(due.toISOString())}.`);
       await load();
     } catch (err) {
-      setError(
-        err instanceof AdminApiError ? err.detail.message : "Extend failed.",
-      );
+      await handleAdminError(err, "Extend failed.");
     } finally {
       setBusy(null);
     }
@@ -742,8 +781,23 @@ export default function AdminDashboard() {
           <p className="text-sm text-neutral-600 mt-1">
             Allocate accommodation, then send each group their balance invoice.
           </p>
+          {actorName && (
+            <p className="text-xs text-neutral-500 mt-1">
+              Signed in as{" "}
+              <span className="font-semibold text-neutral-700">{actorName}</span>
+              {streamReconnecting && (
+                <span className="ml-2 text-amber-600">· Reconnecting…</span>
+              )}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            href="/admin/activity"
+            className="px-3 py-2 text-sm font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100"
+          >
+            Activity log
+          </Link>
           <button
             type="button"
             onClick={() => load()}
@@ -1351,6 +1405,11 @@ function GroupCard({
             <p className="text-xs text-neutral-400 mt-0.5">
               Registered {formatDateTime(g.created_at)}
             </p>
+            {formatLastAction(g) && (
+              <p className="text-xs text-neutral-500 mt-0.5 italic">
+                {formatLastAction(g)}
+              </p>
+            )}
             {!contactOpen && (
               <button
                 type="button"

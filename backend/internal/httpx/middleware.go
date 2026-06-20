@@ -20,7 +20,8 @@ func UseDefaults(r chi.Router, allowedOrigins string) {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60_000_000_000)) // 60s
+	// NOTE: Request timeout is NOT applied here — SSE /admin/stream must run
+	// unbounded. Apply httpx.WithRequestTimeout on route groups that need it.
 
 	origins := parseOrigins(allowedOrigins)
 	allowCreds := len(origins) == 1 && origins[0] != "*"
@@ -34,6 +35,12 @@ func UseDefaults(r chi.Router, allowedOrigins string) {
 		AllowCredentials: allowCreds,
 		MaxAge:           300,
 	}))
+}
+
+// WithRequestTimeout applies a 60s deadline to ordinary API/admin handlers.
+// Do not wrap the SSE stream route with this middleware.
+func WithRequestTimeout(r chi.Router) {
+	r.Use(middleware.Timeout(60_000_000_000))
 }
 
 func parseOrigins(raw string) []string {

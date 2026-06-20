@@ -8,10 +8,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"pagasacentre/backend/internal/adminlog"
 )
 
 const (
@@ -64,28 +65,67 @@ func clientKey(r *http.Request) string {
 	return r.RemoteAddr
 }
 
-func signSession(secret []byte, expUnix int64) string {
-	payload := fmt.Sprintf("%d", expUnix)
+type sessionPayload struct {
+	Exp  int64  `json:"exp"`
+	Name string `json:"name"`
+}
+
+func signSession(secret []byte, expUnix int64, name string) string {
+	raw, _ := json.Marshal(sessionPayload{Exp: expUnix, Name: name})
+	enc := base64.RawURLEncoding.EncodeToString(raw)
 	mac := hmac.New(sha256.New, secret)
-	mac.Write([]byte(payload))
+	mac.Write([]byte(enc))
 	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-	return payload + "." + sig
+	return enc + "." + sig
+}
+
+// VerifySessionToken validates a bearer/cookie token and returns the actor name.
+func VerifySessionToken(secret []byte, token string) (string, bool) {
+	if len(secret) == 0 || token == "" {
+		return "", false
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 2 {
+		return "", false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return "", false
+	}
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte(parts[0]))
+	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	if subtle.ConstantTimeCompare([]byte(sig), []byte(parts[1])) != 1 {
+		return "", false
+	}
+	var p sessionPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return "", false
+	}
+	if p.Name == "" || time.Now().Unix() > p.Exp {
+		return "", false
+	}
+	return p.Name, true
 }
 
 func verifySession(secret []byte, token string) bool {
-	parts := strings.Split(token, ".")
-	if len(parts) != 2 {
-		return false
+	_, ok := VerifySessionToken(secret, token)
+	return ok
+}
+
+func actorFromRequest(r *http.Request, cfg AuthConfig) (string, bool) {
+	if len(cfg.SessionSecret) == 0 {
+		return "", false
 	}
-	expUnix, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil {
-		return false
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		token := strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
+		return VerifySessionToken(cfg.SessionSecret, token)
 	}
-	if time.Now().Unix() > expUnix {
-		return false
+	c, err := r.Cookie(sessionCookieName)
+	if err != nil || c.Value == "" {
+		return "", false
 	}
-	expected := signSession(secret, expUnix)
-	return subtle.ConstantTimeCompare([]byte(expected), []byte(token)) == 1
+	return VerifySessionToken(cfg.SessionSecret, c.Value)
 }
 
 // sameSiteMode picks the cookie SameSite policy. In production the admin
@@ -101,10 +141,9 @@ func sameSiteMode(cfg AuthConfig) http.SameSite {
 	return http.SameSiteLaxMode
 }
 
-// newSessionToken mints a fresh signed session token valid for sessionDuration.
-func newSessionToken(cfg AuthConfig) string {
+func newSessionToken(cfg AuthConfig, name string) string {
 	exp := time.Now().Add(sessionDuration).Unix()
-	return signSession(cfg.SessionSecret, exp)
+	return signSession(cfg.SessionSecret, exp, name)
 }
 
 func setSessionCookie(w http.ResponseWriter, cfg AuthConfig, token string) {
@@ -132,42 +171,27 @@ func clearSessionCookie(w http.ResponseWriter, cfg AuthConfig) {
 }
 
 func isAuthenticated(r *http.Request, cfg AuthConfig) bool {
-	if len(cfg.SessionSecret) == 0 {
-		return false
-	}
-	// Bearer token (preferred): the admin dashboard lives on a different domain
-	// than the API, so the session cookie is cross-site. Browsers in incognito
-	// mode and on iOS/Safari block third-party cookies, which silently logs the
-	// user out. A bearer token in the Authorization header sidesteps cookies
-	// entirely and works everywhere.
-	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
-		token := strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
-		if token != "" && verifySession(cfg.SessionSecret, token) {
-			return true
-		}
-	}
-	// Cookie fallback (same-origin / local dev).
-	c, err := r.Cookie(sessionCookieName)
-	if err != nil || c.Value == "" {
-		return false
-	}
-	return verifySession(cfg.SessionSecret, c.Value)
+	_, ok := actorFromRequest(r, cfg)
+	return ok
 }
 
 // RequireAdmin wraps handlers that need an active admin session.
 func RequireAdmin(cfg AuthConfig, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !isAuthenticated(r, cfg) {
+		actor, ok := actorFromRequest(r, cfg)
+		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), actor)))
 	})
 }
 
-func handleLogin(cfg AuthConfig) http.HandlerFunc {
+func handleLogin(cfg AuthConfig, rec *adminlog.Recorder) http.HandlerFunc {
 	type body struct {
-		Password string `json:"password"`
+		Password  string `json:"password"`
+		FirstName string `json:"first_name"`
+		LastName  string `json:"last_name"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -184,17 +208,25 @@ func handleLogin(cfg AuthConfig) http.HandlerFunc {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
+		b.FirstName = strings.TrimSpace(b.FirstName)
+		b.LastName = strings.TrimSpace(b.LastName)
+		if b.FirstName == "" || b.LastName == "" {
+			http.Error(w, "first and last name are required", http.StatusBadRequest)
+			return
+		}
 		if subtle.ConstantTimeCompare([]byte(b.Password), []byte(cfg.Password)) != 1 {
 			http.Error(w, "invalid credentials", http.StatusUnauthorized)
 			return
 		}
-		token := newSessionToken(cfg)
-		// Set the cookie too (helps same-origin/local dev), but the token in the
-		// body is what the dashboard actually uses cross-site.
+		name := fmt.Sprintf("%s %s", b.FirstName, b.LastName)
+		token := newSessionToken(cfg, name)
 		setSessionCookie(w, cfg, token)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]string{"token": token})
+		_ = json.NewEncoder(w).Encode(map[string]string{"token": token, "name": name})
+		if rec != nil {
+			_, _ = rec.Record(r.Context(), name, adminlog.ActionLogin, nil, name+" signed in", nil)
+		}
 	}
 }
 
@@ -207,10 +239,12 @@ func handleLogout(cfg AuthConfig) http.HandlerFunc {
 
 func handleSession(cfg AuthConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if isAuthenticated(r, cfg) {
-			w.WriteHeader(http.StatusNoContent)
+		actor, ok := actorFromRequest(r, cfg)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"name": actor})
 	}
 }

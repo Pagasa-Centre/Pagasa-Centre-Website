@@ -2,8 +2,10 @@ package billing
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"pagasacentre/backend/internal/httpx"
 	"pagasacentre/backend/internal/registration"
 	"pagasacentre/backend/internal/testhelper"
 )
@@ -92,7 +94,7 @@ func TestAllocate_persistsUnit(t *testing.T) {
 		t.Fatalf("insert camper: %v", err)
 	}
 
-	if err := svc.Allocate(ctx, groupID, AllocateRequest{
+	if err := svc.Allocate(ctx, groupID, "Test Admin", registration.SkipVersionCheck, AllocateRequest{
 		Campers: []AllocateCamper{{
 			CamperID:                   camperID,
 			AllocatedAccommodationCode: "lodge",
@@ -115,6 +117,44 @@ func TestAllocate_persistsUnit(t *testing.T) {
 	}
 	if c.AllocatedUnitCode == nil || *c.AllocatedUnitCode != "lodge_1" {
 		t.Fatalf("unit = %v, want lodge_1", c.AllocatedUnitCode)
+	}
+}
+
+func TestAllocate_versionConflict(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := registration.NewRepository(pool)
+	svc := NewService(repo, NewStripeBilling(), nil, Config{StripePriceChildUnder3: "price_child"})
+
+	var groupID, camperID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, total_amount_pence, currency, billing_status, version
+		) VALUES ('Test', 'Family', 'test@example.com', '07000000000', 'paid', 5000, 'GBP', 'none', 3)
+		RETURNING id`).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+	err = pool.QueryRow(ctx, `
+		INSERT INTO registrations (
+			group_id, is_main_contact, first_name, last_name, gender, age,
+			cell_leader_name, is_cell_leader, attendance_type
+		) VALUES ($1, true, 'Alex', 'Test', 'male', 25, 'Leader', false, 'full_week')
+		RETURNING id`, groupID).Scan(&camperID)
+	if err != nil {
+		t.Fatalf("insert camper: %v", err)
+	}
+
+	req := AllocateRequest{Campers: []AllocateCamper{{
+		CamperID:                   camperID,
+		AllocatedAccommodationCode: "lodge",
+	}}}
+	// Stale version should 409-style conflict.
+	err = svc.Allocate(ctx, groupID, "Aliyah", 1, req)
+	var apiErr httpx.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "stale_state" {
+		t.Fatalf("expected stale_state conflict, got %v", err)
 	}
 }
 

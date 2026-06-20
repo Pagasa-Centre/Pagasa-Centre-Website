@@ -1,0 +1,33 @@
+package adminlog
+
+import (
+	"encoding/json"
+	"time"
+)
+
+// Event is broadcast over SSE when something changes in the admin dashboard.
+type Event struct {
+	ID        int64           `json:"id"`
+	CreatedAt time.Time       `json:"created_at"`
+	ActorName string          `json:"actor_name"`
+	Action    string          `json:"action"`
+	GroupID   *string         `json:"group_id,omitempty"`
+	Summary   string          `json:"summary"`
+	Metadata  json.RawMessage `json:"metadata,omitempty"`
+}
+
+// Action constants for admin_events.action.
+const (
+	ActionLogin               = "login"
+	ActionAllocate            = "allocate"
+	ActionUnallocate          = "unallocate"
+	ActionInvoiceSent         = "invoice_sent"
+	ActionInvoiceResent       = "invoice_resent"
+	ActionRelease             = "release"
+	ActionExtendDue           = "extend_due"
+	ActionContactUpdated      = "contact_updated"
+	ActionRegistrationsToggle = "registrations_toggle"
+	ActionPriceUpdated        = "price_updated"
+	ActionSweep               = "sweep"
+	ActionBalancePaid         = "balance_paid"
+)

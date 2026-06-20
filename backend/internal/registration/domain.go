@@ -58,6 +58,10 @@ type Group struct {
 	BillingStatus         string     `json:"billing_status"`
 	InvoiceDueAt          *time.Time `json:"invoice_due_at,omitempty"`
 	BalancePaidAt         *time.Time `json:"balance_paid_at,omitempty"`
+	Version               int        `json:"version"`
+	LastAction            *string    `json:"last_action,omitempty"`
+	LastActionBy          *string    `json:"last_action_by,omitempty"`
+	LastActionAt          *time.Time `json:"last_action_at,omitempty"`
 }
 
 // Camper is the persisted form of a registrations row.

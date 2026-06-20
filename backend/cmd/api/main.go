@@ -15,6 +15,7 @@ import (
 
 	"pagasacentre/backend/internal/accommodation"
 	"pagasacentre/backend/internal/admin"
+	"pagasacentre/backend/internal/adminlog"
 	"pagasacentre/backend/internal/billing"
 	"pagasacentre/backend/internal/camp"
 	"pagasacentre/backend/internal/config"
@@ -155,11 +156,18 @@ func main() {
 	r := chi.NewRouter()
 	httpx.UseDefaults(r, cfg.AllowedOrigin)
 
+	adminHub := adminlog.NewHub()
+	adminRec := adminlog.NewRecorder(pool, adminHub)
+
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "commit": commit})
 	})
 
+	// SSE stream: no request timeout (see httpx.UseDefaults).
+	r.Get("/admin/stream", admin.HandleStream(adminAuth, adminHub))
+
 	r.Route("/api", func(r chi.Router) {
+		httpx.WithRequestTimeout(r)
 		camp.Mount(r, campRepo)
 		accommodation.Mount(r, accSvc)
 		registration.Mount(r, regSvc)
@@ -168,7 +176,8 @@ func main() {
 	})
 
 	r.Route("/admin", func(r chi.Router) {
-		admin.Mount(r, adminAuth, regRepo, campRepo, billSvc, paySvc)
+		httpx.WithRequestTimeout(r)
+		admin.Mount(r, adminAuth, regRepo, campRepo, billSvc, paySvc, adminRec)
 	})
 
 	srv := &http.Server{

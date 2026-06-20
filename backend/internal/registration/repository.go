@@ -20,7 +20,8 @@ const groupSelectCols = `
 	id, contact_first_name, contact_last_name, contact_email, contact_phone,
 	payment_status, stripe_session_id, stripe_payment_intent_id,
 	total_amount_pence, currency, created_at, paid_at,
-	stripe_customer_id, stripe_invoice_id, billing_status, invoice_due_at, balance_paid_at`
+	stripe_customer_id, stripe_invoice_id, billing_status, invoice_due_at, balance_paid_at,
+	version, last_action, last_action_by, last_action_at`
 
 func scanGroup(row pgx.Row) (Group, error) {
 	var g Group
@@ -29,6 +30,7 @@ func scanGroup(row pgx.Row) (Group, error) {
 		&g.PaymentStatus, &g.StripeSessionID, &g.StripePaymentIntentID,
 		&g.TotalAmountPence, &g.Currency, &g.CreatedAt, &g.PaidAt,
 		&g.StripeCustomerID, &g.StripeInvoiceID, &g.BillingStatus, &g.InvoiceDueAt, &g.BalancePaidAt,
+		&g.Version, &g.LastAction, &g.LastActionBy, &g.LastActionAt,
 	)
 	return g, err
 }

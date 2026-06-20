@@ -28,7 +28,7 @@ func NewService(repo *registration.Repository, stripe *StripeBilling, mailer ema
 }
 
 // Allocate persists White Team placements and sets billing_status=allocated.
-func (s *Service) Allocate(ctx context.Context, groupID string, req AllocateRequest) error {
+func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedVersion int, req AllocateRequest) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
 		return httpx.Internal(err.Error())
@@ -108,16 +108,21 @@ func (s *Service) Allocate(ctx context.Context, groupID string, req AllocateRequ
 		}
 	}
 
-	if err := s.repo.SetCamperAllocations(ctx, groupID, allocs); err != nil {
-		return httpx.Internal(err.Error())
+	meta := registration.ActionMeta{
+		Actor:           actor,
+		Action:          "allocated",
+		ExpectedVersion: expectedVersion,
 	}
-	return s.repo.SetBillingStatus(ctx, groupID, registration.BillingAllocated)
+	if err := s.repo.AllocateGroup(ctx, groupID, allocs, meta); err != nil {
+		return mapVersionErr(ctx, s.repo, groupID, err)
+	}
+	return nil
 }
 
 // Unallocate clears a group's placements and returns it to the unallocated
 // (needs-accommodation) state. Only valid before an invoice has been sent —
 // once invoiced, use VoidAndRelease so the open Stripe invoice is voided too.
-func (s *Service) Unallocate(ctx context.Context, groupID string) error {
+func (s *Service) Unallocate(ctx context.Context, groupID, actor string, expectedVersion int) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
 		return httpx.Internal(err.Error())
@@ -131,10 +136,15 @@ func (s *Service) Unallocate(ctx context.Context, groupID string) error {
 	case registration.BillingBalancePaid:
 		return httpx.BadRequest("balance already paid", nil)
 	}
-	if err := s.repo.ClearCamperAllocations(ctx, groupID); err != nil {
-		return httpx.Internal(err.Error())
+	meta := registration.ActionMeta{
+		Actor:           actor,
+		Action:          "unallocated",
+		ExpectedVersion: expectedVersion,
 	}
-	return s.repo.SetBillingStatus(ctx, groupID, registration.BillingNone)
+	if err := s.repo.UnallocateGroup(ctx, groupID, meta); err != nil {
+		return mapVersionErr(ctx, s.repo, groupID, err)
+	}
+	return nil
 }
 
 // validateAllocatedUnit checks referential integrity between tier and unit.
@@ -180,7 +190,7 @@ func (s *Service) resolvePriceID(ctx context.Context, accommodationCode string, 
 }
 
 // SendInvoice creates and emails a Stripe Invoice for an allocated group.
-func (s *Service) SendInvoice(ctx context.Context, groupID string) error {
+func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expectedVersion int) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
 		return httpx.Internal(err.Error())
@@ -247,8 +257,13 @@ func (s *Service) SendInvoice(ctx context.Context, groupID string) error {
 	if err != nil {
 		return httpx.Internal(err.Error())
 	}
-	if err := s.repo.SetInvoiceDetails(ctx, groupID, res.ID, res.DueAt); err != nil {
-		return httpx.Internal(err.Error())
+	meta := registration.ActionMeta{
+		Actor:           actor,
+		Action:          "invoice_sent",
+		ExpectedVersion: expectedVersion,
+	}
+	if err := s.repo.SetInvoiceDetailsMeta(ctx, groupID, res.ID, res.DueAt, meta); err != nil {
+		return mapVersionErr(ctx, s.repo, groupID, err)
 	}
 	// Stripe is the primary sender. Only if Stripe couldn't email the invoice
 	// (e.g. restricted account) do we fall back to emailing the link ourselves.
@@ -268,10 +283,10 @@ func (s *Service) SendInvoice(ctx context.Context, groupID string) error {
 }
 
 // SendInvoicesBulk sends invoices for many groups; collects per-group errors.
-func (s *Service) SendInvoicesBulk(ctx context.Context, groupIDs []string) map[string]string {
+func (s *Service) SendInvoicesBulk(ctx context.Context, actor string, groupIDs []string) map[string]string {
 	errs := map[string]string{}
 	for _, id := range groupIDs {
-		if err := s.SendInvoice(ctx, id); err != nil {
+		if err := s.SendInvoice(ctx, id, actor, registration.SkipVersionCheck); err != nil {
 			errs[id] = err.Error()
 		}
 	}
@@ -279,7 +294,7 @@ func (s *Service) SendInvoicesBulk(ctx context.Context, groupIDs []string) map[s
 }
 
 // VoidAndRelease voids the Stripe invoice (if any) and clears allocations.
-func (s *Service) VoidAndRelease(ctx context.Context, groupID, reason string) error {
+func (s *Service) VoidAndRelease(ctx context.Context, groupID, reason, actor string, expectedVersion int) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
 		return httpx.Internal(err.Error())
@@ -294,8 +309,13 @@ func (s *Service) VoidAndRelease(ctx context.Context, groupID, reason string) er
 			// Continue — DB release still needed if Stripe already void/paid.
 		}
 	}
-	if err := s.repo.ClearInvoiceAndRelease(ctx, groupID); err != nil {
-		return httpx.Internal(err.Error())
+	meta := registration.ActionMeta{
+		Actor:           actor,
+		Action:          "released",
+		ExpectedVersion: expectedVersion,
+	}
+	if err := s.repo.ClearInvoiceAndReleaseMeta(ctx, groupID, meta); err != nil {
+		return mapVersionErr(ctx, s.repo, groupID, err)
 	}
 
 	campers, _ := s.repo.CampersForGroup(ctx, groupID)
@@ -321,7 +341,7 @@ func (s *Service) VoidAndRelease(ctx context.Context, groupID, reason string) er
 }
 
 // ResendInvoice re-sends the Stripe invoice email.
-func (s *Service) ResendInvoice(ctx context.Context, groupID string) error {
+func (s *Service) ResendInvoice(ctx context.Context, groupID, actor string, expectedVersion int) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
 		return httpx.Internal(err.Error())
@@ -335,8 +355,16 @@ func (s *Service) ResendInvoice(ctx context.Context, groupID string) error {
 	if g.BillingStatus != registration.BillingInvoiced {
 		return httpx.BadRequest("invoice is not open", nil)
 	}
-	// Primary: ask Stripe to re-email. If it succeeds, we're done.
+	// Primary: ask Stripe to re-email. If it succeeds, stamp and return.
 	if err := s.stripe.SendInvoiceEmail(ctx, *g.StripeInvoiceID); err == nil {
+		meta := registration.ActionMeta{
+			Actor:           actor,
+			Action:          "invoice_resent",
+			ExpectedVersion: expectedVersion,
+		}
+		if err := s.repo.StampOnly(ctx, groupID, meta); err != nil {
+			return mapVersionErr(ctx, s.repo, groupID, err)
+		}
 		return nil
 	} else {
 		log.Printf("billing: Stripe re-send failed for group %s; falling back to Resend: %v", groupID, err)
@@ -363,12 +391,28 @@ func (s *Service) ResendInvoice(ctx context.Context, groupID string) error {
 	}); err != nil {
 		return httpx.Internal(err.Error())
 	}
+	meta := registration.ActionMeta{
+		Actor:           actor,
+		Action:          "invoice_resent",
+		ExpectedVersion: expectedVersion,
+	}
+	if err := s.repo.StampOnly(ctx, groupID, meta); err != nil {
+		return mapVersionErr(ctx, s.repo, groupID, err)
+	}
 	return nil
 }
 
 // ExtendDueAt updates the stored due date (Stripe due date is informational after send).
-func (s *Service) ExtendDueAt(ctx context.Context, groupID string, dueAt time.Time) error {
-	return s.repo.ExtendInvoiceDueAt(ctx, groupID, dueAt)
+func (s *Service) ExtendDueAt(ctx context.Context, groupID, actor string, expectedVersion int, dueAt time.Time) error {
+	meta := registration.ActionMeta{
+		Actor:           actor,
+		Action:          "extend_due",
+		ExpectedVersion: expectedVersion,
+	}
+	if err := s.repo.ExtendInvoiceDueAtMeta(ctx, groupID, dueAt, meta); err != nil {
+		return mapVersionErr(ctx, s.repo, groupID, err)
+	}
+	return nil
 }
 
 // HandleInvoicePaid marks balance paid (idempotent) and notifies the White
@@ -387,7 +431,11 @@ func (s *Service) HandleInvoicePaid(ctx context.Context, stripeInvoiceID, groupI
 	if g.BillingStatus == registration.BillingBalancePaid {
 		return nil
 	}
-	if err := s.repo.MarkBalancePaid(ctx, g.ID); err != nil {
+	if err := s.repo.MarkBalancePaidMeta(ctx, g.ID, registration.ActionMeta{
+		Actor:           "Stripe",
+		Action:          "balance_paid",
+		ExpectedVersion: registration.SkipVersionCheck,
+	}); err != nil {
 		return err
 	}
 	if s.cfg.WhiteTeamEmail != "" {
@@ -422,7 +470,7 @@ func (s *Service) SweepOverdue(ctx context.Context) (int, error) {
 	}
 	n := 0
 	for _, g := range overdue {
-		if err := s.VoidAndRelease(ctx, g.ID, "unpaid after invoice due date"); err != nil {
+		if err := s.VoidAndRelease(ctx, g.ID, "unpaid after invoice due date", "system", registration.SkipVersionCheck); err != nil {
 			log.Printf("billing: sweep release group %s: %v", g.ID, err)
 			continue
 		}

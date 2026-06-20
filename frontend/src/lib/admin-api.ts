@@ -9,7 +9,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
 const TOKEN_KEY = "pc_admin_token";
 
-function getToken(): string | null {
+export function getAdminToken(): string | null {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem(TOKEN_KEY);
 }
@@ -43,7 +43,7 @@ async function adminFetch<T>(
   path: string,
   options?: RequestInit,
 ): Promise<T> {
-  const token = getToken();
+  const token = getAdminToken();
   const res = await fetch(`${API_BASE}${path}`, {
     cache: "no-store",
     credentials: "include",
@@ -117,7 +117,21 @@ export type AdminGroup = {
   created_at: string;
   invoice_due_at?: string | null;
   balance_paid_at?: string | null;
+  version: number;
+  last_action?: string | null;
+  last_action_by?: string | null;
+  last_action_at?: string | null;
   campers: AdminCamper[];
+};
+
+export type AdminEvent = {
+  id: number;
+  created_at: string;
+  actor_name: string;
+  action: string;
+  group_id?: string | null;
+  summary: string;
+  metadata?: unknown;
 };
 
 export type AllocateCamper = {
@@ -137,15 +151,45 @@ export type AdminCampConfig = {
   registrations_open: boolean;
 };
 
+/** Opens the admin SSE stream. Caller must close on unmount. */
+export function openAdminEventStream(handlers: {
+  onEvent: (ev: AdminEvent) => void;
+  onOpen?: () => void;
+  onError?: () => void;
+}): EventSource | null {
+  const token = getAdminToken();
+  if (!token) return null;
+  const url = `${API_BASE}/admin/stream?token=${encodeURIComponent(token)}`;
+  const es = new EventSource(url);
+  es.addEventListener("changed", (msg) => {
+    try {
+      handlers.onEvent(JSON.parse(msg.data) as AdminEvent);
+    } catch {
+      // ignore malformed
+    }
+  });
+  es.onopen = () => handlers.onOpen?.();
+  es.onerror = () => handlers.onError?.();
+  return es;
+}
+
 export const adminApi = {
-  login: async (password: string) => {
-    const res = await adminFetch<{ token?: string }>("/admin/login", {
-      method: "POST",
-      body: JSON.stringify({ password }),
-    });
+  login: async (password: string, firstName: string, lastName: string) => {
+    const res = await adminFetch<{ token?: string; name?: string }>(
+      "/admin/login",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          password,
+          first_name: firstName,
+          last_name: lastName,
+        }),
+      },
+    );
     if (res?.token) {
       setToken(res.token);
     }
+    return res?.name ?? null;
   },
 
   logout: async () => {
@@ -157,7 +201,17 @@ export const adminApi = {
   },
 
   checkSession: () =>
-    adminFetch<void>("/admin/session", { method: "GET" }),
+    adminFetch<{ name: string }>("/admin/session", { method: "GET" }),
+
+  listEvents: (params?: { limit?: number; before?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.limit) q.set("limit", String(params.limit));
+    if (params?.before) q.set("before", String(params.before));
+    const qs = q.toString();
+    return adminFetch<{ events: AdminEvent[] }>(
+      `/admin/events${qs ? `?${qs}` : ""}`,
+    );
+  },
 
   listRegistrations: (params?: {
     status?: string;
@@ -197,20 +251,26 @@ export const adminApi = {
       "/admin/accommodation-units",
     ),
 
-  saveAllocation: (groupId: string, campers: AllocateCamper[]) =>
+  saveAllocation: (
+    groupId: string,
+    campers: AllocateCamper[],
+    expectedVersion: number,
+  ) =>
     adminFetch<void>(`/admin/registrations/${groupId}/allocation`, {
       method: "PUT",
-      body: JSON.stringify({ campers }),
+      body: JSON.stringify({ campers, expected_version: expectedVersion }),
     }),
 
-  unallocate: (groupId: string) =>
+  unallocate: (groupId: string, expectedVersion: number) =>
     adminFetch<void>(`/admin/registrations/${groupId}/unallocate`, {
       method: "POST",
+      body: JSON.stringify({ expected_version: expectedVersion }),
     }),
 
-  sendInvoice: (groupId: string) =>
+  sendInvoice: (groupId: string, expectedVersion: number) =>
     adminFetch<void>(`/admin/registrations/${groupId}/invoice`, {
       method: "POST",
+      body: JSON.stringify({ expected_version: expectedVersion }),
     }),
 
   sendInvoiceBulk: (groupIds: string[]) =>
@@ -222,25 +282,31 @@ export const adminApi = {
       },
     ),
 
-  release: (groupId: string) =>
+  release: (groupId: string, expectedVersion: number) =>
     adminFetch<void>(`/admin/registrations/${groupId}/release`, {
       method: "POST",
+      body: JSON.stringify({ expected_version: expectedVersion }),
     }),
 
-  resendInvoice: (groupId: string) =>
+  resendInvoice: (groupId: string, expectedVersion: number) =>
     adminFetch<void>(`/admin/registrations/${groupId}/invoice/resend`, {
       method: "POST",
+      body: JSON.stringify({ expected_version: expectedVersion }),
     }),
 
-  extendDue: (groupId: string, dueAt: string) =>
+  extendDue: (groupId: string, dueAt: string, expectedVersion: number) =>
     adminFetch<void>(`/admin/registrations/${groupId}/invoice-due`, {
       method: "PATCH",
-      body: JSON.stringify({ due_at: dueAt }),
+      body: JSON.stringify({
+        due_at: dueAt,
+        expected_version: expectedVersion,
+      }),
     }),
 
   sweep: () =>
     adminFetch<{ released: number }>("/admin/billing/sweep", {
       method: "POST",
+      body: JSON.stringify({}),
     }),
 
   campConfig: () => adminFetch<AdminCampConfig>("/admin/camp-config"),

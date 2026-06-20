@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"pagasacentre/backend/internal/adminlog"
 	"pagasacentre/backend/internal/billing"
 	"pagasacentre/backend/internal/camp"
 	"pagasacentre/backend/internal/httpx"
@@ -30,8 +31,9 @@ func Mount(
 	campRepo *camp.Repository,
 	billSvc *billing.Service,
 	contactSvc contactService,
+	rec *adminlog.Recorder,
 ) {
-	r.Post("/login", handleLogin(auth))
+	r.Post("/login", handleLogin(auth, rec))
 	r.Post("/logout", handleLogout(auth))
 	r.Get("/session", handleSession(auth))
 
@@ -43,22 +45,23 @@ func Mount(
 		r.Get("/registrations", listRegistrationsJSON(regRepo))
 		r.Get("/registrations.csv", listRegistrationsCSV(regRepo))
 		r.Patch("/registrations/{groupID}", patchRegistration(regRepo))
-		r.Patch("/registrations/{groupID}/contact", patchContact(contactSvc))
-		r.Put("/prices/{code}", putPrice(campRepo))
+		r.Patch("/registrations/{groupID}/contact", patchContact(contactSvc, rec))
+		r.Put("/prices/{code}", putPrice(campRepo, rec))
 
 		r.Get("/camp-config", getCampConfig(campRepo))
-		r.Put("/registrations-open", putRegistrationsOpen(campRepo))
+		r.Put("/registrations-open", putRegistrationsOpen(campRepo, rec))
 
 		r.Get("/accommodations", listAccommodationTypes(regRepo))
 		r.Get("/accommodation-units", listAccommodationUnits(regRepo))
-		r.Put("/registrations/{groupID}/allocation", putAllocation(billSvc))
-		r.Post("/registrations/{groupID}/unallocate", postUnallocate(billSvc))
-		r.Post("/registrations/{groupID}/invoice", postInvoice(billSvc))
-		r.Post("/registrations/invoice-bulk", postInvoiceBulk(billSvc))
-		r.Post("/registrations/{groupID}/release", postRelease(billSvc))
-		r.Post("/registrations/{groupID}/invoice/resend", postResendInvoice(billSvc))
-		r.Patch("/registrations/{groupID}/invoice-due", patchInvoiceDue(billSvc))
-		r.Post("/billing/sweep", postBillingSweep(billSvc))
+		r.Get("/events", listEvents(rec))
+		r.Put("/registrations/{groupID}/allocation", putAllocation(billSvc, rec, regRepo))
+		r.Post("/registrations/{groupID}/unallocate", postUnallocate(billSvc, rec, regRepo))
+		r.Post("/registrations/{groupID}/invoice", postInvoice(billSvc, rec, regRepo))
+		r.Post("/registrations/invoice-bulk", postInvoiceBulk(billSvc, rec, regRepo))
+		r.Post("/registrations/{groupID}/release", postRelease(billSvc, rec, regRepo))
+		r.Post("/registrations/{groupID}/invoice/resend", postResendInvoice(billSvc, rec, regRepo))
+		r.Patch("/registrations/{groupID}/invoice-due", patchInvoiceDue(billSvc, rec, regRepo))
+		r.Post("/billing/sweep", postBillingSweep(billSvc, rec))
 	})
 }
 
@@ -167,7 +170,7 @@ func patchRegistration(repo *registration.Repository) http.HandlerFunc {
 // patchContact corrects a group's contact details and, if requested, re-sends
 // the deposit confirmation email to the corrected address. Used when someone
 // mistypes their email at registration.
-func patchContact(svc contactService) http.HandlerFunc {
+func patchContact(svc contactService, rec *adminlog.Recorder) http.HandlerFunc {
 	type body struct {
 		FirstName          string `json:"first_name"`
 		LastName           string `json:"last_name"`
@@ -210,6 +213,12 @@ func patchContact(svc contactService) http.HandlerFunc {
 			httpx.WriteError(w, err)
 			return
 		}
+		gid := chi.URLParam(r, "groupID")
+		summary := "Updated contact details for " + b.FirstName + " " + b.LastName
+		if b.ResendConfirmation {
+			summary += " (confirmation email re-sent)"
+		}
+		audit(rec, r, adminlog.ActionContactUpdated, &gid, summary, nil)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -225,7 +234,7 @@ func getCampConfig(repo *camp.Repository) http.HandlerFunc {
 	}
 }
 
-func putRegistrationsOpen(repo *camp.Repository) http.HandlerFunc {
+func putRegistrationsOpen(repo *camp.Repository, rec *adminlog.Recorder) http.HandlerFunc {
 	type body struct {
 		Open *bool `json:"open"`
 	}
@@ -243,11 +252,17 @@ func putRegistrationsOpen(repo *camp.Repository) http.HandlerFunc {
 			httpx.WriteError(w, httpx.Internal(err.Error()))
 			return
 		}
+		state := "closed"
+		if *b.Open {
+			state = "opened"
+		}
+		audit(rec, r, adminlog.ActionRegistrationsToggle, nil,
+			ActorFrom(r.Context())+" "+state+" public registration", map[string]bool{"open": *b.Open})
 		httpx.WriteJSON(w, http.StatusOK, map[string]bool{"registrations_open": *b.Open})
 	}
 }
 
-func putPrice(repo *camp.Repository) http.HandlerFunc {
+func putPrice(repo *camp.Repository, rec *adminlog.Recorder) http.HandlerFunc {
 	type body struct {
 		AmountPence int `json:"amount_pence"`
 	}
@@ -265,6 +280,9 @@ func putPrice(repo *camp.Repository) http.HandlerFunc {
 			httpx.WriteError(w, httpx.Internal(err.Error()))
 			return
 		}
+		code := chi.URLParam(r, "code")
+		audit(rec, r, adminlog.ActionPriceUpdated, nil,
+			ActorFrom(r.Context())+" updated price "+code, map[string]any{"code": code, "amount_pence": b.AmountPence})
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

@@ -6,6 +6,8 @@ import { adminApi, AdminApiError } from "@/lib/admin-api";
 
 export default function AdminLoginForm() {
   const router = useRouter();
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -15,7 +17,7 @@ export default function AdminLoginForm() {
     setError(null);
     setLoading(true);
     try {
-      await adminApi.login(password);
+      await adminApi.login(password, firstName.trim(), lastName.trim());
       router.push("/admin");
       router.refresh();
     } catch (err) {
@@ -39,7 +41,8 @@ export default function AdminLoginForm() {
           Welcome, White Team
         </h1>
         <p className="text-sm text-neutral-600 mt-2">
-          Enter the shared team password to manage camp registrations.
+          Enter your name and the shared team password to manage camp
+          registrations.
         </p>
       </div>
       {error && (
@@ -47,6 +50,43 @@ export default function AdminLoginForm() {
           {error}
         </div>
       )}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex flex-col gap-2">
+          <label
+            htmlFor="admin-first-name"
+            className="text-sm font-semibold text-neutral-700"
+          >
+            First name
+          </label>
+          <input
+            id="admin-first-name"
+            type="text"
+            value={firstName}
+            required
+            autoFocus
+            autoComplete="given-name"
+            onChange={(e) => setFirstName(e.target.value)}
+            className="px-4 py-3 border border-neutral-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <label
+            htmlFor="admin-last-name"
+            className="text-sm font-semibold text-neutral-700"
+          >
+            Last name
+          </label>
+          <input
+            id="admin-last-name"
+            type="text"
+            value={lastName}
+            required
+            autoComplete="family-name"
+            onChange={(e) => setLastName(e.target.value)}
+            className="px-4 py-3 border border-neutral-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        </div>
+      </div>
       <div className="flex flex-col gap-2">
         <label
           htmlFor="admin-password"
@@ -59,7 +99,6 @@ export default function AdminLoginForm() {
           type="password"
           value={password}
           required
-          autoFocus
           autoComplete="current-password"
           onChange={(e) => setPassword(e.target.value)}
           className="px-4 py-3 border border-neutral-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-primary"
