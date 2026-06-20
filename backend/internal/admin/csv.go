@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"pagasacentre/backend/internal/registration"
+	"pagasacentre/backend/internal/registration/domain"
 )
 
 var csvHeader = []string{
@@ -24,7 +24,7 @@ var csvHeader = []string{
 
 // WriteCSV emits a flat CSV — one row per camper — combining group fields and
 // camper fields. Groups without campers are skipped.
-func WriteCSV(w io.Writer, groups []registration.Group, campersByGroup map[string][]registration.Camper) error {
+func WriteCSV(w io.Writer, groups []domain.Group, campersByGroup map[string][]domain.Camper) error {
 	cw := csv.NewWriter(w)
 	defer cw.Flush()
 	if err := cw.Write(csvHeader); err != nil {

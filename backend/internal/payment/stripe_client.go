@@ -11,8 +11,6 @@ import (
 	"pagasacentre/backend/internal/registration"
 )
 
-// StripeClient wraps the stripe-go SDK calls we use. Implements
-// registration.CheckoutCreator.
 type StripeClient struct {
 	secretKey     string
 	webhookSecret string
@@ -30,7 +28,6 @@ func NewStripeClient(secretKey, webhookSecret, successURL, cancelURL string) *St
 	}
 }
 
-// CreateCheckoutSession satisfies registration.CheckoutCreator.
 func (c *StripeClient) CreateCheckoutSession(ctx context.Context, p registration.CheckoutParams) (registration.CheckoutSession, error) {
 	params := &stripe.CheckoutSessionParams{
 		Mode:              stripe.String(string(stripe.CheckoutSessionModePayment)),
@@ -59,14 +56,6 @@ func (c *StripeClient) CreateCheckoutSession(ctx context.Context, p registration
 	return registration.CheckoutSession{ID: sess.ID, URL: sess.URL}, nil
 }
 
-// VerifyWebhook validates a Stripe webhook signature and returns the parsed event.
-//
-// IgnoreAPIVersionMismatch is set because Stripe's default API version drifts
-// faster than we bump stripe-go. The signature check is still performed; only
-// the soft "this event was sent with version X but library was compiled
-// against Y" error is suppressed. We only read top-level fields
-// (event.Type / event.Data.Raw on checkout.session.*) which are stable across
-// versions, so this is safe.
 func (c *StripeClient) VerifyWebhook(body []byte, signature string) (stripe.Event, error) {
 	return webhook.ConstructEventWithOptions(body, signature, c.webhookSecret, webhook.ConstructEventOptions{
 		IgnoreAPIVersionMismatch: true,

@@ -5,17 +5,11 @@ import (
 	"net/http"
 
 	"pagasacentre/backend/internal/adminlog"
-	"pagasacentre/backend/internal/registration"
+	"pagasacentre/backend/internal/registration/domain"
 )
 
-func expectedVersion(v *int) int {
-	if v == nil {
-		return registration.SkipVersionCheck
-	}
-	return *v
-}
-
-func audit(rec *adminlog.Recorder, r *http.Request, action string, groupID *string, summary string, meta any) {
+// Audit records an admin action (exported for api/admin).
+func Audit(rec *adminlog.Recorder, r *http.Request, action string, groupID *string, summary string, meta any) {
 	if rec == nil {
 		return
 	}
@@ -25,7 +19,7 @@ func audit(rec *adminlog.Recorder, r *http.Request, action string, groupID *stri
 	}
 }
 
-func groupSummary(g *registration.Group) string {
+func GroupSummary(g *domain.Group) string {
 	if g == nil {
 		return "a registration group"
 	}

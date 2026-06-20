@@ -4,13 +4,14 @@ import (
 	"errors"
 	"testing"
 
-	"pagasacentre/backend/internal/httpx"
+	"pagasacentre/backend/internal/registration/domain"
+	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 )
 
 func boolPtr(b bool) *bool { return &b }
 
-func validFullWeekCamper(main bool) CamperDTO {
-	return CamperDTO{
+func validFullWeekCamper(main bool) domain.CamperDTO {
+	return domain.CamperDTO{
 		FirstName:      "Jane",
 		LastName:       "Doe",
 		Gender:         "female",
@@ -18,8 +19,8 @@ func validFullWeekCamper(main bool) CamperDTO {
 		CellLeaderName: "Pastor Bob",
 		IsCellLeader:   false,
 		IsMainContact:  main,
-		Attendance: AttendanceDTO{
-			Type:                      AttendanceFullWeek,
+		Attendance: domain.AttendanceDTO{
+			Type:                      domain.AttendanceFullWeek,
 			ShirtSize:                 "adult_m",
 			AccommodationFirstChoice:  "lodge",
 			AccommodationSecondChoice: "cabin",
@@ -27,13 +28,13 @@ func validFullWeekCamper(main bool) CamperDTO {
 	}
 }
 
-func validRequest() SubmitRequest {
-	return SubmitRequest{
-		Contact: ContactDTO{
+func validRequest() domain.SubmitRequest {
+	return domain.SubmitRequest{
+		Contact: domain.ContactDTO{
 			FirstName: "Jane", LastName: "Doe",
 			Email: "jane@example.com", Phone: "+44 1234 567890",
 		},
-		Campers: []CamperDTO{validFullWeekCamper(true)},
+		Campers: []domain.CamperDTO{validFullWeekCamper(true)},
 	}
 }
 
@@ -42,7 +43,7 @@ func assertFieldError(t *testing.T, err error, field string) {
 	if err == nil {
 		t.Fatalf("expected error for field %s, got nil", field)
 	}
-	var apiErr httpx.APIError
+	var apiErr commonerrors.APIError
 	if !errors.As(err, &apiErr) {
 		t.Fatalf("expected APIError, got %T: %v", err, err)
 	}
@@ -148,10 +149,10 @@ func TestValidate_RoommateRequestsTooLong(t *testing.T) {
 
 func TestValidate_DayPassEmptyDays(t *testing.T) {
 	req := validRequest()
-	req.Campers[0].Attendance = AttendanceDTO{
-		Type:          AttendanceDayPass,
+	req.Campers[0].Attendance = domain.AttendanceDTO{
+		Type:          domain.AttendanceDayPass,
 		Days:          nil,
-		TshirtOption:  TshirtOptionNone,
+		TshirtOption:  domain.TshirtOptionNone,
 		NeedsCatering: boolPtr(false),
 	}
 	assertFieldError(t, Validate(req), "campers[0].attendance.days")
@@ -159,10 +160,10 @@ func TestValidate_DayPassEmptyDays(t *testing.T) {
 
 func TestValidate_DayPassTeamActivitiesRequiresShirtSize(t *testing.T) {
 	req := validRequest()
-	req.Campers[0].Attendance = AttendanceDTO{
-		Type:          AttendanceDayPass,
+	req.Campers[0].Attendance = domain.AttendanceDTO{
+		Type:          domain.AttendanceDayPass,
 		Days:          []string{"mon", "tue"},
-		TshirtOption:  TshirtOptionTeamActivities,
+		TshirtOption:  domain.TshirtOptionTeamActivities,
 		ShirtSize:     "",
 		NeedsCatering: boolPtr(true),
 	}
@@ -177,17 +178,17 @@ func TestValidate_FullWeekInvalidShirtSize(t *testing.T) {
 
 func TestValidate_FullWeekRejectsNotApplicable(t *testing.T) {
 	req := validRequest()
-	req.Campers[0].Attendance.ShirtSize = ShirtSizeNotApplicable
+	req.Campers[0].Attendance.ShirtSize = domain.ShirtSizeNotApplicable
 	assertFieldError(t, Validate(req), "campers[0].attendance.shirt_size")
 }
 
 func TestValidate_DayPassNoneAcceptsNotApplicable(t *testing.T) {
 	req := validRequest()
-	req.Campers[0].Attendance = AttendanceDTO{
-		Type:          AttendanceDayPass,
+	req.Campers[0].Attendance = domain.AttendanceDTO{
+		Type:          domain.AttendanceDayPass,
 		Days:          []string{"mon"},
-		TshirtOption:  TshirtOptionNone,
-		ShirtSize:     ShirtSizeNotApplicable,
+		TshirtOption:  domain.TshirtOptionNone,
+		ShirtSize:     domain.ShirtSizeNotApplicable,
 		NeedsCatering: boolPtr(false),
 	}
 	if err := Validate(req); err != nil {
@@ -197,10 +198,10 @@ func TestValidate_DayPassNoneAcceptsNotApplicable(t *testing.T) {
 
 func TestValidate_DayPassNoneAcceptsEmptyShirt(t *testing.T) {
 	req := validRequest()
-	req.Campers[0].Attendance = AttendanceDTO{
-		Type:          AttendanceDayPass,
+	req.Campers[0].Attendance = domain.AttendanceDTO{
+		Type:          domain.AttendanceDayPass,
 		Days:          []string{"mon"},
-		TshirtOption:  TshirtOptionNone,
+		TshirtOption:  domain.TshirtOptionNone,
 		ShirtSize:     "",
 		NeedsCatering: boolPtr(false),
 	}
@@ -211,10 +212,10 @@ func TestValidate_DayPassNoneAcceptsEmptyShirt(t *testing.T) {
 
 func TestValidate_DayPassNoneRejectsRealSize(t *testing.T) {
 	req := validRequest()
-	req.Campers[0].Attendance = AttendanceDTO{
-		Type:          AttendanceDayPass,
+	req.Campers[0].Attendance = domain.AttendanceDTO{
+		Type:          domain.AttendanceDayPass,
 		Days:          []string{"mon"},
-		TshirtOption:  TshirtOptionNone,
+		TshirtOption:  domain.TshirtOptionNone,
 		ShirtSize:     "adult_m",
 		NeedsCatering: boolPtr(false),
 	}
@@ -223,11 +224,11 @@ func TestValidate_DayPassNoneRejectsRealSize(t *testing.T) {
 
 func TestValidate_DayPassTeamActivitiesRejectsNotApplicable(t *testing.T) {
 	req := validRequest()
-	req.Campers[0].Attendance = AttendanceDTO{
-		Type:          AttendanceDayPass,
+	req.Campers[0].Attendance = domain.AttendanceDTO{
+		Type:          domain.AttendanceDayPass,
 		Days:          []string{"mon"},
-		TshirtOption:  TshirtOptionTeamActivities,
-		ShirtSize:     ShirtSizeNotApplicable,
+		TshirtOption:  domain.TshirtOptionTeamActivities,
+		ShirtSize:     domain.ShirtSizeNotApplicable,
 		NeedsCatering: boolPtr(true),
 	}
 	assertFieldError(t, Validate(req), "campers[0].attendance.shirt_size")
@@ -239,12 +240,12 @@ func TestIsRealShirtSize(t *testing.T) {
 		"ADULT_M":         true, // case-insensitive
 		"child_3_4y":      true,
 		"child_12_18m":    true,
-		ShirtSizeNotApplicable: false, // n/a is not a "real" size
+		domain.ShirtSizeNotApplicable: false, // n/a is not a "real" size
 		"potato":          false,
 		"":                false,
 	}
 	for in, want := range cases {
-		if got := IsRealShirtSize(in); got != want {
+		if got := domain.IsRealShirtSize(in); got != want {
 			t.Errorf("IsRealShirtSize(%q) = %v, want %v", in, got, want)
 		}
 	}
@@ -252,10 +253,10 @@ func TestIsRealShirtSize(t *testing.T) {
 
 func TestValidate_DayPassInvalidDay(t *testing.T) {
 	req := validRequest()
-	req.Campers[0].Attendance = AttendanceDTO{
-		Type:          AttendanceDayPass,
+	req.Campers[0].Attendance = domain.AttendanceDTO{
+		Type:          domain.AttendanceDayPass,
 		Days:          []string{"sat"},
-		TshirtOption:  TshirtOptionNone,
+		TshirtOption:  domain.TshirtOptionNone,
 		NeedsCatering: boolPtr(false),
 	}
 	assertFieldError(t, Validate(req), "campers[0].attendance.days")

@@ -9,24 +9,21 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"pagasacentre/backend/internal/email"
-	"pagasacentre/backend/internal/httpx"
+	"pagasacentre/backend/internal/registration/domain"
+	"pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/sheets"
+	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 )
 
-// PriceLookup returns the current amount and currency for a price code.
 type PriceLookup interface {
 	GetPrice(ctx context.Context, code string) (PriceRow, error)
 }
 
-// PriceRow is what PriceLookup returns. We use a local type so registration
-// doesn't import the camp package directly.
 type PriceRow struct {
 	AmountPence int
 	Currency    string
 }
 
-// CheckoutCreator is implemented by the Stripe client. It's defined in this
-// package so the service depends only on the small surface it actually uses.
 type CheckoutCreator interface {
 	CreateCheckoutSession(ctx context.Context, p CheckoutParams) (CheckoutSession, error)
 }
@@ -44,14 +41,12 @@ type CheckoutSession struct {
 	URL string
 }
 
-// CampConfigReader returns the runtime camp config (used to check that
-// registrations are open).
 type CampConfigReader interface {
 	RegistrationsOpen(ctx context.Context) (bool, error)
 }
 
 type Service struct {
-	repo          *Repository
+	repo          *storage.Repository
 	prices        PriceLookup
 	stripe        CheckoutCreator
 	camp          CampConfigReader
@@ -61,7 +56,7 @@ type Service struct {
 }
 
 func NewService(
-	repo *Repository,
+	repo *storage.Repository,
 	prices PriceLookup,
 	stripe CheckoutCreator,
 	campCfg CampConfigReader,
@@ -83,22 +78,17 @@ func NewService(
 	}
 }
 
-// Submit validates the request, persists the pending group and campers, then
-// either:
-//   - creates a Stripe Checkout session (total > 0), or
-//   - marks the group paid + sends a confirmation email inline (total == 0,
-//     i.e. day-pass-only registrations).
-func (s *Service) Submit(ctx context.Context, req SubmitRequest) (*SubmitResponse, error) {
+func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain.SubmitResponse, error) {
 	if err := Validate(req); err != nil {
 		return nil, err
 	}
 
 	open, err := s.camp.RegistrationsOpen(ctx)
 	if err != nil {
-		return nil, httpx.Internal(err.Error())
+		return nil, commonerrors.Internal(err.Error())
 	}
 	if !open {
-		return nil, httpx.APIError{
+		return nil, commonerrors.APIError{
 			Code:    "registrations_closed",
 			Message: "Camp registrations are currently closed",
 		}
@@ -106,27 +96,27 @@ func (s *Service) Submit(ctx context.Context, req SubmitRequest) (*SubmitRespons
 
 	total, currency, err := s.computeTotal(ctx, req)
 	if err != nil {
-		return nil, httpx.Internal(err.Error())
+		return nil, commonerrors.Internal(err.Error())
 	}
 
 	tx, err := s.repo.Pool().BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return nil, httpx.Internal(err.Error())
+		return nil, commonerrors.Internal(err.Error())
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	groupID, err := s.repo.InsertGroup(ctx, tx, req, total, currency)
 	if err != nil {
-		return nil, httpx.Internal(err.Error())
+		return nil, commonerrors.Internal(err.Error())
 	}
 	for _, c := range req.Campers {
 		if err := s.repo.InsertCamper(ctx, tx, groupID, c); err != nil {
-			return nil, httpx.Internal(err.Error())
+			return nil, commonerrors.Internal(err.Error())
 		}
 	}
 
 	hasMinor := HasMinor(req)
-	resp := &SubmitResponse{
+	resp := &domain.SubmitResponse{
 		GroupID:          groupID,
 		TotalAmountPence: total,
 		HasMinor:         hasMinor,
@@ -136,19 +126,15 @@ func (s *Service) Submit(ctx context.Context, req SubmitRequest) (*SubmitRespons
 	}
 
 	if total == 0 {
-		// Day-pass-only registration: no Stripe round-trip needed. Mark paid
-		// immediately and fire the confirmation email so the user gets the
-		// same "what to expect next" copy as deposit-paying groups.
 		if err := s.repo.MarkPaid(ctx, tx, groupID, ""); err != nil {
-			return nil, httpx.Internal(err.Error())
+			return nil, commonerrors.Internal(err.Error())
 		}
 		if err := tx.Commit(ctx); err != nil {
-			return nil, httpx.Internal(err.Error())
+			return nil, commonerrors.Internal(err.Error())
 		}
 		s.sendConfirmationEmail(ctx, req, total, currency, hasMinor)
-		// Zero-total path skips Pending entirely — write straight to Paid.
 		now := time.Now().UTC()
-		rows := rowsFromRequest(groupID, req, PaymentPaid, total, currency, now, &now)
+		rows := rowsFromRequest(groupID, req, domain.PaymentPaid, total, currency, now, &now)
 		if err := s.sheets.AppendPaidAndRemovePending(ctx, groupID, rows); err != nil {
 			log.Printf("sheets append paid (group %s): %v", groupID, err)
 		}
@@ -164,19 +150,17 @@ func (s *Service) Submit(ctx context.Context, req SubmitRequest) (*SubmitRespons
 		Description: fmt.Sprintf("PC Summer Camp 2026 non-refundable deposit (%d camper%s)", paying, pluralS(paying)),
 	})
 	if err != nil {
-		return nil, httpx.Internal(fmt.Sprintf("stripe checkout: %s", err.Error()))
+		return nil, commonerrors.Internal(fmt.Sprintf("stripe checkout: %s", err.Error()))
 	}
 	if err := s.repo.SetStripeSession(ctx, tx, groupID, session.ID); err != nil {
-		return nil, httpx.Internal(err.Error())
+		return nil, commonerrors.Internal(err.Error())
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return nil, httpx.Internal(err.Error())
+		return nil, commonerrors.Internal(err.Error())
 	}
 
-	// Append to Pending tab so leaders can see the registration even before
-	// the Stripe webhook fires. Failure is non-fatal — checkout flow continues.
-	pendingRows := rowsFromRequest(groupID, req, PaymentPending, total, currency, time.Now().UTC(), nil)
+	pendingRows := rowsFromRequest(groupID, req, domain.PaymentPending, total, currency, time.Now().UTC(), nil)
 	if err := s.sheets.AppendPending(ctx, pendingRows); err != nil {
 		log.Printf("sheets append pending (group %s): %v", groupID, err)
 	}
@@ -185,10 +169,7 @@ func (s *Service) Submit(ctx context.Context, req SubmitRequest) (*SubmitRespons
 	return resp, nil
 }
 
-// rowsFromRequest builds one sheets.Row per camper in the SubmitRequest,
-// denormalising the group-level contact fields onto each row to match the
-// CSV export layout.
-func rowsFromRequest(groupID string, req SubmitRequest, status string, totalPence int, currency string, submittedAt time.Time, paidAt *time.Time) []sheets.Row {
+func rowsFromRequest(groupID string, req domain.SubmitRequest, status string, totalPence int, currency string, submittedAt time.Time, paidAt *time.Time) []sheets.Row {
 	rows := make([]sheets.Row, 0, len(req.Campers))
 	for _, c := range req.Campers {
 		row := sheets.Row{
@@ -212,14 +193,14 @@ func rowsFromRequest(groupID string, req SubmitRequest, status string, totalPenc
 			AttendanceType:   c.Attendance.Type,
 		}
 		switch c.Attendance.Type {
-		case AttendanceFullWeek:
+		case domain.AttendanceFullWeek:
 			row.ShirtSize = ptrIfNotEmpty(c.Attendance.ShirtSize)
 			row.DietaryRequirements = ptrIfNotEmpty(c.Attendance.DietaryRequirements)
 			row.NeedsCoach = c.Attendance.NeedsCoach
 			row.AccommodationFirstChoice = ptrIfNotEmpty(c.Attendance.AccommodationFirstChoice)
 			row.AccommodationSecondChoice = ptrIfNotEmpty(c.Attendance.AccommodationSecondChoice)
 			row.RoommateRequests = ptrIfNotEmpty(c.Attendance.RoommateRequests)
-		case AttendanceDayPass:
+		case domain.AttendanceDayPass:
 			row.DayPassDays = c.Attendance.Days
 			row.DayPassTshirtOption = ptrIfNotEmpty(c.Attendance.TshirtOption)
 			row.DayPassNeedsCatering = c.Attendance.NeedsCatering
@@ -236,11 +217,8 @@ func ptrIfNotEmpty(s string) *string {
 	return &s
 }
 
-// computeTotal returns the £-deposit total for the group: flat per
-// deposit-paying camper (full-week AND age >= MinDepositAge). Day-pass
-// campers and under-3s contribute 0.
-func (s *Service) computeTotal(ctx context.Context, req SubmitRequest) (totalPence int, currency string, err error) {
-	deposit, err := s.prices.GetPrice(ctx, PriceDeposit)
+func (s *Service) computeTotal(ctx context.Context, req domain.SubmitRequest) (totalPence int, currency string, err error) {
+	deposit, err := s.prices.GetPrice(ctx, domain.PriceDeposit)
 	if err != nil {
 		return 0, "", fmt.Errorf("lookup deposit price: %w", err)
 	}
@@ -252,11 +230,7 @@ func (s *Service) computeTotal(ctx context.Context, req SubmitRequest) (totalPen
 	return totalPence, currency, nil
 }
 
-// sendConfirmationEmail dispatches the deposit / day-pass confirmation. Failure
-// is logged but not surfaced to the caller — the registration is already
-// committed at this point, and we'd rather a user see "success" + chase a
-// missing email than have the submit appear to fail after the fact.
-func (s *Service) sendConfirmationEmail(ctx context.Context, req SubmitRequest, totalPence int, currency string, hasMinor bool) {
+func (s *Service) sendConfirmationEmail(ctx context.Context, req domain.SubmitRequest, totalPence int, currency string, hasMinor bool) {
 	if s.mailer == nil {
 		return
 	}
@@ -278,23 +252,17 @@ func (s *Service) sendConfirmationEmail(ctx context.Context, req SubmitRequest, 
 	}
 }
 
-// MinDepositAge is the youngest age that has to pay the deposit. Campers
-// under this age attend free (cot / lap-of-parent etc.).
 const MinDepositAge = 4
 
-// Summary loads a public-facing summary of a registration for display on the
-// success page. Lookup is by sessionID OR groupID — exactly one of those
-// should be non-empty. Returns (nil, nil) if no group matches; the caller
-// should map that to 404.
-func (s *Service) Summary(ctx context.Context, sessionID, groupID string) (*SummaryResponse, error) {
+func (s *Service) Summary(ctx context.Context, sessionID, groupID string) (*domain.SummaryResponse, error) {
 	if sessionID == "" && groupID == "" {
-		return nil, httpx.APIError{
+		return nil, commonerrors.APIError{
 			Code:    "missing_identifier",
 			Message: "either session_id or group_id is required",
 		}
 	}
 
-	var group *Group
+	var group *domain.Group
 	var err error
 	if sessionID != "" {
 		group, err = s.repo.FindGroupBySessionID(ctx, sessionID)
@@ -302,7 +270,7 @@ func (s *Service) Summary(ctx context.Context, sessionID, groupID string) (*Summ
 		group, err = s.repo.FindGroupByID(ctx, groupID)
 	}
 	if err != nil {
-		return nil, httpx.Internal(err.Error())
+		return nil, commonerrors.Internal(err.Error())
 	}
 	if group == nil {
 		return nil, nil
@@ -310,18 +278,18 @@ func (s *Service) Summary(ctx context.Context, sessionID, groupID string) (*Summ
 
 	campers, err := s.repo.CampersForGroup(ctx, group.ID)
 	if err != nil {
-		return nil, httpx.Internal(err.Error())
+		return nil, commonerrors.Internal(err.Error())
 	}
-	out := &SummaryResponse{
+	out := &domain.SummaryResponse{
 		GroupID:          group.ID,
 		PaymentStatus:    group.PaymentStatus,
 		TotalAmountPence: group.TotalAmountPence,
 		Currency:         group.Currency,
 		ContactEmail:     group.ContactEmail,
-		Campers:          make([]SummaryCamper, 0, len(campers)),
+		Campers:          make([]domain.SummaryCamper, 0, len(campers)),
 	}
 	for _, c := range campers {
-		out.Campers = append(out.Campers, SummaryCamper{
+		out.Campers = append(out.Campers, domain.SummaryCamper{
 			FirstName: c.FirstName,
 			LastName:  c.LastName,
 		})
@@ -329,12 +297,10 @@ func (s *Service) Summary(ctx context.Context, sessionID, groupID string) (*Summ
 	return out, nil
 }
 
-// depositPayingCount returns the number of campers in the request who owe a
-// deposit: full-week AND age >= MinDepositAge.
-func depositPayingCount(req SubmitRequest) int {
+func depositPayingCount(req domain.SubmitRequest) int {
 	n := 0
 	for _, c := range req.Campers {
-		if c.Attendance.Type == AttendanceFullWeek && c.Age >= MinDepositAge {
+		if c.Attendance.Type == domain.AttendanceFullWeek && c.Age >= MinDepositAge {
 			n++
 		}
 	}

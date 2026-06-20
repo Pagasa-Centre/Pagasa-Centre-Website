@@ -1,16 +1,18 @@
 package accommodation
 
-import "context"
+import (
+	"context"
 
-// Service is a thin layer over the repository so handlers don't talk to SQL
-// directly.
+	"pagasacentre/backend/internal/accommodation/domain"
+	"pagasacentre/backend/internal/accommodation/storage"
+)
+
 type Service struct {
-	repo *Repository
+	repo *storage.Repository
 }
 
-func NewService(repo *Repository) *Service { return &Service{repo: repo} }
+func NewService(repo *storage.Repository) *Service { return &Service{repo: repo} }
 
-// ListOptions returns the catalogue of accommodation options.
-func (s *Service) ListOptions(ctx context.Context) ([]Option, error) {
+func (s *Service) ListOptions(ctx context.Context) ([]domain.Option, error) {
 	return s.repo.ListOptions(ctx)
 }

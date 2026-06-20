@@ -11,8 +11,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+regapi "pagasacentre/backend/internal/api/registration"
 	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/registration"
+	"pagasacentre/backend/internal/registration/domain"
+	regstorage "pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/testhelper"
 )
 
@@ -22,7 +25,7 @@ import (
 type fakePrices struct{}
 
 func (fakePrices) GetPrice(_ context.Context, code string) (registration.PriceRow, error) {
-	if code == registration.PriceDeposit {
+	if code == domain.PriceDeposit {
 		return registration.PriceRow{AmountPence: 5000, Currency: "GBP"}, nil
 	}
 	return registration.PriceRow{}, nil
@@ -80,12 +83,13 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	pool := testhelper.MaybePool(t)
-	repo := registration.NewRepository(pool)
+	repo := regstorage.NewRepository(pool)
 	stripe := &fakeCheckout{id: "sess_test", url: "https://checkout.stripe.com/test"}
 	mailer := &recordingMailer{}
 	svc := registration.NewService(repo, fakePrices{}, stripe, fakeCamp{open: true}, mailer, nil, "http://localhost:8080")
 	r := chi.NewRouter()
-	registration.Mount(r, svc)
+	h := regapi.NewHandler(svc)
+	r.Post("/registrations", h.Submit())
 	return &harness{router: r, stripe: stripe, mailer: mailer}
 }
 
@@ -152,7 +156,7 @@ func TestPostRegistrations_FullWeek_CreatesStripeCheckout(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
-	var resp registration.SubmitResponse
+	var resp domain.SubmitResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +183,7 @@ func TestPostRegistrations_DayPassOnly_SkipsStripeAndEmailsImmediately(t *testin
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
-	var resp registration.SubmitResponse
+	var resp domain.SubmitResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}

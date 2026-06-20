@@ -9,7 +9,8 @@ import (
 
 	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/payment"
-	"pagasacentre/backend/internal/registration"
+	"pagasacentre/backend/internal/registration/domain"
+	"pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/testhelper"
 )
 
@@ -49,22 +50,22 @@ func (m *recordingMailer) callCount() int {
 
 // seedPendingGroup commits a pending registration_group + camper with the given
 // session id. Returns the group id.
-func seedPendingGroup(t *testing.T, ctx context.Context, repo *registration.Repository, sessID, emailAddr string) string {
+func seedPendingGroup(t *testing.T, ctx context.Context, repo *storage.Repository, sessID, emailAddr string) string {
 	t.Helper()
 	tx, err := repo.Pool().BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	req := registration.SubmitRequest{
-		Contact: registration.ContactDTO{
+	req := domain.SubmitRequest{
+		Contact: domain.ContactDTO{
 			FirstName: "Web", LastName: "Hook", Email: emailAddr, Phone: "+44 0",
 		},
-		Campers: []registration.CamperDTO{{
+		Campers: []domain.CamperDTO{{
 			FirstName: "Web", LastName: "Hook", Gender: "female", Age: 25,
 			CellLeaderName: "Pastor", IsMainContact: true,
-			Attendance: registration.AttendanceDTO{
-				Type:                      registration.AttendanceFullWeek,
+			Attendance: domain.AttendanceDTO{
+				Type:                      domain.AttendanceFullWeek,
 				ShirtSize:                 "adult_m",
 				AccommodationFirstChoice:  "lodge",
 				AccommodationSecondChoice: "cabin",
@@ -90,7 +91,7 @@ func seedPendingGroup(t *testing.T, ctx context.Context, repo *registration.Repo
 func TestHandleCheckoutCompleted_MarksPaidAndSendsEmail(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
-	repo := registration.NewRepository(pool)
+	repo := storage.NewRepository(pool)
 
 	_ = seedPendingGroup(t, ctx, repo, "sess_happy", "happy@example.com")
 	mailer := &recordingMailer{}
@@ -122,7 +123,7 @@ func TestHandleCheckoutCompleted_MarksPaidAndSendsEmail(t *testing.T) {
 func TestHandleCheckoutCompleted_Idempotent(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
-	repo := registration.NewRepository(pool)
+	repo := storage.NewRepository(pool)
 
 	_ = seedPendingGroup(t, ctx, repo, "sess_idem", "idem@example.com")
 	mailer := &recordingMailer{}

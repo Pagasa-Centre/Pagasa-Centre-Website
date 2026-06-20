@@ -8,19 +8,21 @@ import (
 	"time"
 
 	"pagasacentre/backend/internal/email"
-	"pagasacentre/backend/internal/httpx"
 	"pagasacentre/backend/internal/registration"
+	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
+	"pagasacentre/backend/internal/registration/domain"
+	"pagasacentre/backend/internal/registration/storage"
 )
 
 // Service coordinates allocation, Stripe Invoices, and release sweeps.
 type Service struct {
-	repo   *registration.Repository
+	repo   *storage.Repository
 	stripe *StripeBilling
 	mailer email.Mailer
 	cfg    Config
 }
 
-func NewService(repo *registration.Repository, stripe *StripeBilling, mailer email.Mailer, cfg Config) *Service {
+func NewService(repo *storage.Repository, stripe *StripeBilling, mailer email.Mailer, cfg Config) *Service {
 	if cfg.InvoiceDueDays <= 0 {
 		cfg.InvoiceDueDays = 15
 	}
@@ -31,42 +33,42 @@ func NewService(repo *registration.Repository, stripe *StripeBilling, mailer ema
 func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedVersion int, req AllocateRequest) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return httpx.Internal(err.Error())
+		return commonerrors.Internal(err.Error())
 	}
 	if g == nil {
-		return httpx.NotFound("group not found")
+		return commonerrors.NotFound("group not found")
 	}
-	if g.PaymentStatus != registration.PaymentPaid {
-		return httpx.BadRequest("deposit must be paid before allocation", nil)
+	if g.PaymentStatus != domain.PaymentPaid {
+		return commonerrors.BadRequest("deposit must be paid before allocation", nil)
 	}
-	if g.BillingStatus == registration.BillingInvoiced {
-		return httpx.BadRequest("cannot change allocation while invoice is open; release first", nil)
+	if g.BillingStatus == domain.BillingInvoiced {
+		return commonerrors.BadRequest("cannot change allocation while invoice is open; release first", nil)
 	}
-	if g.BillingStatus == registration.BillingBalancePaid {
-		return httpx.BadRequest("balance already paid", nil)
+	if g.BillingStatus == domain.BillingBalancePaid {
+		return commonerrors.BadRequest("balance already paid", nil)
 	}
 
 	campers, err := s.repo.CampersForGroup(ctx, groupID)
 	if err != nil {
-		return httpx.Internal(err.Error())
+		return commonerrors.Internal(err.Error())
 	}
-	byID := map[string]registration.Camper{}
+	byID := map[string]domain.Camper{}
 	for _, c := range campers {
 		byID[c.ID] = c
 	}
 
-	var allocs []registration.CamperAllocation
+	var allocs []storage.CamperAllocation
 	for _, a := range req.Campers {
 		c, ok := byID[a.CamperID]
 		if !ok {
-			return httpx.BadRequest("unknown camper_id "+a.CamperID, nil)
+			return commonerrors.BadRequest("unknown camper_id "+a.CamperID, nil)
 		}
-		if c.AttendanceType != registration.AttendanceFullWeek {
+		if c.AttendanceType != domain.AttendanceFullWeek {
 			continue
 		}
 		code := strings.TrimSpace(a.AllocatedAccommodationCode)
 		if code == "" {
-			return httpx.ValidationFailed(map[string]string{
+			return commonerrors.ValidationFailed(map[string]string{
 				a.CamperID: "allocated_accommodation_code is required for full-week campers",
 			})
 		}
@@ -74,14 +76,14 @@ func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedV
 		if priceID == "" {
 			priceID, err = s.resolvePriceID(ctx, code, c.Age)
 			if err != nil {
-				return httpx.BadRequest(err.Error(), nil)
+				return commonerrors.BadRequest(err.Error(), nil)
 			}
 		}
 		unitCode := strings.TrimSpace(a.AllocatedUnitCode)
 		if err := s.validateAllocatedUnit(ctx, code, unitCode); err != nil {
 			return err
 		}
-		allocs = append(allocs, registration.CamperAllocation{
+		allocs = append(allocs, storage.CamperAllocation{
 			CamperID:                   a.CamperID,
 			AllocatedAccommodationCode: code,
 			AllocatedUnitCode:          unitCode,
@@ -91,7 +93,7 @@ func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedV
 
 	// Every full-week camper must be allocated.
 	for _, c := range campers {
-		if c.AttendanceType != registration.AttendanceFullWeek {
+		if c.AttendanceType != domain.AttendanceFullWeek {
 			continue
 		}
 		found := false
@@ -102,13 +104,13 @@ func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedV
 			}
 		}
 		if !found {
-			return httpx.ValidationFailed(map[string]string{
+			return commonerrors.ValidationFailed(map[string]string{
 				"campers": fmt.Sprintf("full-week camper %s %s is not allocated", c.FirstName, c.LastName),
 			})
 		}
 	}
 
-	meta := registration.ActionMeta{
+	meta := domain.ActionMeta{
 		Actor:           actor,
 		Action:          "allocated",
 		ExpectedVersion: expectedVersion,
@@ -125,18 +127,18 @@ func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedV
 func (s *Service) Unallocate(ctx context.Context, groupID, actor string, expectedVersion int) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return httpx.Internal(err.Error())
+		return commonerrors.Internal(err.Error())
 	}
 	if g == nil {
-		return httpx.NotFound("group not found")
+		return commonerrors.NotFound("group not found")
 	}
 	switch g.BillingStatus {
-	case registration.BillingInvoiced:
-		return httpx.BadRequest("invoice is open; use release instead", nil)
-	case registration.BillingBalancePaid:
-		return httpx.BadRequest("balance already paid", nil)
+	case domain.BillingInvoiced:
+		return commonerrors.BadRequest("invoice is open; use release instead", nil)
+	case domain.BillingBalancePaid:
+		return commonerrors.BadRequest("balance already paid", nil)
 	}
-	meta := registration.ActionMeta{
+	meta := domain.ActionMeta{
 		Actor:           actor,
 		Action:          "unallocated",
 		ExpectedVersion: expectedVersion,
@@ -155,13 +157,13 @@ func (s *Service) validateAllocatedUnit(ctx context.Context, tierCode, unitCode 
 	}
 	u, err := s.repo.GetAccommodationUnit(ctx, unitCode)
 	if err != nil {
-		return httpx.Internal(err.Error())
+		return commonerrors.Internal(err.Error())
 	}
 	if u == nil {
-		return httpx.BadRequest("unknown unit "+unitCode, nil)
+		return commonerrors.BadRequest("unknown unit "+unitCode, nil)
 	}
 	if u.AccommodationCode != tierCode {
-		return httpx.BadRequest(
+		return commonerrors.BadRequest(
 			fmt.Sprintf("unit %q belongs to %q, not %q", unitCode, u.AccommodationCode, tierCode),
 			nil,
 		)
@@ -193,34 +195,34 @@ func (s *Service) resolvePriceID(ctx context.Context, accommodationCode string, 
 func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expectedVersion int) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return httpx.Internal(err.Error())
+		return commonerrors.Internal(err.Error())
 	}
 	if g == nil {
-		return httpx.NotFound("group not found")
+		return commonerrors.NotFound("group not found")
 	}
-	if g.PaymentStatus != registration.PaymentPaid {
-		return httpx.BadRequest("deposit must be paid first", nil)
+	if g.PaymentStatus != domain.PaymentPaid {
+		return commonerrors.BadRequest("deposit must be paid first", nil)
 	}
 	switch g.BillingStatus {
-	case registration.BillingBalancePaid:
-		return httpx.BadRequest("balance already paid", nil)
-	case registration.BillingInvoiced:
-		return httpx.BadRequest("invoice already sent", nil)
-	case registration.BillingNone, registration.BillingReleased:
-		return httpx.BadRequest("group must be allocated before invoicing", nil)
+	case domain.BillingBalancePaid:
+		return commonerrors.BadRequest("balance already paid", nil)
+	case domain.BillingInvoiced:
+		return commonerrors.BadRequest("invoice already sent", nil)
+	case domain.BillingNone, domain.BillingReleased:
+		return commonerrors.BadRequest("group must be allocated before invoicing", nil)
 	}
 
 	campers, err := s.repo.CampersForGroup(ctx, groupID)
 	if err != nil {
-		return httpx.Internal(err.Error())
+		return commonerrors.Internal(err.Error())
 	}
 	var priceIDs []string
 	for _, c := range campers {
-		if c.AttendanceType != registration.AttendanceFullWeek {
+		if c.AttendanceType != domain.AttendanceFullWeek {
 			continue
 		}
 		if c.AllocatedAccommodationCode == nil || strings.TrimSpace(*c.AllocatedAccommodationCode) == "" {
-			return httpx.BadRequest(fmt.Sprintf("camper %s %s is not allocated", c.FirstName, c.LastName), nil)
+			return commonerrors.BadRequest(fmt.Sprintf("camper %s %s is not allocated", c.FirstName, c.LastName), nil)
 		}
 		// Re-resolve the Stripe Price from the CURRENT accommodation config at
 		// send time rather than replaying the value stored when the allocation
@@ -229,12 +231,12 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 		// "No such price".
 		priceID, err := s.resolvePriceID(ctx, strings.TrimSpace(*c.AllocatedAccommodationCode), c.Age)
 		if err != nil {
-			return httpx.BadRequest(err.Error(), nil)
+			return commonerrors.BadRequest(err.Error(), nil)
 		}
 		priceIDs = append(priceIDs, priceID)
 	}
 	if len(priceIDs) == 0 {
-		return httpx.BadRequest("no full-week campers to invoice", nil)
+		return commonerrors.BadRequest("no full-week campers to invoice", nil)
 	}
 
 	customerID := ""
@@ -244,20 +246,20 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 	name := strings.TrimSpace(g.ContactFirstName + " " + g.ContactLastName)
 	customerID, err = s.stripe.EnsureCustomer(ctx, customerID, g.ContactEmail, name, g.ID)
 	if err != nil {
-		return httpx.Internal(err.Error())
+		return commonerrors.Internal(err.Error())
 	}
 	if customerID != "" && (g.StripeCustomerID == nil || *g.StripeCustomerID != customerID) {
 		if err := s.repo.SetStripeCustomerID(ctx, groupID, customerID); err != nil {
-			return httpx.Internal(err.Error())
+			return commonerrors.Internal(err.Error())
 		}
 	}
 
 	res, err := s.stripe.CreateInvoice(
 		ctx, customerID, g.ID, priceIDs, int64(s.cfg.InvoiceDueDays))
 	if err != nil {
-		return httpx.Internal(err.Error())
+		return commonerrors.Internal(err.Error())
 	}
-	meta := registration.ActionMeta{
+	meta := domain.ActionMeta{
 		Actor:           actor,
 		Action:          "invoice_sent",
 		ExpectedVersion: expectedVersion,
@@ -286,7 +288,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 func (s *Service) SendInvoicesBulk(ctx context.Context, actor string, groupIDs []string) map[string]string {
 	errs := map[string]string{}
 	for _, id := range groupIDs {
-		if err := s.SendInvoice(ctx, id, actor, registration.SkipVersionCheck); err != nil {
+		if err := s.SendInvoice(ctx, id, actor, domain.SkipVersionCheck); err != nil {
 			errs[id] = err.Error()
 		}
 	}
@@ -297,19 +299,19 @@ func (s *Service) SendInvoicesBulk(ctx context.Context, actor string, groupIDs [
 func (s *Service) VoidAndRelease(ctx context.Context, groupID, reason, actor string, expectedVersion int) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return httpx.Internal(err.Error())
+		return commonerrors.Internal(err.Error())
 	}
 	if g == nil {
-		return httpx.NotFound("group not found")
+		return commonerrors.NotFound("group not found")
 	}
 	if g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" &&
-		g.BillingStatus == registration.BillingInvoiced {
+		g.BillingStatus == domain.BillingInvoiced {
 		if err := s.stripe.VoidInvoice(ctx, *g.StripeInvoiceID); err != nil {
 			log.Printf("billing: void invoice %s for group %s: %v", *g.StripeInvoiceID, groupID, err)
 			// Continue — DB release still needed if Stripe already void/paid.
 		}
 	}
-	meta := registration.ActionMeta{
+	meta := domain.ActionMeta{
 		Actor:           actor,
 		Action:          "released",
 		ExpectedVersion: expectedVersion,
@@ -344,20 +346,20 @@ func (s *Service) VoidAndRelease(ctx context.Context, groupID, reason, actor str
 func (s *Service) ResendInvoice(ctx context.Context, groupID, actor string, expectedVersion int) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return httpx.Internal(err.Error())
+		return commonerrors.Internal(err.Error())
 	}
 	if g == nil {
-		return httpx.NotFound("group not found")
+		return commonerrors.NotFound("group not found")
 	}
 	if g.StripeInvoiceID == nil || *g.StripeInvoiceID == "" {
-		return httpx.BadRequest("no invoice on file", nil)
+		return commonerrors.BadRequest("no invoice on file", nil)
 	}
-	if g.BillingStatus != registration.BillingInvoiced {
-		return httpx.BadRequest("invoice is not open", nil)
+	if g.BillingStatus != domain.BillingInvoiced {
+		return commonerrors.BadRequest("invoice is not open", nil)
 	}
 	// Primary: ask Stripe to re-email. If it succeeds, stamp and return.
 	if err := s.stripe.SendInvoiceEmail(ctx, *g.StripeInvoiceID); err == nil {
-		meta := registration.ActionMeta{
+		meta := domain.ActionMeta{
 			Actor:           actor,
 			Action:          "invoice_resent",
 			ExpectedVersion: expectedVersion,
@@ -372,7 +374,7 @@ func (s *Service) ResendInvoice(ctx context.Context, groupID, actor string, expe
 	// Fallback: email the hosted payment link ourselves.
 	res, err := s.stripe.GetInvoice(ctx, *g.StripeInvoiceID)
 	if err != nil {
-		return httpx.Internal(err.Error())
+		return commonerrors.Internal(err.Error())
 	}
 	due := ""
 	if g.InvoiceDueAt != nil {
@@ -389,9 +391,9 @@ func (s *Service) ResendInvoice(ctx context.Context, groupID, actor string, expe
 		AmountLabel: formatAmountLabel(res.AmountDuePence, res.Currency),
 		Items:       balanceInvoiceItems(campers, s.accommodationNames(ctx), s.unitNames(ctx)),
 	}); err != nil {
-		return httpx.Internal(err.Error())
+		return commonerrors.Internal(err.Error())
 	}
-	meta := registration.ActionMeta{
+	meta := domain.ActionMeta{
 		Actor:           actor,
 		Action:          "invoice_resent",
 		ExpectedVersion: expectedVersion,
@@ -404,7 +406,7 @@ func (s *Service) ResendInvoice(ctx context.Context, groupID, actor string, expe
 
 // ExtendDueAt updates the stored due date (Stripe due date is informational after send).
 func (s *Service) ExtendDueAt(ctx context.Context, groupID, actor string, expectedVersion int, dueAt time.Time) error {
-	meta := registration.ActionMeta{
+	meta := domain.ActionMeta{
 		Actor:           actor,
 		Action:          "extend_due",
 		ExpectedVersion: expectedVersion,
@@ -428,13 +430,13 @@ func (s *Service) HandleInvoicePaid(ctx context.Context, stripeInvoiceID, groupI
 			return fmt.Errorf("group not found for invoice %s", stripeInvoiceID)
 		}
 	}
-	if g.BillingStatus == registration.BillingBalancePaid {
+	if g.BillingStatus == domain.BillingBalancePaid {
 		return nil
 	}
-	if err := s.repo.MarkBalancePaidMeta(ctx, g.ID, registration.ActionMeta{
+	if err := s.repo.MarkBalancePaidMeta(ctx, g.ID, domain.ActionMeta{
 		Actor:           "Stripe",
 		Action:          "balance_paid",
-		ExpectedVersion: registration.SkipVersionCheck,
+		ExpectedVersion: domain.SkipVersionCheck,
 	}); err != nil {
 		return err
 	}
@@ -470,7 +472,7 @@ func (s *Service) SweepOverdue(ctx context.Context) (int, error) {
 	}
 	n := 0
 	for _, g := range overdue {
-		if err := s.VoidAndRelease(ctx, g.ID, "unpaid after invoice due date", "system", registration.SkipVersionCheck); err != nil {
+		if err := s.VoidAndRelease(ctx, g.ID, "unpaid after invoice due date", "system", domain.SkipVersionCheck); err != nil {
 			log.Printf("billing: sweep release group %s: %v", g.ID, err)
 			continue
 		}
@@ -479,7 +481,7 @@ func (s *Service) SweepOverdue(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-func camperNames(campers []registration.Camper) []string {
+func camperNames(campers []domain.Camper) []string {
 	var names []string
 	for _, c := range campers {
 		names = append(names, c.FirstName+" "+c.LastName)
@@ -517,10 +519,10 @@ func (s *Service) unitNames(ctx context.Context) map[string]string {
 
 // balanceInvoiceItems produces one "Name — Accommodation [Unit]" line per
 // full-week camper, for the invoice email body.
-func balanceInvoiceItems(campers []registration.Camper, accNames, unitNames map[string]string) []string {
+func balanceInvoiceItems(campers []domain.Camper, accNames, unitNames map[string]string) []string {
 	var items []string
 	for _, c := range campers {
-		if c.AttendanceType != registration.AttendanceFullWeek {
+		if c.AttendanceType != domain.AttendanceFullWeek {
 			continue
 		}
 		name := c.FirstName + " " + c.LastName

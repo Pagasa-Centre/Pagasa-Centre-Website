@@ -5,8 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	"pagasacentre/backend/internal/httpx"
+	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 	"pagasacentre/backend/internal/registration"
+	"pagasacentre/backend/internal/registration/domain"
+	"pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/testhelper"
 )
 
@@ -27,10 +29,10 @@ func TestChildUnder3UsesConfigPrice(t *testing.T) {
 func TestBalanceInvoiceItemsIncludesUnit(t *testing.T) {
 	unit := "caravan_5"
 	items := balanceInvoiceItems(
-		[]registration.Camper{{
+		[]domain.Camper{{
 			FirstName:                  "Josh",
 			LastName:                   "Basco",
-			AttendanceType:             registration.AttendanceFullWeek,
+			AttendanceType:             domain.AttendanceFullWeek,
 			AllocatedAccommodationCode: strPtr("static_caravan"),
 			AllocatedUnitCode:          &unit,
 		}},
@@ -48,7 +50,7 @@ func TestBalanceInvoiceItemsIncludesUnit(t *testing.T) {
 
 func TestValidateAllocatedUnit_blankAllowed(t *testing.T) {
 	pool := testhelper.MaybePool(t)
-	repo := registration.NewRepository(pool)
+	repo := storage.NewRepository(pool)
 	svc := NewService(repo, NewStripeBilling(), nil, Config{})
 
 	if err := svc.validateAllocatedUnit(context.Background(), "lodge", ""); err != nil {
@@ -58,7 +60,7 @@ func TestValidateAllocatedUnit_blankAllowed(t *testing.T) {
 
 func TestValidateAllocatedUnit_rejectsMismatch(t *testing.T) {
 	pool := testhelper.MaybePool(t)
-	repo := registration.NewRepository(pool)
+	repo := storage.NewRepository(pool)
 	svc := NewService(repo, NewStripeBilling(), nil, Config{})
 
 	err := svc.validateAllocatedUnit(context.Background(), "lodge", "caravan_1")
@@ -70,7 +72,7 @@ func TestValidateAllocatedUnit_rejectsMismatch(t *testing.T) {
 func TestAllocate_persistsUnit(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
-	repo := registration.NewRepository(pool)
+	repo := storage.NewRepository(pool)
 	svc := NewService(repo, NewStripeBilling(), nil, Config{StripePriceChildUnder3: "price_child"})
 
 	// Seed a paid group with one full-week camper via raw SQL.
@@ -94,7 +96,7 @@ func TestAllocate_persistsUnit(t *testing.T) {
 		t.Fatalf("insert camper: %v", err)
 	}
 
-	if err := svc.Allocate(ctx, groupID, "Test Admin", registration.SkipVersionCheck, AllocateRequest{
+	if err := svc.Allocate(ctx, groupID, "Test Admin", domain.SkipVersionCheck, AllocateRequest{
 		Campers: []AllocateCamper{{
 			CamperID:                   camperID,
 			AllocatedAccommodationCode: "lodge",
@@ -123,7 +125,7 @@ func TestAllocate_persistsUnit(t *testing.T) {
 func TestAllocate_versionConflict(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
-	repo := registration.NewRepository(pool)
+	repo := storage.NewRepository(pool)
 	svc := NewService(repo, NewStripeBilling(), nil, Config{StripePriceChildUnder3: "price_child"})
 
 	var groupID, camperID string
@@ -152,7 +154,7 @@ func TestAllocate_versionConflict(t *testing.T) {
 	}}}
 	// Stale version should 409-style conflict.
 	err = svc.Allocate(ctx, groupID, "Aliyah", 1, req)
-	var apiErr httpx.APIError
+	var apiErr commonerrors.APIError
 	if !errors.As(err, &apiErr) || apiErr.Code != "stale_state" {
 		t.Fatalf("expected stale_state conflict, got %v", err)
 	}

@@ -11,8 +11,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"pagasacentre/backend/internal/email"
-	"pagasacentre/backend/internal/httpx"
-	"pagasacentre/backend/internal/registration"
+	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
+	"pagasacentre/backend/internal/registration/domain"
+	"pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/sheets"
 )
 
@@ -21,13 +22,13 @@ import (
 // Race-loser refund logic was deleted along with accommodation capacity caps.
 type Service struct {
 	pool          *pgxpool.Pool
-	regRepo       *registration.Repository
+	regRepo       *storage.Repository
 	mailer        email.Mailer
 	sheets        sheets.Sync
 	publicBaseURL string
 }
 
-func NewService(pool *pgxpool.Pool, regRepo *registration.Repository, mailer email.Mailer, sheetSync sheets.Sync, publicBaseURL string) *Service {
+func NewService(pool *pgxpool.Pool, regRepo *storage.Repository, mailer email.Mailer, sheetSync sheets.Sync, publicBaseURL string) *Service {
 	if sheetSync == nil {
 		sheetSync = sheets.NewNoopSync()
 	}
@@ -69,7 +70,7 @@ func (s *Service) HandleCheckoutCompleted(ctx context.Context, evt CheckoutCompl
 	if group == nil {
 		return fmt.Errorf("no registration group for session %s", evt.SessionID)
 	}
-	if group.PaymentStatus != registration.PaymentPending {
+	if group.PaymentStatus != domain.PaymentPending {
 		return nil // already processed — webhook replays are expected
 	}
 
@@ -85,7 +86,7 @@ func (s *Service) HandleCheckoutCompleted(ctx context.Context, evt CheckoutCompl
 	// that into the in-memory group so sendConfirmationEmail + syncToSheet
 	// see consistent data without an extra round-trip.
 	now := time.Now().UTC()
-	group.PaymentStatus = registration.PaymentPaid
+	group.PaymentStatus = domain.PaymentPaid
 	group.PaidAt = &now
 
 	s.sendConfirmationEmail(ctx, group)
@@ -97,7 +98,7 @@ func (s *Service) HandleCheckoutCompleted(ctx context.Context, evt CheckoutCompl
 // any matching Pending rows. Failure is logged, never fatal — the webhook
 // return value of "OK" already triggered DB commit + email; the sheet is a
 // view layer.
-func (s *Service) syncToSheet(ctx context.Context, g *registration.Group) {
+func (s *Service) syncToSheet(ctx context.Context, g *domain.Group) {
 	if s.sheets == nil {
 		return
 	}
@@ -114,7 +115,7 @@ func (s *Service) syncToSheet(ctx context.Context, g *registration.Group) {
 
 // rowsFromGroup builds one sheets.Row per camper, denormalising group-level
 // contact fields onto each row to match the CSV export layout.
-func rowsFromGroup(g *registration.Group, campers []registration.Camper) []sheets.Row {
+func rowsFromGroup(g *domain.Group, campers []domain.Camper) []sheets.Row {
 	rows := make([]sheets.Row, 0, len(campers))
 	for _, c := range campers {
 		rows = append(rows, sheets.Row{
@@ -163,10 +164,10 @@ func (s *Service) HandleCheckoutExpired(ctx context.Context, sessionID string) e
 	if err != nil {
 		return err
 	}
-	if group == nil || group.PaymentStatus != registration.PaymentPending {
+	if group == nil || group.PaymentStatus != domain.PaymentPending {
 		return nil
 	}
-	if err := s.regRepo.MarkStatusInTx(ctx, tx, group.ID, registration.PaymentCancelled); err != nil {
+	if err := s.regRepo.MarkStatusInTx(ctx, tx, group.ID, domain.PaymentCancelled); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -177,7 +178,7 @@ func (s *Service) HandleCheckoutExpired(ctx context.Context, sessionID string) e
 // point, and a webhook return value of error would cause Stripe to retry the
 // whole HandleCheckoutCompleted (which is fine, but doesn't help if SMTP is
 // down — we'd just rack up retries).
-func (s *Service) sendConfirmationEmail(ctx context.Context, g *registration.Group) {
+func (s *Service) sendConfirmationEmail(ctx context.Context, g *domain.Group) {
 	if err := s.sendDepositConfirmation(ctx, g); err != nil {
 		log.Printf("send confirmation email to %s failed: %v", g.ContactEmail, err)
 	}
@@ -187,7 +188,7 @@ func (s *Service) sendConfirmationEmail(ctx context.Context, g *registration.Gro
 // group's current data. Returns any error so callers that need to surface
 // failure (e.g. an admin re-send) can, while the webhook path keeps logging
 // and swallowing via sendConfirmationEmail.
-func (s *Service) sendDepositConfirmation(ctx context.Context, g *registration.Group) error {
+func (s *Service) sendDepositConfirmation(ctx context.Context, g *domain.Group) error {
 	if s.mailer == nil {
 		return nil
 	}
@@ -232,10 +233,10 @@ func (s *Service) UpdateGroupContact(ctx context.Context, groupID, firstName, la
 		return fmt.Errorf("load group: %w", err)
 	}
 	if g == nil {
-		return httpx.NotFound("registration not found")
+		return commonerrors.NotFound("registration not found")
 	}
-	if resend && g.PaymentStatus != registration.PaymentPaid {
-		return httpx.BadRequest(
+	if resend && g.PaymentStatus != domain.PaymentPaid {
+		return commonerrors.BadRequest(
 			"the confirmation email can only be re-sent once the deposit is paid", nil)
 	}
 

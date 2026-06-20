@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"pagasacentre/backend/internal/db"
+	commondb "pagasacentre/backend/pkg/commonlibrary/db"
 )
 
 // MaybePool opens a connection pool against $TEST_DATABASE_URL, or calls
@@ -24,11 +24,11 @@ func MaybePool(t *testing.T) *pgxpool.Pool {
 	}
 
 	migrationsPath := "file://" + filepath.Join(repoRoot(t), "migrations")
-	if err := db.RunMigrations(url, migrationsPath); err != nil {
+	if err := commondb.RunMigrations(url, migrationsPath); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 
-	pool, err := db.New(context.Background(), url)
+	pool, err := commondb.New(context.Background(), url)
 	if err != nil {
 		t.Fatalf("pool: %v", err)
 	}

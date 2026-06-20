@@ -5,28 +5,30 @@ import (
 	"errors"
 	"fmt"
 
-	"pagasacentre/backend/internal/httpx"
-	"pagasacentre/backend/internal/registration"
+	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
+	"pagasacentre/backend/internal/registration/domain"
 )
 
-func expectedVersion(v *int) int {
+func ExpectedVersion(v *int) int {
 	if v == nil {
-		return registration.SkipVersionCheck
+		return domain.SkipVersionCheck
 	}
 	return *v
 }
 
+func expectedVersion(v *int) int { return ExpectedVersion(v) }
+
 func billingStatusLabel(status string) string {
 	switch status {
-	case registration.BillingNone:
+	case domain.BillingNone:
 		return "Needs accommodation"
-	case registration.BillingAllocated:
+	case domain.BillingAllocated:
 		return "Ready to invoice"
-	case registration.BillingInvoiced:
+	case domain.BillingInvoiced:
 		return "Awaiting payment"
-	case registration.BillingBalancePaid:
+	case domain.BillingBalancePaid:
 		return "Paid in full"
-	case registration.BillingReleased:
+	case domain.BillingReleased:
 		return "Released"
 	default:
 		return status
@@ -34,10 +36,10 @@ func billingStatusLabel(status string) string {
 }
 
 type groupReader interface {
-	FindGroupByID(ctx context.Context, groupID string) (*registration.Group, error)
+	FindGroupByID(ctx context.Context, groupID string) (*domain.Group, error)
 }
 
-func staleConflict(ctx context.Context, repo groupReader, groupID string) httpx.APIError {
+func staleConflict(ctx context.Context, repo groupReader, groupID string) commonerrors.APIError {
 	who := "someone else"
 	state := "updated"
 	if g, err := repo.FindGroupByID(ctx, groupID); err == nil && g != nil {
@@ -50,12 +52,12 @@ func staleConflict(ctx context.Context, repo groupReader, groupID string) httpx.
 		"This group was just updated by %s (%s). Your view was refreshed — please check and try again.",
 		who, state,
 	)
-	return httpx.Conflict("stale_state", msg, nil)
+	return commonerrors.Conflict("stale_state", msg, nil)
 }
 
 func mapVersionErr(ctx context.Context, repo groupReader, groupID string, err error) error {
-	if errors.Is(err, registration.ErrVersionConflict) {
+	if errors.Is(err, domain.ErrVersionConflict) {
 		return staleConflict(ctx, repo, groupID)
 	}
-	return httpx.Internal(err.Error())
+	return commonerrors.Internal(err.Error())
 }

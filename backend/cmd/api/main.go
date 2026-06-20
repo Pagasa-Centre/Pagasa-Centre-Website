@@ -10,22 +10,28 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/robfig/cron/v3"
 
+	accomapi "pagasacentre/backend/internal/api/accommodation"
+	campapi "pagasacentre/backend/internal/api/camp"
+	consentapi "pagasacentre/backend/internal/api/consent"
+	paymentapi "pagasacentre/backend/internal/api/payment"
+	regapi "pagasacentre/backend/internal/api/registration"
 	"pagasacentre/backend/internal/accommodation"
-	"pagasacentre/backend/internal/admin"
 	"pagasacentre/backend/internal/adminlog"
 	"pagasacentre/backend/internal/billing"
 	"pagasacentre/backend/internal/camp"
 	"pagasacentre/backend/internal/config"
-	"pagasacentre/backend/internal/consent"
-	"pagasacentre/backend/internal/db"
 	"pagasacentre/backend/internal/email"
-	"pagasacentre/backend/internal/httpx"
+	"pagasacentre/backend/internal/http/router"
+	"pagasacentre/backend/internal/middleware"
 	"pagasacentre/backend/internal/payment"
 	"pagasacentre/backend/internal/registration"
+	regstorage "pagasacentre/backend/internal/registration/storage"
+	campstorage "pagasacentre/backend/internal/camp/storage"
+	accomstorage "pagasacentre/backend/internal/accommodation/storage"
 	"pagasacentre/backend/internal/sheets"
+	commondb "pagasacentre/backend/pkg/commonlibrary/db"
 )
 
 func main() {
@@ -34,35 +40,30 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	if err := db.RunMigrations(cfg.DatabaseURL, "file://migrations"); err != nil {
+	if err := commondb.RunMigrations(cfg.DatabaseURL, "file://migrations"); err != nil {
 		log.Fatalf("migrations: %v", err)
 	}
 
 	ctx := context.Background()
-	pool, err := db.New(ctx, cfg.DatabaseURL)
+	pool, err := commondb.New(ctx, cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("db: %v", err)
 	}
 	defer pool.Close()
 
-	// Repositories
-	accRepo := accommodation.NewRepository(pool)
+	accRepo := accomstorage.NewRepository(pool)
 	accSvc := accommodation.NewService(accRepo)
-	campRepo := camp.NewRepository(pool)
-	regRepo := registration.NewRepository(pool)
+	campRepo := campstorage.NewRepository(pool)
+	campSvc := camp.NewService(campRepo)
+	regRepo := regstorage.NewRepository(pool)
 
 	applyStripePriceOverrides(ctx, regRepo, cfg)
 
-	// Stripe
 	stripeCli := payment.NewStripeClient(
 		cfg.StripeSecretKey, cfg.StripeWebhookSecret,
 		cfg.StripeSuccessURL, cfg.StripeCancelURL,
 	)
 
-	// Email backend selection. Priority:
-	//   1. Resend (HTTPS, works on hosts that block SMTP)
-	//   2. SMTP (works locally and on hosts that allow 465/587 out)
-	//   3. NoopMailer (template still renders, just logs)
 	var mailer email.Mailer
 	switch {
 	case cfg.ResendAPIKey != "" && cfg.EmailFrom != "":
@@ -76,7 +77,6 @@ func main() {
 		log.Println("email: no backend configured, using NoopMailer (no real email sent)")
 	}
 
-	// Google Sheets live sync.
 	var sheetSync sheets.Sync
 	if cfg.GoogleServiceAccountJSON != "" && cfg.GoogleSheetsSpreadsheetID != "" {
 		gs, err := sheets.NewGoogleSync(ctx, sheets.GoogleSyncConfig{
@@ -117,7 +117,7 @@ func main() {
 	}
 	billSvc := billing.NewService(regRepo, billing.NewStripeBilling(), mailer, billCfg)
 
-	adminAuth := admin.AuthConfig{
+	adminAuth := middleware.AuthConfig{
 		Password:      cfg.AdminPassword,
 		SessionSecret: []byte(cfg.AdminSessionSecret),
 		SecureCookie:  cfg.AdminSecureCookie,
@@ -126,7 +126,6 @@ func main() {
 		log.Println("admin: WARNING — ADMIN_PASSWORD or ADMIN_SESSION_SECRET unset; login will not work")
 	}
 
-	// Daily sweep: release allocations unpaid past invoice_due_at.
 	cronScheduler := cron.New()
 	_, err = cronScheduler.AddFunc("0 3 * * *", func() {
 		n, sweepErr := billSvc.SweepOverdue(context.Background())
@@ -144,45 +143,35 @@ func main() {
 	cronScheduler.Start()
 	defer cronScheduler.Stop()
 
-	// Build/deploy marker. Railway injects RAILWAY_GIT_COMMIT_SHA at build time,
-	// so /health reports exactly which commit is live. This removes all guesswork
-	// about whether a push actually deployed.
 	commit := os.Getenv("RAILWAY_GIT_COMMIT_SHA")
 	if commit == "" {
 		commit = "unknown"
 	}
 	log.Printf("build: running commit %s", commit)
 
-	r := chi.NewRouter()
-	httpx.UseDefaults(r, cfg.AllowedOrigin)
-
 	adminHub := adminlog.NewHub()
 	adminRec := adminlog.NewRecorder(pool, adminHub)
 
-	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
-		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "commit": commit})
-	})
-
-	// SSE stream: no request timeout (see httpx.UseDefaults).
-	r.Get("/admin/stream", admin.HandleStream(adminAuth, adminHub))
-
-	r.Route("/api", func(r chi.Router) {
-		httpx.WithRequestTimeout(r)
-		camp.Mount(r, campRepo)
-		accommodation.Mount(r, accSvc)
-		registration.Mount(r, regSvc)
-		payment.Mount(r, paySvc, billSvc, stripeCli)
-		consent.Mount(r)
-	})
-
-	r.Route("/admin", func(r chi.Router) {
-		httpx.WithRequestTimeout(r)
-		admin.Mount(r, adminAuth, regRepo, campRepo, billSvc, paySvc, adminRec)
+	handler := router.New(router.Config{
+		AllowedOrigin:        cfg.AllowedOrigin,
+		Commit:               commit,
+		AdminAuth:            adminAuth,
+		CampHandler:          campapi.NewHandler(campSvc),
+		AccommodationHandler: accomapi.NewHandler(accSvc),
+		RegistrationHandler:  regapi.NewHandler(regSvc),
+		PaymentHandler:       paymentapi.NewHandler(paySvc, billSvc, stripeCli),
+		ConsentHandler:       consentapi.NewHandler(),
+		RegRepo:              regRepo,
+		CampRepo:             campRepo,
+		BillSvc:              billSvc,
+		PaySvc:               paySvc,
+		AdminRec:             adminRec,
+		AdminHub:             adminHub,
 	})
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           r,
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -202,7 +191,7 @@ func main() {
 	_ = srv.Shutdown(shutdownCtx)
 }
 
-func applyStripePriceOverrides(ctx context.Context, repo *registration.Repository, cfg config.Config) {
+func applyStripePriceOverrides(ctx context.Context, repo *regstorage.Repository, cfg config.Config) {
 	pairs := map[string]string{
 		"lodge":          cfg.StripePriceLodge,
 		"cabin":          cfg.StripePriceCabin,
@@ -221,9 +210,7 @@ func applyStripePriceOverrides(ctx context.Context, repo *registration.Repositor
 	}
 }
 
-// campPriceAdapter wraps a *camp.Repository so it satisfies
-// registration.PriceLookup without leaking the camp package into registration.
-type campPriceAdapter struct{ repo *camp.Repository }
+type campPriceAdapter struct{ repo *campstorage.Repository }
 
 func (a campPriceAdapter) GetPrice(ctx context.Context, code string) (registration.PriceRow, error) {
 	p, err := a.repo.GetPrice(ctx, code)
