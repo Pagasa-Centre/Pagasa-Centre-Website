@@ -20,6 +20,7 @@ type Event struct {
 const (
 	ActionLogin               = "login"
 	ActionAllocate            = "allocate"
+	ActionAllocationEdited    = "allocation_edited"
 	ActionUnallocate          = "unallocate"
 	ActionInvoiceSent         = "invoice_sent"
 	ActionInvoiceResent       = "invoice_resent"

@@ -28,14 +28,27 @@ func putAllocation(svc *billing.Service, rec *adminlog.Recorder, regRepo *regsto
 		}
 		groupID := chi.URLParam(r, "groupID")
 		actor := admin.ActorFrom(r.Context())
+
+		// Capture the prior billing status so we can distinguish a first-time
+		// allocation ("none") from an edit of an existing allocation
+		// ("allocated"). This makes the activity log show who did the initial
+		// placement vs. who later changed it.
+		prior, _ := regRepo.FindGroupByID(r.Context(), groupID)
+		isEdit := prior != nil && prior.BillingStatus == domain.BillingAllocated
+
 		if err := svc.Allocate(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion), body); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
 		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
 		gid := groupID
-		admin.Audit(rec, r, adminlog.ActionAllocate, &gid,
-			"Allocated accommodation for "+admin.GroupSummary(g), nil)
+		if isEdit {
+			admin.Audit(rec, r, adminlog.ActionAllocationEdited, &gid,
+				"Edited accommodation allocation for "+admin.GroupSummary(g), nil)
+		} else {
+			admin.Audit(rec, r, adminlog.ActionAllocate, &gid,
+				"Allocated accommodation for "+admin.GroupSummary(g), nil)
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
