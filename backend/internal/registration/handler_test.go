@@ -68,6 +68,10 @@ func (m *recordingMailer) SendBalancePaid(context.Context, email.BalancePaid) er
 	return nil
 }
 
+func (m *recordingMailer) SendBalancePaidConfirmation(context.Context, email.BalancePaidConfirmation) error {
+	return nil
+}
+
 func (m *recordingMailer) SendSponsorshipConfirmed(context.Context, email.SponsorshipConfirmed) error {
 	return nil
 }

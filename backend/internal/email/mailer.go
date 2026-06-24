@@ -17,7 +17,19 @@ type Mailer interface {
 	SendWhiteTeamNotification(ctx context.Context, p WhiteTeamNotification) error
 	SendBalanceInvoice(ctx context.Context, p BalanceInvoice) error
 	SendBalancePaid(ctx context.Context, p BalancePaid) error
+	SendBalancePaidConfirmation(ctx context.Context, p BalancePaidConfirmation) error
 	SendSponsorshipConfirmed(ctx context.Context, p SponsorshipConfirmed) error
+}
+
+// BalancePaidConfirmation tells the family their balance is paid and their
+// camp place is fully confirmed. Distinct from BalancePaid, which is the
+// internal White Team notification.
+type BalancePaidConfirmation struct {
+	ToEmail     string
+	ToName      string
+	AmountLabel string // optional, e.g. "£250.00" (blank if unknown)
+	// Items is one line per full-week camper, e.g. "Josh Basco — Lodge".
+	Items []string
 }
 
 // SponsorshipConfirmed tells a church-sponsored family that their accommodation

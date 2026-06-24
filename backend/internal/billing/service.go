@@ -504,15 +504,28 @@ func (s *Service) HandleInvoicePaid(ctx context.Context, stripeInvoiceID, groupI
 	}); err != nil {
 		return err
 	}
+	campers, _ := s.repo.CampersForGroup(ctx, g.ID)
+	items := balanceInvoiceItems(campers, s.accommodationNames(ctx), s.unitNames(ctx))
+	amountLabel := formatAmountLabel(amountPaidPence, currency)
+
+	// Confirm to the family that their place is fully paid and confirmed.
+	if err := s.mailer.SendBalancePaidConfirmation(ctx, email.BalancePaidConfirmation{
+		ToEmail:     g.ContactEmail,
+		ToName:      g.ContactFirstName,
+		AmountLabel: amountLabel,
+		Items:       items,
+	}); err != nil {
+		log.Printf("billing: balance-paid confirmation email to %s: %v", g.ContactEmail, err)
+	}
+
 	if s.cfg.WhiteTeamEmail != "" {
-		campers, _ := s.repo.CampersForGroup(ctx, g.ID)
 		_ = s.mailer.SendBalancePaid(ctx, email.BalancePaid{
 			ToEmail:      s.cfg.WhiteTeamEmail,
 			ContactName:  strings.TrimSpace(g.ContactFirstName + " " + g.ContactLastName),
 			ContactEmail: g.ContactEmail,
-			AmountLabel:  formatAmountLabel(amountPaidPence, currency),
+			AmountLabel:  amountLabel,
 			PaidDate:     time.Now().Format("2 Jan 2006"),
-			Items:        balanceInvoiceItems(campers, s.accommodationNames(ctx), s.unitNames(ctx)),
+			Items:        items,
 		})
 	}
 	return nil

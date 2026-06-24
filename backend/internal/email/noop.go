@@ -60,6 +60,16 @@ func (NoopMailer) SendBalancePaid(_ context.Context, p BalancePaid) error {
 	return nil
 }
 
+func (NoopMailer) SendBalancePaidConfirmation(_ context.Context, p BalancePaidConfirmation) error {
+	subject, _, err := renderBalancePaidConfirmation(p)
+	if err != nil {
+		return err
+	}
+	log.Printf("[email noop] to=%s subject=%q amount=%s (balance paid confirmation)",
+		p.ToEmail, subject, p.AmountLabel)
+	return nil
+}
+
 func (NoopMailer) SendSponsorshipConfirmed(_ context.Context, p SponsorshipConfirmed) error {
 	subject, _, err := renderSponsorshipConfirmed(p)
 	if err != nil {

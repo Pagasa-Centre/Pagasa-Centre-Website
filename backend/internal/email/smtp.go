@@ -74,6 +74,14 @@ func (s *SMTPMailer) SendBalancePaid(ctx context.Context, p BalancePaid) error {
 	return s.send(ctx, p.ToEmail, subject, body)
 }
 
+func (s *SMTPMailer) SendBalancePaidConfirmation(ctx context.Context, p BalancePaidConfirmation) error {
+	subject, body, err := renderBalancePaidConfirmation(p)
+	if err != nil {
+		return err
+	}
+	return s.send(ctx, p.ToEmail, subject, body)
+}
+
 func (s *SMTPMailer) SendSponsorshipConfirmed(ctx context.Context, p SponsorshipConfirmed) error {
 	subject, body, err := renderSponsorshipConfirmed(p)
 	if err != nil {

@@ -13,14 +13,20 @@ import (
 	"pagasacentre/backend/internal/testhelper"
 )
 
-// recordingMailer captures SponsorshipConfirmed sends for assertions.
+// recordingMailer captures family-facing confirmation sends for assertions.
 type recordingMailer struct {
 	email.NoopMailer
 	sponsorships []email.SponsorshipConfirmed
+	balancePaid  []email.BalancePaidConfirmation
 }
 
 func (m *recordingMailer) SendSponsorshipConfirmed(_ context.Context, p email.SponsorshipConfirmed) error {
 	m.sponsorships = append(m.sponsorships, p)
+	return nil
+}
+
+func (m *recordingMailer) SendBalancePaidConfirmation(_ context.Context, p email.BalancePaidConfirmation) error {
+	m.balancePaid = append(m.balancePaid, p)
 	return nil
 }
 
@@ -253,6 +259,42 @@ func TestConfirmFree_rejectsNonAllocatedGroup(t *testing.T) {
 	var apiErr commonerrors.APIError
 	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
 		t.Fatalf("expected bad_request for non-allocated free group, got %v", err)
+	}
+}
+
+func TestHandleInvoicePaid_emailsFamily(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	mailer := &recordingMailer{}
+	svc := NewService(repo, NewStripeBilling(), mailer, Config{})
+
+	var groupID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, total_amount_pence, currency, billing_status, stripe_invoice_id
+		) VALUES ('Pay', 'Family', 'family@example.com', '07000000000', 'paid', 25000, 'GBP', 'invoiced', 'in_test_123')
+		RETURNING id`).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+
+	if err := svc.HandleInvoicePaid(ctx, "in_test_123", groupID, 25000, "GBP"); err != nil {
+		t.Fatalf("HandleInvoicePaid: %v", err)
+	}
+	g, err := repo.FindGroupByID(ctx, groupID)
+	if err != nil || g == nil {
+		t.Fatalf("find group: %v", err)
+	}
+	if g.BillingStatus != domain.BillingBalancePaid {
+		t.Fatalf("billing_status = %q, want balance_paid", g.BillingStatus)
+	}
+	if len(mailer.balancePaid) != 1 {
+		t.Fatalf("expected 1 balance-paid confirmation email, got %d", len(mailer.balancePaid))
+	}
+	if mailer.balancePaid[0].ToEmail != "family@example.com" {
+		t.Fatalf("email sent to %q, want family@example.com", mailer.balancePaid[0].ToEmail)
 	}
 }
 

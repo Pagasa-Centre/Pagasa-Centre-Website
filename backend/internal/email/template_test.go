@@ -86,6 +86,30 @@ func TestRenderDepositConfirmation_SponsoredPath(t *testing.T) {
 	}
 }
 
+func TestRenderBalancePaidConfirmation(t *testing.T) {
+	subject, body, err := renderBalancePaidConfirmation(BalancePaidConfirmation{
+		ToEmail:     "family@example.com",
+		ToName:      "Sam",
+		AmountLabel: "£250.00",
+		Items:       []string{"Josh Basco — Lodge"},
+	})
+	if err != nil {
+		t.Fatalf("renderBalancePaidConfirmation: %v", err)
+	}
+	if !strings.Contains(subject, "place is confirmed") {
+		t.Errorf("unexpected subject %q", subject)
+	}
+	if !strings.Contains(body, "£250.00") {
+		t.Errorf("body should include the amount paid")
+	}
+	if !strings.Contains(body, "paid in full") {
+		t.Errorf("body should state the balance is paid in full")
+	}
+	if !strings.Contains(body, "Josh Basco — Lodge") {
+		t.Errorf("body should list the camper's accommodation")
+	}
+}
+
 func TestRenderSponsorshipConfirmed(t *testing.T) {
 	subject, body, err := renderSponsorshipConfirmed(SponsorshipConfirmed{
 		ToEmail: "guest@example.com",
