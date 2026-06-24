@@ -131,6 +131,36 @@ func (r *Repository) UnallocateGroup(ctx context.Context, groupID string, meta d
 	return tx.Commit(ctx)
 }
 
+// ConfirmFreeMeta marks a free-place group as fully confirmed (no invoice).
+func (r *Repository) ConfirmFreeMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	if err != nil {
+		return err
+	}
+	if g == nil {
+		return fmt.Errorf("group %q not found", groupID)
+	}
+	if !g.IsFree {
+		return fmt.Errorf("group %q is not a free place", groupID)
+	}
+	if g.BillingStatus != domain.BillingAllocated {
+		return fmt.Errorf("group %q must be allocated before confirming free place", groupID)
+	}
+	if err := checkVersion(g, meta); err != nil {
+		return err
+	}
+	if err := stampExec(ctx, tx, groupID, meta, `, billing_status = 'free_confirmed'`); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // SetInvoiceDetailsMeta records invoice id/due and moves to invoiced with attribution.
 func (r *Repository) SetInvoiceDetailsMeta(ctx context.Context, groupID, invoiceID string, dueAt time.Time, meta domain.ActionMeta) error {
 	tx, err := r.pool.Begin(ctx)

@@ -73,7 +73,9 @@ func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedV
 			})
 		}
 		priceID := strings.TrimSpace(a.BilledStripePriceID)
-		if priceID == "" {
+		if g.IsFree {
+			priceID = ""
+		} else if priceID == "" {
 			priceID, err = s.resolvePriceID(ctx, code, c.Age)
 			if err != nil {
 				return commonerrors.BadRequest(err.Error(), nil)
@@ -200,6 +202,9 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 	if g == nil {
 		return commonerrors.NotFound("group not found")
 	}
+	if g.IsFree {
+		return commonerrors.BadRequest("this is a free (church-funded) place; confirm the free place instead of invoicing", nil)
+	}
 	if g.PaymentStatus != domain.PaymentPaid {
 		return commonerrors.BadRequest("deposit must be paid first", nil)
 	}
@@ -288,11 +293,48 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 func (s *Service) SendInvoicesBulk(ctx context.Context, actor string, groupIDs []string) map[string]string {
 	errs := map[string]string{}
 	for _, id := range groupIDs {
+		g, err := s.repo.FindGroupByID(ctx, id)
+		if err != nil {
+			errs[id] = err.Error()
+			continue
+		}
+		if g != nil && g.IsFree {
+			continue
+		}
 		if err := s.SendInvoice(ctx, id, actor, domain.SkipVersionCheck); err != nil {
 			errs[id] = err.Error()
 		}
 	}
 	return errs
+}
+
+// ConfirmFree marks a free-place group as fully confirmed (no Stripe invoice).
+func (s *Service) ConfirmFree(ctx context.Context, groupID, actor string, expectedVersion int) error {
+	g, err := s.repo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		return commonerrors.Internal(err.Error())
+	}
+	if g == nil {
+		return commonerrors.NotFound("group not found")
+	}
+	if !g.IsFree {
+		return commonerrors.BadRequest("this group is not a free place", nil)
+	}
+	if g.PaymentStatus != domain.PaymentPaid {
+		return commonerrors.BadRequest("deposit must be paid first", nil)
+	}
+	if g.BillingStatus != domain.BillingAllocated {
+		return commonerrors.BadRequest("group must be allocated before confirming free place", nil)
+	}
+	meta := domain.ActionMeta{
+		Actor:           actor,
+		Action:          "free_confirmed",
+		ExpectedVersion: expectedVersion,
+	}
+	if err := s.repo.ConfirmFreeMeta(ctx, groupID, meta); err != nil {
+		return mapVersionErr(ctx, s.repo, groupID, err)
+	}
+	return nil
 }
 
 // VoidAndRelease voids the Stripe invoice (if any) and clears allocations.

@@ -23,7 +23,7 @@ const groupSelectCols = `
 	payment_status, stripe_session_id, stripe_payment_intent_id,
 	total_amount_pence, currency, created_at, paid_at,
 	stripe_customer_id, stripe_invoice_id, billing_status, invoice_due_at, balance_paid_at,
-	version, last_action, last_action_by, last_action_at`
+	version, last_action, last_action_by, last_action_at, is_free`
 
 func scanGroup(row pgx.Row) (domain.Group, error) {
 	var g domain.Group
@@ -32,7 +32,7 @@ func scanGroup(row pgx.Row) (domain.Group, error) {
 		&g.PaymentStatus, &g.StripeSessionID, &g.StripePaymentIntentID,
 		&g.TotalAmountPence, &g.Currency, &g.CreatedAt, &g.PaidAt,
 		&g.StripeCustomerID, &g.StripeInvoiceID, &g.BillingStatus, &g.InvoiceDueAt, &g.BalancePaidAt,
-		&g.Version, &g.LastAction, &g.LastActionBy, &g.LastActionAt,
+		&g.Version, &g.LastAction, &g.LastActionBy, &g.LastActionAt, &g.IsFree,
 	)
 	return g, err
 }
@@ -63,16 +63,16 @@ func scanCamper(row pgx.Row) (domain.Camper, error) {
 func (r *Repository) Pool() *pgxpool.Pool { return r.pool }
 
 // InsertGroup inserts a registration_groups row inside tx and returns its UUID.
-func (r *Repository) InsertGroup(ctx context.Context, tx pgx.Tx, req domain.SubmitRequest, totalPence int, currency string) (string, error) {
+func (r *Repository) InsertGroup(ctx context.Context, tx pgx.Tx, req domain.SubmitRequest, totalPence int, currency string, isFree bool) (string, error) {
 	const q = `
 		INSERT INTO registration_groups (
 			contact_first_name, contact_last_name, contact_email, contact_phone,
-			total_amount_pence, currency
-		) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`
+			total_amount_pence, currency, is_free
+		) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`
 	var id string
 	err := tx.QueryRow(ctx, q,
 		req.Contact.FirstName, req.Contact.LastName, req.Contact.Email, req.Contact.Phone,
-		totalPence, currency,
+		totalPence, currency, isFree,
 	).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("insert group: %w", err)

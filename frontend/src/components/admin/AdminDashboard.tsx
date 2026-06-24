@@ -88,6 +88,8 @@ function categorize(g: AdminGroup): Category {
       return "awaiting";
     case "balance_paid":
       return "paid";
+    case "free_confirmed":
+      return "paid";
     case "allocated":
       return "to_invoice";
     default: // "none" or "released" → still needs (re)allocation
@@ -124,10 +126,15 @@ function statusBadge(g: AdminGroup): { label: string; className: string } {
         className: "bg-violet-100 text-violet-800 border-violet-200",
       };
     case "paid":
-      return {
-        label: "Paid in full",
-        className: "bg-green-100 text-green-800 border-green-200",
-      };
+      return g.is_free
+        ? {
+            label: "Free place confirmed",
+            className: "bg-green-100 text-green-800 border-green-200",
+          }
+        : {
+            label: "Paid in full",
+            className: "bg-green-100 text-green-800 border-green-200",
+          };
     case "daypass":
       return {
         label: "Day pass only",
@@ -178,6 +185,7 @@ const LAST_ACTION_LABELS: Record<string, string> = {
   extend_due: "Due date extended",
   contact_updated: "Contact updated",
   balance_paid: "Balance paid",
+  free_confirmed: "Free place confirmed",
 };
 
 function formatLastAction(g: AdminGroup): string | null {
@@ -492,7 +500,7 @@ export default function AdminDashboard() {
 
   async function sendAllAllocated() {
     const ids = groups
-      .filter((g) => categorize(g) === "to_invoice")
+      .filter((g) => categorize(g) === "to_invoice" && !g.is_free)
       .map((g) => g.id);
     if (ids.length === 0) return;
     if (
@@ -617,6 +625,21 @@ export default function AdminDashboard() {
     }
   }
 
+  async function confirmFreeGroup(g: AdminGroup) {
+    setBusy(`free-${g.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await adminApi.confirmFree(g.id, g.version);
+      setNotice(`Free place confirmed for ${g.contact_first_name}'s group.`);
+      await load();
+    } catch (err) {
+      await handleAdminError(err, "Could not confirm free place.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function runSweep() {
     if (
       !confirm(
@@ -701,6 +724,14 @@ export default function AdminDashboard() {
     }
     return c;
   }, [groups]);
+
+  const invoiceableCount = useMemo(
+    () =>
+      groups.filter(
+        (g) => categorize(g) === "to_invoice" && !g.is_free,
+      ).length,
+    [groups],
+  );
 
   // How many beds are currently held per accommodation code. A camper holds a
   // spot once their allocation is saved; releasing a group clears the code, so
@@ -792,6 +823,12 @@ export default function AdminDashboard() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            href="/admin/free-codes"
+            className="px-3 py-2 text-sm font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100"
+          >
+            Free place codes
+          </Link>
           <Link
             href="/admin/activity"
             className="px-3 py-2 text-sm font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100"
@@ -997,14 +1034,14 @@ export default function AdminDashboard() {
             ))}
           </select>
         </label>
-        {tab === "to_invoice" && counts.to_invoice > 0 && (
+        {tab === "to_invoice" && invoiceableCount > 0 && (
           <button
             type="button"
             disabled={busy === "bulk"}
             onClick={sendAllAllocated}
             className="px-4 py-2 text-sm font-bold text-white bg-primary rounded-lg hover:bg-primary-dark disabled:opacity-50"
           >
-            Send all {counts.to_invoice} invoices
+            Send all {invoiceableCount} invoices
           </button>
         )}
       </div>
@@ -1039,6 +1076,7 @@ export default function AdminDashboard() {
               onCancelEdit={() => cancelEdit(g)}
               onReset={() => resetAllocation(g)}
               onInvoice={() => sendInvoice(g)}
+              onConfirmFree={() => confirmFreeGroup(g)}
               onResend={() => resendInvoice(g)}
               onExtend={() => extendDue(g)}
               onRelease={() => releaseGroup(g)}
@@ -1306,6 +1344,7 @@ function GroupCard({
   onCancelEdit,
   onReset,
   onInvoice,
+  onConfirmFree,
   onResend,
   onExtend,
   onRelease,
@@ -1334,6 +1373,7 @@ function GroupCard({
   onCancelEdit: () => void;
   onReset: () => void;
   onInvoice: () => void;
+  onConfirmFree: () => void;
   onResend: () => void;
   onExtend: () => void;
   onRelease: () => void;
@@ -1377,7 +1417,11 @@ function GroupCard({
   return (
     <article
       className={`bg-white border rounded-xl overflow-hidden ${
-        overdue ? "border-red-300" : "border-neutral-300"
+        overdue
+          ? "border-red-300"
+          : g.is_free
+            ? "border-violet-400 ring-2 ring-violet-100"
+            : "border-neutral-300"
       }`}
     >
       {/* Header */}
@@ -1386,6 +1430,11 @@ function GroupCard({
           <div className="min-w-0">
             <p className="text-lg font-bold text-neutral-800">
               {g.contact_first_name} {g.contact_last_name}
+              {g.is_free && (
+                <span className="ml-2 inline-flex items-center px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide rounded-full bg-violet-100 text-violet-800 border border-violet-200">
+                  Free place
+                </span>
+              )}
             </p>
             <p className="text-sm text-neutral-600 break-all">
               {g.contact_email}
@@ -1650,16 +1699,29 @@ function GroupCard({
 
             {cat === "to_invoice" && (
               <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  disabled={busy === `inv-${g.id}`}
-                  onClick={onInvoice}
-                  className="px-5 py-2.5 text-sm font-bold text-white bg-primary rounded-lg hover:bg-primary-dark disabled:opacity-50"
-                >
-                  {busy === `inv-${g.id}`
-                    ? "Sending…"
-                    : "Send balance invoice"}
-                </button>
+                {g.is_free ? (
+                  <button
+                    type="button"
+                    disabled={busy === `free-${g.id}`}
+                    onClick={onConfirmFree}
+                    className="px-5 py-2.5 text-sm font-bold text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50"
+                  >
+                    {busy === `free-${g.id}`
+                      ? "Confirming…"
+                      : "Confirm free place"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={busy === `inv-${g.id}`}
+                    onClick={onInvoice}
+                    className="px-5 py-2.5 text-sm font-bold text-white bg-primary rounded-lg hover:bg-primary-dark disabled:opacity-50"
+                  >
+                    {busy === `inv-${g.id}`
+                      ? "Sending…"
+                      : "Send balance invoice"}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={onEdit}
@@ -1675,9 +1737,11 @@ function GroupCard({
                 >
                   Reset allocation
                 </button>
-                <span className="text-xs text-neutral-500">
-                  Stripe will email a secure payment link.
-                </span>
+                {!g.is_free && (
+                  <span className="text-xs text-neutral-500">
+                    Stripe will email a secure payment link.
+                  </span>
+                )}
               </div>
             )}
 
@@ -1722,8 +1786,12 @@ function GroupCard({
 
             {cat === "paid" && (
               <p className="text-sm text-green-700 font-semibold">
-                ✓ Balance paid in full
-                {g.balance_paid_at ? ` on ${formatDate(g.balance_paid_at)}` : ""}
+                {g.is_free || g.billing_status === "free_confirmed"
+                  ? "✓ Free place confirmed"
+                  : "✓ Balance paid in full"}
+                {!g.is_free && g.balance_paid_at
+                  ? ` on ${formatDate(g.balance_paid_at)}`
+                  : ""}
                 .
               </p>
             )}

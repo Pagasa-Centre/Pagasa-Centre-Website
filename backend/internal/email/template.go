@@ -23,6 +23,7 @@ type templateData struct {
 	HasMinor             bool
 	ConsentFormURL       string
 	IsDepositConfirm     bool // true when AmountPence > 0
+	IsFree               bool // church-funded free place
 	KeyDatesRegistration string
 	KeyDatesAllocation   string
 	KeyDatesFinalPayment string
@@ -38,6 +39,7 @@ func renderDepositConfirmation(p DepositConfirmation) (subject, htmlBody string,
 		HasMinor:             p.HasMinor,
 		ConsentFormURL:       p.ConsentFormURL,
 		IsDepositConfirm:     p.AmountPence > 0,
+		IsFree:               p.IsFree,
 		KeyDatesRegistration: KeyDatesRegistration,
 		KeyDatesAllocation:   KeyDatesAllocation,
 		KeyDatesFinalPayment: KeyDatesFinalPayment,
@@ -202,6 +204,8 @@ const depositConfirmationHTML = `<!DOCTYPE html>
 
   {{if .IsDepositConfirm}}
   <p>Thank you for registering for <strong>PC Summer Camp 2026</strong>. We've received your non-refundable deposit of <strong>{{.AmountFormatted}}</strong> covering {{.CamperCount}} camper{{if ne .CamperCount 1}}s{{end}}. A separate payment receipt has been emailed to you by Stripe.</p>
+  {{else if .IsFree}}
+  <p>Thank you for registering {{.CamperCount}} camper{{if ne .CamperCount 1}}s{{end}} for <strong>PC Summer Camp 2026</strong>. Your place is fully covered by the church — there is nothing to pay.</p>
   {{else}}
   <p>Thank you for registering {{.CamperCount}} camper{{if ne .CamperCount 1}}s{{end}} for <strong>PC Summer Camp 2026</strong>. Day-pass attendance doesn't require a deposit — any catering or t-shirt fees will be settled directly with the camp team.</p>
   {{end}}

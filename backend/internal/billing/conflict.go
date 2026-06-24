@@ -28,6 +28,8 @@ func billingStatusLabel(status string) string {
 		return "Awaiting payment"
 	case domain.BillingBalancePaid:
 		return "Paid in full"
+	case domain.BillingFreeConfirmed:
+		return "Free place confirmed"
 	case domain.BillingReleased:
 		return "Released"
 	default:

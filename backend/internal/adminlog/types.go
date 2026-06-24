@@ -31,4 +31,7 @@ const (
 	ActionPriceUpdated        = "price_updated"
 	ActionSweep               = "sweep"
 	ActionBalancePaid         = "balance_paid"
+	ActionFreeCodeGenerated   = "free_code_generated"
+	ActionFreeCodeRevoked     = "free_code_revoked"
+	ActionFreeConfirmed       = "free_confirmed"
 )

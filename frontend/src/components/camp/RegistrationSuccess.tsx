@@ -43,6 +43,7 @@ function SuccessBody({ apiBase }: Props) {
   // Stripe round-trip happens in that case, so the messaging needs to be
   // tweaked to not promise a Stripe receipt that won't arrive.
   const isFreeRegistration = sp.get("free") === "1";
+  const isFreePlace = sp.get("free_place") === "1";
   const stashJson = useSyncExternalStore(
     subscribe,
     getClientSnapshot,
@@ -127,9 +128,11 @@ function SuccessBody({ apiBase }: Props) {
             : "Thanks, your deposit is in"}
         </h1>
         <p className="text-neutral-700 mb-3 text-center">
-          {isFreeRegistration
-            ? "Thank you for registering for PC Summer Camp 2026. Day-pass attendance doesn't require a deposit — we'll see you on the day."
-            : "Thank you for signing up to PC Summer Camp 2026. Your non-refundable deposit has been received. A separate payment receipt will arrive from Stripe shortly."}
+          {isFreePlace
+            ? "Thank you for registering for PC Summer Camp 2026. Your place is fully covered by the church — there is nothing to pay."
+            : isFreeRegistration
+              ? "Thank you for registering for PC Summer Camp 2026. Day-pass attendance doesn't require a deposit — we'll see you on the day."
+              : "Thank you for signing up to PC Summer Camp 2026. Your non-refundable deposit has been received. A separate payment receipt will arrive from Stripe shortly."}
         </p>
         <p className="text-neutral-700 mb-3 text-center">
           A confirmation email has been sent to{" "}

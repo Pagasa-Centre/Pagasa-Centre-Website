@@ -51,10 +51,11 @@ type Props = {
 type FormState = {
   contact: { email: string; phone: string };
   campers: CamperState[];
+  free_code: string;
 };
 
 function initialState(): FormState {
-  return { contact: { email: "", phone: "" }, campers: [emptyCamper()] };
+  return { contact: { email: "", phone: "" }, campers: [emptyCamper()], free_code: "" };
 }
 
 const labelCls =
@@ -245,6 +246,9 @@ function toSubmission(
         phone: state.contact.phone.trim(),
       },
       campers,
+      ...(state.free_code.trim()
+        ? { free_code: state.free_code.trim() }
+        : {}),
     },
   };
 }
@@ -386,18 +390,20 @@ export default function CampRegisterForm({
       if (res.checkout_url) {
         window.location.href = res.checkout_url;
       } else {
-        // £0 total (day-pass-only): backend already marked paid + emailed.
-        // Send the user straight to the success page; the ?free=1 flag lets
-        // it adjust copy to match. Also pass group_id so the success page
-        // can fall back to /api/registrations/summary if sessionStorage is
-        // unavailable (rare, but possible).
-        window.location.href = `/camp/registration/success?free=1&group_id=${encodeURIComponent(res.group_id)}`;
+        const freePlace = !!built.payload.free_code;
+        const qs = new URLSearchParams({ free: "1", group_id: res.group_id });
+        if (freePlace) qs.set("free_place", "1");
+        window.location.href = `/camp/registration/success?${qs.toString()}`;
       }
     } catch (err) {
       setSubmitting(false);
       if (err instanceof ApiClientError) {
         setTopError(err.detail.message);
-        setFieldErrors(err.detail.fields ?? {});
+        const fields = err.detail.fields ?? {};
+        if (err.detail.code === "invalid_free_code") {
+          fields.free_code = err.detail.message;
+        }
+        setFieldErrors(fields);
       } else {
         setTopError("Something went wrong. Please try again.");
       }
@@ -547,6 +553,31 @@ export default function CampRegisterForm({
               Bro Ash before camp.
             </div>
           )}
+
+          <div className="bg-white border border-neutral-200 p-4 rounded-xl">
+            <label className={labelCls} htmlFor="free_code">
+              Have a free-place code?
+            </label>
+            <input
+              id="free_code"
+              type="text"
+              autoComplete="off"
+              placeholder="FREE-XXXXXXXX"
+              value={state.free_code}
+              onChange={(e) =>
+                setState((s) => ({ ...s, free_code: e.target.value }))
+              }
+              className={inputCls(!!fieldErrors.free_code)}
+            />
+            {fieldErrors.free_code ? (
+              <p className="text-xs text-red-600 mt-1">{fieldErrors.free_code}</p>
+            ) : (
+              <p className="text-xs text-neutral-500 mt-1">
+                If the church gave you a code, enter it here — you won&apos;t
+                need to pay a deposit.
+              </p>
+            )}
+          </div>
 
           {/* Total + Submit */}
           <div className="bg-white border border-neutral-300 p-6 rounded-xl flex flex-col gap-4">

@@ -26,9 +26,18 @@ const (
 
 // AuthConfig holds shared-password admin session settings.
 type AuthConfig struct {
-	Password      string
-	SessionSecret []byte
-	SecureCookie  bool // true in production (HTTPS)
+	Password          string
+	SessionSecret     []byte
+	SecureCookie      bool // true in production (HTTPS)
+	FreeCodePassword  string
+}
+
+// FreeCodePasswordMatches reports whether pw matches the free-code generation password.
+func (c AuthConfig) FreeCodePasswordMatches(pw string) bool {
+	if c.FreeCodePassword == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(pw), []byte(c.FreeCodePassword)) == 1
 }
 
 type loginLimiter struct {

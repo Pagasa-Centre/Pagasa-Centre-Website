@@ -1,8 +1,9 @@
 package domain
 
 type SubmitRequest struct {
-	Contact ContactDTO  `json:"contact"`
-	Campers []CamperDTO `json:"campers"`
+	Contact  ContactDTO  `json:"contact"`
+	Campers  []CamperDTO `json:"campers"`
+	FreeCode string      `json:"free_code,omitempty"`
 }
 
 type ContactDTO struct {

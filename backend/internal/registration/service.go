@@ -2,8 +2,11 @@ package registration
 
 import (
 	"context"
+	"crypto/rand"
+	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -99,18 +102,43 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 		return nil, commonerrors.Internal(err.Error())
 	}
 
+	isFree := false
+	var reservedCodeID string
+
 	tx, err := s.repo.Pool().BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return nil, commonerrors.Internal(err.Error())
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	groupID, err := s.repo.InsertGroup(ctx, tx, req, total, currency)
+	freeCode := strings.ToUpper(strings.TrimSpace(req.FreeCode))
+	if freeCode != "" {
+		codeID, err := s.repo.ReserveFreeCode(ctx, tx, freeCode)
+		if err != nil {
+			if errors.Is(err, storage.ErrFreeCodeInvalid) {
+				return nil, commonerrors.APIError{
+					Code:    "invalid_free_code",
+					Message: "That free-place code is not valid or has already been used.",
+				}
+			}
+			return nil, commonerrors.Internal(err.Error())
+		}
+		reservedCodeID = codeID
+		isFree = true
+		total = 0
+	}
+
+	groupID, err := s.repo.InsertGroup(ctx, tx, req, total, currency, isFree)
 	if err != nil {
 		return nil, commonerrors.Internal(err.Error())
 	}
 	for _, c := range req.Campers {
 		if err := s.repo.InsertCamper(ctx, tx, groupID, c); err != nil {
+			return nil, commonerrors.Internal(err.Error())
+		}
+	}
+	if reservedCodeID != "" {
+		if err := s.repo.MarkFreeCodeUsed(ctx, tx, reservedCodeID, groupID); err != nil {
 			return nil, commonerrors.Internal(err.Error())
 		}
 	}
@@ -132,7 +160,7 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 		if err := tx.Commit(ctx); err != nil {
 			return nil, commonerrors.Internal(err.Error())
 		}
-		s.sendConfirmationEmail(ctx, req, total, currency, hasMinor)
+		s.sendConfirmationEmail(ctx, req, total, currency, hasMinor, isFree)
 		now := time.Now().UTC()
 		rows := rowsFromRequest(groupID, req, domain.PaymentPaid, total, currency, now, &now)
 		if err := s.sheets.AppendPaidAndRemovePending(ctx, groupID, rows); err != nil {
@@ -230,7 +258,7 @@ func (s *Service) computeTotal(ctx context.Context, req domain.SubmitRequest) (t
 	return totalPence, currency, nil
 }
 
-func (s *Service) sendConfirmationEmail(ctx context.Context, req domain.SubmitRequest, totalPence int, currency string, hasMinor bool) {
+func (s *Service) sendConfirmationEmail(ctx context.Context, req domain.SubmitRequest, totalPence int, currency string, hasMinor, isFree bool) {
 	if s.mailer == nil {
 		return
 	}
@@ -246,6 +274,7 @@ func (s *Service) sendConfirmationEmail(ctx context.Context, req domain.SubmitRe
 		CamperCount:    len(req.Campers),
 		HasMinor:       hasMinor,
 		ConsentFormURL: consentURL,
+		IsFree:         isFree,
 	})
 	if err != nil {
 		log.Printf("send confirmation email to %s failed: %v", req.Contact.Email, err)
@@ -312,4 +341,61 @@ func pluralS(n int) string {
 		return ""
 	}
 	return "s"
+}
+
+const freeCodePrefix = "FREE-"
+const freeCodeCharset = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+
+// GenerateFreeCode creates a one-time free-place code (admin only).
+func (s *Service) GenerateFreeCode(ctx context.Context, actor, note string) (string, error) {
+	for attempt := 0; attempt < 5; attempt++ {
+		code, err := randomFreeCode()
+		if err != nil {
+			return "", commonerrors.Internal(err.Error())
+		}
+		if err := s.repo.GenerateFreeCode(ctx, code, actor, note); err != nil {
+			if isUniqueViolation(err) {
+				continue
+			}
+			return "", commonerrors.Internal(err.Error())
+		}
+		return code, nil
+	}
+	return "", commonerrors.Internal("could not generate unique free code")
+}
+
+func randomFreeCode() (string, error) {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	out := make([]byte, 8)
+	for i := range b {
+		out[i] = freeCodeCharset[int(b[i])%len(freeCodeCharset)]
+	}
+	return freeCodePrefix + string(out), nil
+}
+
+func isUniqueViolation(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "duplicate key")
+}
+
+// ListFreeCodes returns all generated free-place codes.
+func (s *Service) ListFreeCodes(ctx context.Context) ([]domain.FreeCode, error) {
+	codes, err := s.repo.ListFreeCodes(ctx)
+	if err != nil {
+		return nil, commonerrors.Internal(err.Error())
+	}
+	return codes, nil
+}
+
+// RevokeFreeCode disables an unused code.
+func (s *Service) RevokeFreeCode(ctx context.Context, id string) error {
+	if err := s.repo.RevokeFreeCode(ctx, id); err != nil {
+		if errors.Is(err, storage.ErrFreeCodeNotRevocable) {
+			return commonerrors.BadRequest("code cannot be revoked (already used or revoked)", nil)
+		}
+		return commonerrors.Internal(err.Error())
+	}
+	return nil
 }

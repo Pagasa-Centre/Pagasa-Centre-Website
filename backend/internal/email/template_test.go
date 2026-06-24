@@ -64,6 +64,28 @@ func TestRenderDepositConfirmation_DayPassOnlyPath(t *testing.T) {
 	}
 }
 
+func TestRenderDepositConfirmation_FreePlacePath(t *testing.T) {
+	subject, body, err := renderDepositConfirmation(DepositConfirmation{
+		ToEmail:     "guest@example.com",
+		ToName:      "Sam",
+		AmountPence: 0,
+		CamperCount: 1,
+		IsFree:      true,
+	})
+	if err != nil {
+		t.Fatalf("renderDepositConfirmation: %v", err)
+	}
+	if !strings.Contains(subject, "registration is confirmed") {
+		t.Errorf("expected free-place subject, got %q", subject)
+	}
+	if !strings.Contains(body, "fully covered by the church") {
+		t.Errorf("free-place body should mention church coverage")
+	}
+	if strings.Contains(body, "Day-pass attendance") {
+		t.Errorf("free-place body should not use day-pass wording")
+	}
+}
+
 func TestFormatPence(t *testing.T) {
 	cases := []struct {
 		pence    int

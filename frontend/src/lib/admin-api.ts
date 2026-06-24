@@ -121,7 +121,19 @@ export type AdminGroup = {
   last_action?: string | null;
   last_action_by?: string | null;
   last_action_at?: string | null;
+  is_free: boolean;
   campers: AdminCamper[];
+};
+
+export type FreeCode = {
+  id: string;
+  code: string;
+  created_at: string;
+  created_by: string;
+  note?: string | null;
+  used_at?: string | null;
+  used_by_group_id?: string | null;
+  revoked_at?: string | null;
 };
 
 export type AdminEvent = {
@@ -316,4 +328,22 @@ export const adminApi = {
       method: "PUT",
       body: JSON.stringify({ open }),
     }),
+
+  confirmFree: (groupId: string, expectedVersion: number) =>
+    adminFetch<void>(`/admin/registrations/${groupId}/confirm-free`, {
+      method: "POST",
+      body: JSON.stringify({ expected_version: expectedVersion }),
+    }),
+
+  generateFreeCode: (password: string, note?: string) =>
+    adminFetch<{ code: string }>("/admin/free-codes", {
+      method: "POST",
+      body: JSON.stringify({ password, note: note ?? "" }),
+    }),
+
+  listFreeCodes: () =>
+    adminFetch<{ codes: FreeCode[] }>("/admin/free-codes"),
+
+  revokeFreeCode: (id: string) =>
+    adminFetch<void>(`/admin/free-codes/${id}/revoke`, { method: "POST" }),
 };

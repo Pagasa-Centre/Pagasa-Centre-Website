@@ -141,6 +141,7 @@ export type SubmitRequest = {
     phone: string;
   };
   campers: CamperSubmission[];
+  free_code?: string;
 };
 
 export type SubmitResponse = {

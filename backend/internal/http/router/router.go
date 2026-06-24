@@ -16,6 +16,7 @@ import (
 	"pagasacentre/backend/internal/middleware"
 	campstorage "pagasacentre/backend/internal/camp/storage"
 	"pagasacentre/backend/internal/payment"
+	"pagasacentre/backend/internal/registration"
 	regstorage "pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/pkg/commonlibrary/render"
 )
@@ -34,6 +35,7 @@ type Config struct {
 
 	RegRepo   *regstorage.Repository
 	CampRepo  *campstorage.Repository
+	RegSvc    *registration.Service
 	BillSvc   *billing.Service
 	PaySvc    *payment.Service
 	AdminRec  *adminlog.Recorder
@@ -64,7 +66,7 @@ func New(cfg Config) http.Handler {
 
 	r.Route("/admin", func(r chi.Router) {
 		middleware.WithRequestTimeout(r)
-		adminapi.Mount(r, cfg.AdminAuth, cfg.RegRepo, cfg.CampRepo, cfg.BillSvc, cfg.PaySvc, cfg.AdminRec)
+		adminapi.Mount(r, cfg.AdminAuth, cfg.RegRepo, cfg.CampRepo, cfg.RegSvc, cfg.BillSvc, cfg.PaySvc, cfg.AdminRec)
 	})
 
 	return r

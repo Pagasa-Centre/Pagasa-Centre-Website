@@ -160,4 +160,81 @@ func TestAllocate_versionConflict(t *testing.T) {
 	}
 }
 
+func TestConfirmFree_allocatedFreeGroup(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, NewStripeBilling(), nil, Config{})
+
+	var groupID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, total_amount_pence, currency, billing_status, is_free
+		) VALUES ('Free', 'Guest', 'free@example.com', '07000000000', 'paid', 0, 'GBP', 'allocated', true)
+		RETURNING id`).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+
+	if err := svc.ConfirmFree(ctx, groupID, "Admin", domain.SkipVersionCheck); err != nil {
+		t.Fatalf("ConfirmFree: %v", err)
+	}
+	g, err := repo.FindGroupByID(ctx, groupID)
+	if err != nil || g == nil {
+		t.Fatalf("find group: %v", err)
+	}
+	if g.BillingStatus != domain.BillingFreeConfirmed {
+		t.Fatalf("billing_status = %q, want free_confirmed", g.BillingStatus)
+	}
+}
+
+func TestConfirmFree_rejectsNonFreeGroup(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, NewStripeBilling(), nil, Config{})
+
+	var groupID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, total_amount_pence, currency, billing_status, is_free
+		) VALUES ('Pay', 'Guest', 'pay@example.com', '07000000000', 'paid', 5000, 'GBP', 'allocated', false)
+		RETURNING id`).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+
+	err = svc.ConfirmFree(ctx, groupID, "Admin", domain.SkipVersionCheck)
+	var apiErr commonerrors.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		t.Fatalf("expected bad_request, got %v", err)
+	}
+}
+
+func TestConfirmFree_rejectsNonAllocatedGroup(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, NewStripeBilling(), nil, Config{})
+
+	var groupID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, total_amount_pence, currency, billing_status, is_free
+		) VALUES ('Free', 'Guest', 'free-none@example.com', '07000000000', 'paid', 0, 'GBP', 'none', true)
+		RETURNING id`).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+
+	err = svc.ConfirmFree(ctx, groupID, "Admin", domain.SkipVersionCheck)
+	var apiErr commonerrors.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		t.Fatalf("expected bad_request for non-allocated free group, got %v", err)
+	}
+}
+
 func strPtr(s string) *string { return &s }

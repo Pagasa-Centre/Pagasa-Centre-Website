@@ -44,6 +44,7 @@ type Config struct {
 	AdminPassword       string
 	AdminSessionSecret  string
 	AdminSecureCookie   bool // ADMIN_SECURE_COOKIE=1 behind HTTPS
+	AdminFreeCodePassword string
 	WhiteTeamEmail      string
 	StripePriceChildUnder3 string // Stripe Price for full-week under-3 balance (£0)
 	InvoiceDueDays      int    // defaults to 15
@@ -83,6 +84,7 @@ func Load() (Config, error) {
 		AdminPassword:             os.Getenv("ADMIN_PASSWORD"),
 		AdminSessionSecret:        os.Getenv("ADMIN_SESSION_SECRET"),
 		AdminSecureCookie:         os.Getenv("ADMIN_SECURE_COOKIE") == "1" || os.Getenv("ADMIN_SECURE_COOKIE") == "true",
+		AdminFreeCodePassword:     os.Getenv("ADMIN_FREE_CODE_PASSWORD"),
 		WhiteTeamEmail:            os.Getenv("WHITE_TEAM_EMAIL"),
 		StripePriceChildUnder3:    os.Getenv("STRIPE_PRICE_CHILD_UNDER3"),
 		InvoiceDueDays:            getEnvInt("INVOICE_DUE_DAYS", 15),

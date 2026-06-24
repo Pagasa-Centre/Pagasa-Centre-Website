@@ -20,11 +20,12 @@ const (
 	PaymentRefunded       = "refunded"
 	PaymentCancelled      = "cancelled"
 
-	BillingNone        = "none"
-	BillingAllocated   = "allocated"
-	BillingInvoiced    = "invoiced"
-	BillingBalancePaid = "balance_paid"
-	BillingReleased    = "released"
+	BillingNone          = "none"
+	BillingAllocated     = "allocated"
+	BillingInvoiced      = "invoiced"
+	BillingBalancePaid   = "balance_paid"
+	BillingReleased      = "released"
+	BillingFreeConfirmed = "free_confirmed"
 )
 
 // ValidDayPassDays enumerates the allowed day_pass_days entries.
@@ -62,6 +63,19 @@ type Group struct {
 	LastAction            *string    `json:"last_action,omitempty"`
 	LastActionBy          *string    `json:"last_action_by,omitempty"`
 	LastActionAt          *time.Time `json:"last_action_at,omitempty"`
+	IsFree                bool       `json:"is_free"`
+}
+
+// FreeCode is a row from free_codes for admin listing.
+type FreeCode struct {
+	ID             string     `json:"id"`
+	Code           string     `json:"code"`
+	CreatedAt      time.Time  `json:"created_at"`
+	CreatedBy      string     `json:"created_by"`
+	Note           *string    `json:"note,omitempty"`
+	UsedAt         *time.Time `json:"used_at,omitempty"`
+	UsedByGroupID  *string    `json:"used_by_group_id,omitempty"`
+	RevokedAt      *time.Time `json:"revoked_at,omitempty"`
 }
 
 // Camper is the persisted form of a registrations row.

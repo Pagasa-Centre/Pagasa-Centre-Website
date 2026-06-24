@@ -118,9 +118,10 @@ func main() {
 	billSvc := billing.NewService(regRepo, billing.NewStripeBilling(), mailer, billCfg)
 
 	adminAuth := middleware.AuthConfig{
-		Password:      cfg.AdminPassword,
-		SessionSecret: []byte(cfg.AdminSessionSecret),
-		SecureCookie:  cfg.AdminSecureCookie,
+		Password:         cfg.AdminPassword,
+		SessionSecret:    []byte(cfg.AdminSessionSecret),
+		SecureCookie:     cfg.AdminSecureCookie,
+		FreeCodePassword: cfg.AdminFreeCodePassword,
 	}
 	if cfg.AdminPassword == "" || cfg.AdminSessionSecret == "" {
 		log.Println("admin: WARNING — ADMIN_PASSWORD or ADMIN_SESSION_SECRET unset; login will not work")
@@ -163,6 +164,7 @@ func main() {
 		ConsentHandler:       consentapi.NewHandler(),
 		RegRepo:              regRepo,
 		CampRepo:             campRepo,
+		RegSvc:               regSvc,
 		BillSvc:              billSvc,
 		PaySvc:               paySvc,
 		AdminRec:             adminRec,

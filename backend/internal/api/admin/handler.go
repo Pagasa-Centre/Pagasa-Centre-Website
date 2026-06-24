@@ -35,6 +35,7 @@ func Mount(
 	auth middleware.AuthConfig,
 	regRepo *regstorage.Repository,
 	campRepo *campstorage.Repository,
+	regSvc *registration.Service,
 	billSvc *billing.Service,
 	contactSvc contactService,
 	rec *adminlog.Recorder,
@@ -68,6 +69,11 @@ func Mount(
 		r.Post("/registrations/{groupID}/invoice/resend", postResendInvoice(billSvc, rec, regRepo))
 		r.Patch("/registrations/{groupID}/invoice-due", patchInvoiceDue(billSvc, rec, regRepo))
 		r.Post("/billing/sweep", postBillingSweep(billSvc, rec))
+
+		r.Post("/free-codes", postGenerateFreeCode(auth, regSvc, rec))
+		r.Get("/free-codes", getFreeCodes(regSvc))
+		r.Post("/free-codes/{id}/revoke", postRevokeFreeCode(regSvc, rec))
+		r.Post("/registrations/{groupID}/confirm-free", postConfirmFree(billSvc, rec, regRepo))
 	})
 }
 

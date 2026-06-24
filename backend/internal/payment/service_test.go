@@ -72,7 +72,7 @@ func seedPendingGroup(t *testing.T, ctx context.Context, repo *storage.Repositor
 			},
 		}},
 	}
-	gid, err := repo.InsertGroup(ctx, tx, req, 5000, "GBP")
+	gid, err := repo.InsertGroup(ctx, tx, req, 5000, "GBP", false)
 	if err != nil {
 		t.Fatal(err)
 	}
