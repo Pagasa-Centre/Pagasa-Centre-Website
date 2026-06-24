@@ -150,7 +150,7 @@ func seedRevokedFreeCode(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 	}
 }
 
-func freePlaceRequest(code, email string) domain.SubmitRequest {
+func sponsoredRequest(code, email string) domain.SubmitRequest {
 	req := validRequest()
 	req.FreeCode = code
 	req.Contact.Email = email
@@ -179,7 +179,7 @@ func TestSubmit_invalidFreeCode(t *testing.T) {
 	ctx := context.Background()
 	svc := newIntegrationService(pool)
 
-	_, err := svc.Submit(ctx, freePlaceRequest("FREE-NOSUCH01", "bad@example.com"))
+	_, err := svc.Submit(ctx, sponsoredRequest("SPON-NOSUCH01", "bad@example.com"))
 	assertAPIErrorCode(t, err, "invalid_free_code")
 	if countGroups(t, ctx, pool) != 0 {
 		t.Fatalf("expected no group row after invalid code")
@@ -190,9 +190,9 @@ func TestSubmit_usedFreeCodeRejected(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
 	svc := newIntegrationService(pool)
-	seedUsedFreeCode(t, ctx, pool, "FREE-USED0001")
+	seedUsedFreeCode(t, ctx, pool, "SPON-USED0001")
 
-	_, err := svc.Submit(ctx, freePlaceRequest("FREE-USED0001", "used@example.com"))
+	_, err := svc.Submit(ctx, sponsoredRequest("SPON-USED0001", "used@example.com"))
 	assertAPIErrorCode(t, err, "invalid_free_code")
 	if countGroups(t, ctx, pool) != 1 {
 		t.Fatalf("expected only the pre-seeded group, got %d", countGroups(t, ctx, pool))
@@ -203,9 +203,9 @@ func TestSubmit_revokedFreeCodeRejected(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
 	svc := newIntegrationService(pool)
-	seedRevokedFreeCode(t, ctx, pool, "FREE-REVOK001")
+	seedRevokedFreeCode(t, ctx, pool, "SPON-REVOK001")
 
-	_, err := svc.Submit(ctx, freePlaceRequest("FREE-REVOK001", "revoked@example.com"))
+	_, err := svc.Submit(ctx, sponsoredRequest("SPON-REVOK001", "revoked@example.com"))
 	assertAPIErrorCode(t, err, "invalid_free_code")
 	if countGroups(t, ctx, pool) != 0 {
 		t.Fatalf("expected no group row after revoked code")
@@ -217,9 +217,9 @@ func TestSubmit_validFreeCode(t *testing.T) {
 	ctx := context.Background()
 	repo := storage.NewRepository(pool)
 	svc := newIntegrationService(pool)
-	seedUnusedFreeCode(t, ctx, pool, "FREE-VALID001")
+	seedUnusedFreeCode(t, ctx, pool, "SPON-VALID001")
 
-	resp, err := svc.Submit(ctx, freePlaceRequest("free-valid001", "free@example.com"))
+	resp, err := svc.Submit(ctx, sponsoredRequest("spon-valid001", "free@example.com"))
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestSubmit_validFreeCode(t *testing.T) {
 		t.Fatalf("total = %d, want 0", resp.TotalAmountPence)
 	}
 	if resp.CheckoutURL != "" {
-		t.Fatalf("expected no checkout URL for free place")
+		t.Fatalf("expected no checkout URL for sponsored registration")
 	}
 
 	g, err := repo.FindGroupByID(ctx, resp.GroupID)
@@ -246,7 +246,7 @@ func TestSubmit_validFreeCode(t *testing.T) {
 
 	var usedBy *string
 	err = pool.QueryRow(ctx,
-		`SELECT used_by_group_id FROM free_codes WHERE code = $1`, "FREE-VALID001").Scan(&usedBy)
+		`SELECT used_by_group_id FROM free_codes WHERE code = $1`, "SPON-VALID001").Scan(&usedBy)
 	if err != nil {
 		t.Fatalf("lookup code: %v", err)
 	}
@@ -259,12 +259,12 @@ func TestSubmit_doubleRedeemFreeCode(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
 	svc := newIntegrationService(pool)
-	seedUnusedFreeCode(t, ctx, pool, "FREE-DOUBLE01")
+	seedUnusedFreeCode(t, ctx, pool, "SPON-DOUBLE01")
 
-	if _, err := svc.Submit(ctx, freePlaceRequest("FREE-DOUBLE01", "first@example.com")); err != nil {
+	if _, err := svc.Submit(ctx, sponsoredRequest("SPON-DOUBLE01", "first@example.com")); err != nil {
 		t.Fatalf("first Submit: %v", err)
 	}
-	_, err := svc.Submit(ctx, freePlaceRequest("FREE-DOUBLE01", "second@example.com"))
+	_, err := svc.Submit(ctx, sponsoredRequest("SPON-DOUBLE01", "second@example.com"))
 	assertAPIErrorCode(t, err, "invalid_free_code")
 	if countGroups(t, ctx, pool) != 1 {
 		t.Fatalf("expected exactly one group after double-redeem attempt, got %d", countGroups(t, ctx, pool))
@@ -276,7 +276,7 @@ func TestRevokeFreeCode_rejectsUsedCode(t *testing.T) {
 	ctx := context.Background()
 	repo := storage.NewRepository(pool)
 	svc := newIntegrationService(pool)
-	seedUsedFreeCode(t, ctx, pool, "FREE-NOREVOK1")
+	seedUsedFreeCode(t, ctx, pool, "SPON-NOREVOK1")
 
 	codes, err := repo.ListFreeCodes(ctx)
 	if err != nil {
@@ -284,7 +284,7 @@ func TestRevokeFreeCode_rejectsUsedCode(t *testing.T) {
 	}
 	var id string
 	for _, c := range codes {
-		if c.Code == "FREE-NOREVOK1" {
+		if c.Code == "SPON-NOREVOK1" {
 			id = c.ID
 			break
 		}

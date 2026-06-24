@@ -118,7 +118,7 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 			if errors.Is(err, storage.ErrFreeCodeInvalid) {
 				return nil, commonerrors.APIError{
 					Code:    "invalid_free_code",
-					Message: "That free-place code is not valid or has already been used.",
+					Message: "That sponsorship code is not valid or has already been used.",
 				}
 			}
 			return nil, commonerrors.Internal(err.Error())
@@ -343,10 +343,10 @@ func pluralS(n int) string {
 	return "s"
 }
 
-const freeCodePrefix = "FREE-"
+const freeCodePrefix = "SPON-"
 const freeCodeCharset = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 
-// GenerateFreeCode creates a one-time free-place code (admin only).
+// GenerateFreeCode creates a one-time sponsorship code (admin only).
 func (s *Service) GenerateFreeCode(ctx context.Context, actor, note string) (string, error) {
 	for attempt := 0; attempt < 5; attempt++ {
 		code, err := randomFreeCode()
@@ -380,7 +380,7 @@ func isUniqueViolation(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "duplicate key")
 }
 
-// ListFreeCodes returns all generated free-place codes.
+// ListFreeCodes returns all generated sponsorship codes.
 func (s *Service) ListFreeCodes(ctx context.Context) ([]domain.FreeCode, error) {
 	codes, err := s.repo.ListFreeCodes(ctx)
 	if err != nil {

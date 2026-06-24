@@ -32,7 +32,7 @@ type AuthConfig struct {
 	FreeCodePassword  string
 }
 
-// FreeCodePasswordMatches reports whether pw matches the free-code generation password.
+// FreeCodePasswordMatches reports whether pw matches the sponsored-code generation password.
 func (c AuthConfig) FreeCodePasswordMatches(pw string) bool {
 	if c.FreeCodePassword == "" {
 		return false

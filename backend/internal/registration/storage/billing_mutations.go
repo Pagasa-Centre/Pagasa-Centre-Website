@@ -131,7 +131,7 @@ func (r *Repository) UnallocateGroup(ctx context.Context, groupID string, meta d
 	return tx.Commit(ctx)
 }
 
-// ConfirmFreeMeta marks a free-place group as fully confirmed (no invoice).
+// ConfirmFreeMeta marks a church-sponsored group as fully confirmed (no invoice).
 func (r *Repository) ConfirmFreeMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -147,10 +147,10 @@ func (r *Repository) ConfirmFreeMeta(ctx context.Context, groupID string, meta d
 		return fmt.Errorf("group %q not found", groupID)
 	}
 	if !g.IsFree {
-		return fmt.Errorf("group %q is not a free place", groupID)
+		return fmt.Errorf("group %q is not church-sponsored", groupID)
 	}
 	if g.BillingStatus != domain.BillingAllocated {
-		return fmt.Errorf("group %q must be allocated before confirming free place", groupID)
+		return fmt.Errorf("group %q must be allocated before confirming sponsorship", groupID)
 	}
 	if err := checkVersion(g, meta); err != nil {
 		return err

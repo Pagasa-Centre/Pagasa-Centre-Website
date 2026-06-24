@@ -64,7 +64,7 @@ func TestRenderDepositConfirmation_DayPassOnlyPath(t *testing.T) {
 	}
 }
 
-func TestRenderDepositConfirmation_FreePlacePath(t *testing.T) {
+func TestRenderDepositConfirmation_SponsoredPath(t *testing.T) {
 	subject, body, err := renderDepositConfirmation(DepositConfirmation{
 		ToEmail:     "guest@example.com",
 		ToName:      "Sam",
@@ -76,13 +76,13 @@ func TestRenderDepositConfirmation_FreePlacePath(t *testing.T) {
 		t.Fatalf("renderDepositConfirmation: %v", err)
 	}
 	if !strings.Contains(subject, "registration is confirmed") {
-		t.Errorf("expected free-place subject, got %q", subject)
+		t.Errorf("expected sponsored registration subject, got %q", subject)
 	}
-	if !strings.Contains(body, "fully covered by the church") {
-		t.Errorf("free-place body should mention church coverage")
+	if !strings.Contains(body, "fully sponsored by the church") {
+		t.Errorf("sponsored registration body should mention church sponsorship")
 	}
 	if strings.Contains(body, "Day-pass attendance") {
-		t.Errorf("free-place body should not use day-pass wording")
+		t.Errorf("sponsored registration body should not use day-pass wording")
 	}
 }
 

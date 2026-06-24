@@ -1,4 +1,4 @@
--- Free-place (church-funded) codes and billing status.
+-- Church-sponsored registration codes and billing status.
 
 ALTER TABLE registration_groups ADD COLUMN is_free BOOLEAN NOT NULL DEFAULT false;
 

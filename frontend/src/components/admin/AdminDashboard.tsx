@@ -128,7 +128,7 @@ function statusBadge(g: AdminGroup): { label: string; className: string } {
     case "paid":
       return g.is_free
         ? {
-            label: "Free place confirmed",
+            label: "Sponsorship confirmed",
             className: "bg-green-100 text-green-800 border-green-200",
           }
         : {
@@ -185,7 +185,7 @@ const LAST_ACTION_LABELS: Record<string, string> = {
   extend_due: "Due date extended",
   contact_updated: "Contact updated",
   balance_paid: "Balance paid",
-  free_confirmed: "Free place confirmed",
+  free_confirmed: "Sponsorship confirmed",
 };
 
 function formatLastAction(g: AdminGroup): string | null {
@@ -631,10 +631,10 @@ export default function AdminDashboard() {
     setNotice(null);
     try {
       await adminApi.confirmFree(g.id, g.version);
-      setNotice(`Free place confirmed for ${g.contact_first_name}'s group.`);
+      setNotice(`Sponsorship confirmed for ${g.contact_first_name}'s group.`);
       await load();
     } catch (err) {
-      await handleAdminError(err, "Could not confirm free place.");
+      await handleAdminError(err, "Could not confirm sponsorship.");
     } finally {
       setBusy(null);
     }
@@ -824,10 +824,10 @@ export default function AdminDashboard() {
         </div>
         <div className="flex items-center gap-2">
           <Link
-            href="/admin/free-codes"
+            href="/admin/sponsored-codes"
             className="px-3 py-2 text-sm font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100"
           >
-            Free place codes
+            Sponsorship codes
           </Link>
           <Link
             href="/admin/activity"
@@ -1432,7 +1432,7 @@ function GroupCard({
               {g.contact_first_name} {g.contact_last_name}
               {g.is_free && (
                 <span className="ml-2 inline-flex items-center px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide rounded-full bg-violet-100 text-violet-800 border border-violet-200">
-                  Free place
+                  Sponsored
                 </span>
               )}
             </p>
@@ -1708,7 +1708,7 @@ function GroupCard({
                   >
                     {busy === `free-${g.id}`
                       ? "Confirming…"
-                      : "Confirm free place"}
+                      : "Confirm sponsorship"}
                   </button>
                 ) : (
                   <button
@@ -1787,7 +1787,7 @@ function GroupCard({
             {cat === "paid" && (
               <p className="text-sm text-green-700 font-semibold">
                 {g.is_free || g.billing_status === "free_confirmed"
-                  ? "✓ Free place confirmed"
+                  ? "✓ Sponsorship confirmed"
                   : "✓ Balance paid in full"}
                 {!g.is_free && g.balance_paid_at
                   ? ` on ${formatDate(g.balance_paid_at)}`

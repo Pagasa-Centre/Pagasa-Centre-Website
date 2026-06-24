@@ -72,5 +72,5 @@ type DepositConfirmation struct {
 	CamperCount    int // full-week + day-pass total
 	HasMinor       bool
 	ConsentFormURL string // empty if HasMinor is false
-	IsFree         bool   // church-funded free place (not day-pass £0)
+	IsFree         bool   // church-sponsored registration (not day-pass £0)
 }

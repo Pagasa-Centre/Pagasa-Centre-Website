@@ -390,9 +390,9 @@ export default function CampRegisterForm({
       if (res.checkout_url) {
         window.location.href = res.checkout_url;
       } else {
-        const freePlace = !!built.payload.free_code;
+        const isSponsored = !!built.payload.free_code;
         const qs = new URLSearchParams({ free: "1", group_id: res.group_id });
-        if (freePlace) qs.set("free_place", "1");
+        if (isSponsored) qs.set("sponsored", "1");
         window.location.href = `/camp/registration/success?${qs.toString()}`;
       }
     } catch (err) {
@@ -556,13 +556,13 @@ export default function CampRegisterForm({
 
           <div className="bg-white border border-neutral-200 p-4 rounded-xl">
             <label className={labelCls} htmlFor="free_code">
-              Have a free-place code?
+              Have a sponsorship code?
             </label>
             <input
               id="free_code"
               type="text"
               autoComplete="off"
-              placeholder="FREE-XXXXXXXX"
+              placeholder="SPON-XXXXXXXX"
               value={state.free_code}
               onChange={(e) =>
                 setState((s) => ({ ...s, free_code: e.target.value }))
@@ -573,8 +573,8 @@ export default function CampRegisterForm({
               <p className="text-xs text-red-600 mt-1">{fieldErrors.free_code}</p>
             ) : (
               <p className="text-xs text-neutral-500 mt-1">
-                If the church gave you a code, enter it here — you won&apos;t
-                need to pay a deposit.
+                If the church gave you a sponsorship code, enter it here — you
+                won&apos;t need to pay a deposit.
               </p>
             )}
           </div>

@@ -203,7 +203,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 		return commonerrors.NotFound("group not found")
 	}
 	if g.IsFree {
-		return commonerrors.BadRequest("this is a free (church-funded) place; confirm the free place instead of invoicing", nil)
+		return commonerrors.BadRequest("this is a church-sponsored registration; confirm the sponsorship instead of invoicing", nil)
 	}
 	if g.PaymentStatus != domain.PaymentPaid {
 		return commonerrors.BadRequest("deposit must be paid first", nil)
@@ -308,7 +308,7 @@ func (s *Service) SendInvoicesBulk(ctx context.Context, actor string, groupIDs [
 	return errs
 }
 
-// ConfirmFree marks a free-place group as fully confirmed (no Stripe invoice).
+// ConfirmFree marks a church-sponsored group as fully confirmed (no Stripe invoice).
 func (s *Service) ConfirmFree(ctx context.Context, groupID, actor string, expectedVersion int) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
@@ -318,13 +318,13 @@ func (s *Service) ConfirmFree(ctx context.Context, groupID, actor string, expect
 		return commonerrors.NotFound("group not found")
 	}
 	if !g.IsFree {
-		return commonerrors.BadRequest("this group is not a free place", nil)
+		return commonerrors.BadRequest("this group is not church-sponsored", nil)
 	}
 	if g.PaymentStatus != domain.PaymentPaid {
 		return commonerrors.BadRequest("deposit must be paid first", nil)
 	}
 	if g.BillingStatus != domain.BillingAllocated {
-		return commonerrors.BadRequest("group must be allocated before confirming free place", nil)
+		return commonerrors.BadRequest("group must be allocated before confirming sponsorship", nil)
 	}
 	meta := domain.ActionMeta{
 		Actor:           actor,

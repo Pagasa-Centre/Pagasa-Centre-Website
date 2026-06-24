@@ -29,7 +29,7 @@ function codeStatus(c: FreeCode): string {
   return "Unused";
 }
 
-export default function AdminFreeCodesPage() {
+export default function AdminSponsoredCodesPage() {
   const router = useRouter();
   const [codes, setCodes] = useState<FreeCode[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,7 +51,7 @@ export default function AdminFreeCodesPage() {
         router.replace("/admin/login");
         return;
       }
-      setError("Could not load free-place codes.");
+      setError("Could not load sponsorship codes.");
     } finally {
       setLoading(false);
     }
@@ -127,11 +127,11 @@ export default function AdminFreeCodesPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-extrabold text-neutral-800">
-            Free place codes
+            Sponsorship codes
           </h1>
           <p className="text-sm text-neutral-600 mt-1">
-            Generate one-time codes for church-funded camp places. Requires the
-            separate free-code password.
+            Generate one-time codes for church-sponsored registrations. Requires
+            the separate code-generation password.
           </p>
         </div>
         <Link
@@ -157,7 +157,7 @@ export default function AdminFreeCodesPage() {
         </h2>
         <div>
           <label className="block text-xs font-semibold text-neutral-600 mb-1">
-            Free-code password
+            Code-generation password
           </label>
           <input
             type="password"

@@ -26,7 +26,7 @@ func postGenerateFreeCode(auth middleware.AuthConfig, svc *registration.Service,
 		if auth.FreeCodePassword == "" {
 			commonerrors.WriteError(w, commonerrors.APIError{
 				Code:    "forbidden",
-				Message: "free-place codes are not configured on this server",
+				Message: "sponsorship codes are not configured on this server",
 			})
 			return
 		}
@@ -46,7 +46,7 @@ func postGenerateFreeCode(auth middleware.AuthConfig, svc *registration.Service,
 			return
 		}
 		admin.Audit(rec, r, adminlog.ActionFreeCodeGenerated, nil,
-			actor+" generated free-place code "+code, map[string]string{"code": code})
+			actor+" generated sponsorship code "+code, map[string]string{"code": code})
 		render.Json(w, http.StatusOK, map[string]string{"code": code})
 	}
 }
@@ -73,7 +73,7 @@ func postRevokeFreeCode(svc *registration.Service, rec *adminlog.Recorder) http.
 			return
 		}
 		admin.Audit(rec, r, adminlog.ActionFreeCodeRevoked, nil,
-			admin.ActorFrom(r.Context())+" revoked free-place code "+id, map[string]string{"code_id": id})
+			admin.ActorFrom(r.Context())+" revoked sponsorship code "+id, map[string]string{"code_id": id})
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -91,7 +91,7 @@ func postConfirmFree(billSvc *billing.Service, rec *adminlog.Recorder, regRepo *
 		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
 		gid := groupID
 		admin.Audit(rec, r, adminlog.ActionFreeConfirmed, &gid,
-			"Confirmed free place for "+admin.GroupSummary(g), nil)
+			"Confirmed sponsorship for "+admin.GroupSummary(g), nil)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
