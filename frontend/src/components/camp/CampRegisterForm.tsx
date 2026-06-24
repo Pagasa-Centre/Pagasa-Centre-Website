@@ -59,9 +59,9 @@ function initialState(): FormState {
 }
 
 const labelCls =
-  "text-xs font-bold uppercase tracking-widest text-neutral-700";
+  "block text-xs font-bold uppercase tracking-widest text-neutral-700";
 const baseInput =
-  "px-4 py-3 bg-white border text-neutral-900 placeholder-neutral-500 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary";
+  "w-full px-4 py-3 bg-white border rounded-lg text-neutral-900 placeholder-neutral-400 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-colors";
 
 function inputCls(hasError: boolean) {
   return `${baseInput} ${hasError ? "border-red-500" : "border-neutral-300"}`;
@@ -554,10 +554,14 @@ export default function CampRegisterForm({
             </div>
           )}
 
-          <div className="bg-white border border-neutral-200 p-4 rounded-xl">
+          <div className="bg-white border border-neutral-200 p-6 rounded-xl flex flex-col gap-2">
             <label className={labelCls} htmlFor="free_code">
               Have a sponsorship code?
             </label>
+            <p className="text-sm text-neutral-500">
+              If the church gave you a sponsorship code, enter it here — you
+              won&apos;t need to pay a deposit.
+            </p>
             <input
               id="free_code"
               type="text"
@@ -565,17 +569,15 @@ export default function CampRegisterForm({
               placeholder="SPON-XXXXXXXX"
               value={state.free_code}
               onChange={(e) =>
-                setState((s) => ({ ...s, free_code: e.target.value }))
+                setState((s) => ({
+                  ...s,
+                  free_code: e.target.value.toUpperCase(),
+                }))
               }
-              className={inputCls(!!fieldErrors.free_code)}
+              className={`${inputCls(!!fieldErrors.free_code)} mt-1 font-mono tracking-widest uppercase placeholder:tracking-normal placeholder:normal-case sm:max-w-xs`}
             />
-            {fieldErrors.free_code ? (
-              <p className="text-xs text-red-600 mt-1">{fieldErrors.free_code}</p>
-            ) : (
-              <p className="text-xs text-neutral-500 mt-1">
-                If the church gave you a sponsorship code, enter it here — you
-                won&apos;t need to pay a deposit.
-              </p>
+            {fieldErrors.free_code && (
+              <p className="text-xs text-red-600">{fieldErrors.free_code}</p>
             )}
           </div>
 
@@ -593,7 +595,7 @@ export default function CampRegisterForm({
               <button
                 type="submit"
                 disabled={submitting}
-                className="px-10 py-4 bg-primary text-white font-bold uppercase tracking-widest text-sm hover:bg-primary-dark transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                className="w-full sm:w-auto px-10 py-4 bg-primary text-white font-bold uppercase tracking-widest text-sm rounded-lg hover:bg-primary-dark transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {submitting
                   ? "Submitting…"
