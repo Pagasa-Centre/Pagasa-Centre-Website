@@ -75,6 +75,14 @@ func (r *ResendMailer) SendBalancePaid(ctx context.Context, p BalancePaid) error
 	return r.send(ctx, p.ToEmail, subject, body)
 }
 
+func (r *ResendMailer) SendSponsorshipConfirmed(ctx context.Context, p SponsorshipConfirmed) error {
+	subject, body, err := renderSponsorshipConfirmed(p)
+	if err != nil {
+		return err
+	}
+	return r.send(ctx, p.ToEmail, subject, body)
+}
+
 type resendRequest struct {
 	From    string   `json:"from"`
 	To      []string `json:"to"`

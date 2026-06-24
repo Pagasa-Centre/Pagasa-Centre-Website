@@ -6,11 +6,23 @@ import (
 	"testing"
 
 	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
+	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/registration"
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/testhelper"
 )
+
+// recordingMailer captures SponsorshipConfirmed sends for assertions.
+type recordingMailer struct {
+	email.NoopMailer
+	sponsorships []email.SponsorshipConfirmed
+}
+
+func (m *recordingMailer) SendSponsorshipConfirmed(_ context.Context, p email.SponsorshipConfirmed) error {
+	m.sponsorships = append(m.sponsorships, p)
+	return nil
+}
 
 func TestChildUnder3UsesConfigPrice(t *testing.T) {
 	cfg := Config{StripePriceChildUnder3: "price_child_0"}
@@ -164,7 +176,8 @@ func TestConfirmFree_allocatedFreeGroup(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
 	repo := storage.NewRepository(pool)
-	svc := NewService(repo, NewStripeBilling(), nil, Config{})
+	mailer := &recordingMailer{}
+	svc := NewService(repo, NewStripeBilling(), mailer, Config{})
 
 	var groupID string
 	err := pool.QueryRow(ctx, `
@@ -186,6 +199,12 @@ func TestConfirmFree_allocatedFreeGroup(t *testing.T) {
 	}
 	if g.BillingStatus != domain.BillingFreeConfirmed {
 		t.Fatalf("billing_status = %q, want free_confirmed", g.BillingStatus)
+	}
+	if len(mailer.sponsorships) != 1 {
+		t.Fatalf("expected 1 sponsorship-confirmed email, got %d", len(mailer.sponsorships))
+	}
+	if mailer.sponsorships[0].ToEmail != "free@example.com" {
+		t.Fatalf("email sent to %q, want free@example.com", mailer.sponsorships[0].ToEmail)
 	}
 }
 

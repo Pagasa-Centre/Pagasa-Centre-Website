@@ -68,6 +68,10 @@ func (m *recordingMailer) SendBalancePaid(context.Context, email.BalancePaid) er
 	return nil
 }
 
+func (m *recordingMailer) SendSponsorshipConfirmed(context.Context, email.SponsorshipConfirmed) error {
+	return nil
+}
+
 func (m *recordingMailer) SendDepositConfirmation(_ context.Context, p email.DepositConfirmation) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -86,6 +86,27 @@ func TestRenderDepositConfirmation_SponsoredPath(t *testing.T) {
 	}
 }
 
+func TestRenderSponsorshipConfirmed(t *testing.T) {
+	subject, body, err := renderSponsorshipConfirmed(SponsorshipConfirmed{
+		ToEmail: "guest@example.com",
+		ToName:  "Sam",
+		Items:   []string{"Josh Basco — Lodge", "Mary Basco — Cabin (Cabin 2)"},
+	})
+	if err != nil {
+		t.Fatalf("renderSponsorshipConfirmed: %v", err)
+	}
+	if !strings.Contains(subject, "place is confirmed") {
+		t.Errorf("unexpected subject %q", subject)
+	}
+	if !strings.Contains(body, "sponsored by the church") {
+		t.Errorf("body should mention church sponsorship")
+	}
+	if !strings.Contains(body, "Josh Basco — Lodge") ||
+		!strings.Contains(body, "Mary Basco — Cabin (Cabin 2)") {
+		t.Errorf("body should list each camper's accommodation")
+	}
+}
+
 func TestFormatPence(t *testing.T) {
 	cases := []struct {
 		pence    int

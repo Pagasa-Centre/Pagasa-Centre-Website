@@ -334,7 +334,29 @@ func (s *Service) ConfirmFree(ctx context.Context, groupID, actor string, expect
 	if err := s.repo.ConfirmFreeMeta(ctx, groupID, meta); err != nil {
 		return mapVersionErr(ctx, s.repo, groupID, err)
 	}
+	s.sendSponsorshipConfirmedEmail(ctx, g)
 	return nil
+}
+
+// sendSponsorshipConfirmedEmail tells the sponsored family their accommodation
+// is confirmed. Best-effort: a failure here must not fail the confirmation,
+// which has already been committed.
+func (s *Service) sendSponsorshipConfirmedEmail(ctx context.Context, g *domain.Group) {
+	if s.mailer == nil {
+		return
+	}
+	campers, err := s.repo.CampersForGroup(ctx, g.ID)
+	if err != nil {
+		log.Printf("billing: sponsorship email load campers (group %s): %v", g.ID, err)
+		return
+	}
+	if err := s.mailer.SendSponsorshipConfirmed(ctx, email.SponsorshipConfirmed{
+		ToEmail: g.ContactEmail,
+		ToName:  g.ContactFirstName,
+		Items:   balanceInvoiceItems(campers, s.accommodationNames(ctx), s.unitNames(ctx)),
+	}); err != nil {
+		log.Printf("billing: sponsorship confirmed email to %s: %v", g.ContactEmail, err)
+	}
 }
 
 // VoidAndRelease voids the Stripe invoice (if any) and clears allocations.

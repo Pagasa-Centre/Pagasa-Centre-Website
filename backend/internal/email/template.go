@@ -184,6 +184,35 @@ func renderBalancePaid(p BalancePaid) (subject, htmlBody string, err error) {
 	return subject, htmlBody, nil
 }
 
+func renderSponsorshipConfirmed(p SponsorshipConfirmed) (subject, htmlBody string, err error) {
+	subject = "Your PC Summer Camp 2026 place is confirmed"
+	name := p.ToName
+	if name == "" {
+		name = "there"
+	}
+	items := ""
+	for _, it := range p.Items {
+		items += "<li>" + template.HTMLEscapeString(it) + "</li>"
+	}
+	accommodationBlock := ""
+	if items != "" {
+		accommodationBlock = `<p style="margin:16px 0 4px;"><strong>Your accommodation:</strong></p><ul style="margin:0 0 16px;">` + items + "</ul>"
+	}
+	htmlBody = fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en"><body style="font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; color:#1a1a1a; line-height:1.55; max-width:600px; margin:0 auto; padding:24px;">
+  <h1 style="font-size:22px; margin:0 0 16px;">Your camp place is confirmed</h1>
+  <p>Hi %s,</p>
+  <p>Good news — your accommodation for <strong>PC Summer Camp 2026</strong> has been allocated and your place is fully confirmed. As your registration is sponsored by the church, there is nothing to pay.</p>
+  %s
+  <p>If anything looks wrong, reply to this email or speak to your cell leader.</p>
+  <p style="margin-top:32px;">God bless,<br>The PC Summer Camp 2026 team</p>
+</body></html>`,
+		template.HTMLEscapeString(name),
+		accommodationBlock,
+	)
+	return subject, htmlBody, nil
+}
+
 func renderWhiteTeamNotification(p WhiteTeamNotification) (subject, htmlBody string, err error) {
 	subject = p.Subject
 	body := template.HTMLEscapeString(p.Body)
