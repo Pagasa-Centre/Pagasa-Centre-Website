@@ -93,6 +93,93 @@ func renderAllocationReleased(p AllocationReleased) (subject, htmlBody string, e
 	return subject, htmlBody, nil
 }
 
+// renderAccommodationChangeCallout returns a highlighted warning block when the
+// family was placed outside their accommodation preferences. Used inline in
+// emails we control (invoice fallback, balance-paid, sponsorship confirmed).
+func renderAccommodationChangeCallout(changes []AccommodationChange) string {
+	if len(changes) == 0 {
+		return ""
+	}
+	lines := ""
+	for _, ch := range changes {
+		prefs := ""
+		if ch.FirstChoice != "" && ch.SecondChoice != "" {
+			prefs = template.HTMLEscapeString(ch.FirstChoice) + " (1st) / " +
+				template.HTMLEscapeString(ch.SecondChoice) + " (2nd)"
+		} else if ch.FirstChoice != "" {
+			prefs = template.HTMLEscapeString(ch.FirstChoice) + " (1st choice)"
+		} else if ch.SecondChoice != "" {
+			prefs = template.HTMLEscapeString(ch.SecondChoice) + " (2nd choice)"
+		}
+		line := "<li><strong>" + template.HTMLEscapeString(ch.CamperName) + "</strong>"
+		if prefs != "" {
+			line += " — asked for " + prefs
+		}
+		line += " — placed in <strong>" + template.HTMLEscapeString(ch.Allocated) + "</strong>"
+		if ch.TentGuidance {
+			line += " (bring your own tent)"
+		}
+		line += "</li>"
+		lines += line
+	}
+	return `<div style="margin:0 0 20px; padding:16px; background:#fef3c7; border:1px solid #f59e0b; border-radius:8px;">
+  <p style="margin:0 0 8px; font-weight:bold; color:#92400e;">Important — your accommodation is different from what you requested</p>
+  <p style="margin:0 0 8px; font-size:14px; color:#78350f;">We couldn't place everyone in their preferred accommodation. Please read the details below carefully before paying or arriving at camp.</p>
+  <ul style="margin:0; padding-left:20px; font-size:14px; color:#78350f;">` + lines + `</ul>
+</div>`
+}
+
+func renderAccommodationChanged(p AccommodationChangedNotice) (subject, htmlBody string, err error) {
+	subject = "Important — your PC Summer Camp 2026 accommodation"
+	name := p.ToName
+	if name == "" {
+		name = "there"
+	}
+	items := ""
+	for _, ch := range p.Items {
+		prefs := ""
+		if ch.FirstChoice != "" && ch.SecondChoice != "" {
+			prefs = template.HTMLEscapeString(ch.FirstChoice) + " (1st) / " +
+				template.HTMLEscapeString(ch.SecondChoice) + " (2nd)"
+		} else if ch.FirstChoice != "" {
+			prefs = template.HTMLEscapeString(ch.FirstChoice) + " (1st choice)"
+		} else if ch.SecondChoice != "" {
+			prefs = template.HTMLEscapeString(ch.SecondChoice) + " (2nd choice)"
+		}
+		line := "<li><strong>" + template.HTMLEscapeString(ch.CamperName) + "</strong>"
+		if prefs != "" {
+			line += " — asked for " + prefs
+		}
+		line += " — placed in <strong>" + template.HTMLEscapeString(ch.Allocated) + "</strong>"
+		if ch.TentGuidance {
+			line += " (bring your own tent)"
+		}
+		line += "</li>"
+		items += line
+	}
+	paymentNote := ""
+	if p.AwaitingPayment {
+		paymentNote = `<p style="margin:16px 0 0; padding:12px; background:#fff7ed; border:1px solid #fdba74; border-radius:8px; font-size:14px; color:#9a3412;">
+  <strong>Before you pay:</strong> you will receive a separate balance invoice from Stripe. The amount reflects the accommodation listed above — not necessarily what you originally chose. Please check carefully before paying.
+</p>`
+	}
+	htmlBody = fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en"><body style="font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; color:#1a1a1a; line-height:1.55; max-width:600px; margin:0 auto; padding:24px;">
+  <h1 style="font-size:22px; margin:0 0 16px;">Your accommodation is different from what you requested</h1>
+  <p>Hi %s,</p>
+  <p>We're sorry — we couldn't place everyone in their preferred accommodation for <strong>PC Summer Camp 2026</strong>. Your family has been allocated as follows:</p>
+  <ul style="padding-left:20px;">%s</ul>
+  %s
+  <p>If this won't work for you, please contact a member of the white team or speak to your cell leader as soon as possible.</p>
+  <p style="margin-top:32px;">God bless,<br>The PC Summer Camp 2026 team</p>
+</body></html>`,
+		template.HTMLEscapeString(name),
+		items,
+		paymentNote,
+	)
+	return subject, htmlBody, nil
+}
+
 func renderBalanceInvoice(p BalanceInvoice) (subject, htmlBody string, err error) {
 	subject = "Your PC Summer Camp 2026 balance is ready to pay"
 	names := ""
@@ -113,9 +200,11 @@ func renderBalanceInvoice(p BalanceInvoice) (subject, htmlBody string, err error
 	if names != "" {
 		camperBlock = "<p>This payment covers:</p><ul>" + names + "</ul>"
 	}
+	callout := renderAccommodationChangeCallout(p.Changes)
 	htmlBody = fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en"><body style="font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; color:#1a1a1a; line-height:1.55; max-width:600px; margin:0 auto; padding:24px;">
   <h1 style="font-size:22px; margin:0 0 16px;">Your camp balance is ready to pay</h1>
+  %s
   <p>Hi %s,</p>
   <p>Your accommodation for <strong>PC Summer Camp 2026</strong> has been allocated. Please pay your remaining balance to confirm your place.</p>
   %s
@@ -127,6 +216,7 @@ func renderBalanceInvoice(p BalanceInvoice) (subject, htmlBody string, err error
   %s
   <p style="margin-top:32px;">God bless,<br>The PC Summer Camp 2026 team</p>
 </body></html>`,
+		callout,
 		template.HTMLEscapeString(p.ToName),
 		amount,
 		due,
@@ -203,9 +293,11 @@ func renderBalancePaidConfirmation(p BalancePaidConfirmation) (subject, htmlBody
 		amountBlock = fmt.Sprintf(`<p>We've received your balance payment of <strong>%s</strong>.</p>`,
 			template.HTMLEscapeString(p.AmountLabel))
 	}
+	callout := renderAccommodationChangeCallout(p.Changes)
 	htmlBody = fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en"><body style="font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; color:#1a1a1a; line-height:1.55; max-width:600px; margin:0 auto; padding:24px;">
   <h1 style="font-size:22px; margin:0 0 16px;">Your camp place is confirmed ✅</h1>
+  %s
   <p>Hi %s,</p>
   %s
   <p>Your balance is paid in full and your accommodation for <strong>PC Summer Camp 2026</strong> is now fully confirmed. There's nothing more to pay.</p>
@@ -213,6 +305,7 @@ func renderBalancePaidConfirmation(p BalancePaidConfirmation) (subject, htmlBody
   <p>If anything looks wrong, reply to this email or speak to your cell leader.</p>
   <p style="margin-top:32px;">God bless,<br>The PC Summer Camp 2026 team</p>
 </body></html>`,
+		callout,
 		template.HTMLEscapeString(name),
 		amountBlock,
 		accommodationBlock,
@@ -234,15 +327,18 @@ func renderSponsorshipConfirmed(p SponsorshipConfirmed) (subject, htmlBody strin
 	if items != "" {
 		accommodationBlock = `<p style="margin:16px 0 4px;"><strong>Your accommodation:</strong></p><ul style="margin:0 0 16px;">` + items + "</ul>"
 	}
+	callout := renderAccommodationChangeCallout(p.Changes)
 	htmlBody = fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en"><body style="font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; color:#1a1a1a; line-height:1.55; max-width:600px; margin:0 auto; padding:24px;">
   <h1 style="font-size:22px; margin:0 0 16px;">Your camp place is confirmed</h1>
+  %s
   <p>Hi %s,</p>
   <p>Good news — your accommodation for <strong>PC Summer Camp 2026</strong> has been allocated and your place is fully confirmed. As your registration is sponsored by the church, there is nothing to pay.</p>
   %s
   <p>If anything looks wrong, reply to this email or speak to your cell leader.</p>
   <p style="margin-top:32px;">God bless,<br>The PC Summer Camp 2026 team</p>
 </body></html>`,
+		callout,
 		template.HTMLEscapeString(name),
 		accommodationBlock,
 	)

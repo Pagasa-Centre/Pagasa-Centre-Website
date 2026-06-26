@@ -72,6 +72,15 @@ function fullWeekCampers(g: AdminGroup): AdminCamper[] {
   return g.campers.filter((c) => c.attendance_type === "full_week");
 }
 
+// True when the selected tier is neither the camper's 1st nor 2nd choice.
+function isOffPreference(c: AdminCamper, selected: string): boolean {
+  if (!selected) return false;
+  const first = c.accommodation_first_choice ?? "";
+  const second = c.accommodation_second_choice ?? "";
+  if (!first && !second) return false;
+  return selected !== first && selected !== second;
+}
+
 function isOverdue(g: AdminGroup): boolean {
   return (
     g.billing_status === "invoiced" &&
@@ -1620,6 +1629,11 @@ function GroupCard({
                         );
                       })}
                     </select>
+                    {isOffPreference(c, selected) && (
+                      <span className="text-xs font-semibold text-amber-800 bg-amber-100 border border-amber-200 px-2 py-1 rounded-full">
+                        Off preference
+                      </span>
+                    )}
                     {showUnits && (
                       <select
                         value={selectedUnit}

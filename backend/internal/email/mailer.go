@@ -19,6 +19,25 @@ type Mailer interface {
 	SendBalancePaid(ctx context.Context, p BalancePaid) error
 	SendBalancePaidConfirmation(ctx context.Context, p BalancePaidConfirmation) error
 	SendSponsorshipConfirmed(ctx context.Context, p SponsorshipConfirmed) error
+	SendAccommodationChanged(ctx context.Context, p AccommodationChangedNotice) error
+}
+
+// AccommodationChange describes one camper placed outside their 1st/2nd choice.
+type AccommodationChange struct {
+	CamperName   string
+	FirstChoice  string // display name; empty if none recorded
+	SecondChoice string // display name; empty if none recorded
+	Allocated    string // display name of tier actually assigned
+	TentGuidance bool   // true when allocated tier is tent — bring your own
+}
+
+// AccommodationChangedNotice is the dedicated heads-up email sent when a
+// family is invoiced for accommodation that is neither their 1st nor 2nd choice.
+type AccommodationChangedNotice struct {
+	ToEmail         string
+	ToName          string
+	Items           []AccommodationChange
+	AwaitingPayment bool // true when a balance invoice is on its way / open
 }
 
 // BalancePaidConfirmation tells the family their balance is paid and their
@@ -30,6 +49,8 @@ type BalancePaidConfirmation struct {
 	AmountLabel string // optional, e.g. "£250.00" (blank if unknown)
 	// Items is one line per full-week camper, e.g. "Josh Basco — Lodge".
 	Items []string
+	// Changes lists campers placed outside their preferences (inline callout).
+	Changes []AccommodationChange
 }
 
 // SponsorshipConfirmed tells a church-sponsored family that their accommodation
@@ -39,6 +60,8 @@ type SponsorshipConfirmed struct {
 	ToName  string
 	// Items is one line per full-week camper, e.g. "Josh Basco — Lodge".
 	Items []string
+	// Changes lists campers placed outside their preferences (inline callout).
+	Changes []AccommodationChange
 }
 
 // BalancePaid is the notification (to the White Team) that a group has paid
@@ -65,6 +88,8 @@ type BalanceInvoice struct {
 	// Items is one line per thing being paid for, e.g.
 	// "Josh Basco — Lodge". Shown as a bullet list in the email.
 	Items []string
+	// Changes lists campers placed outside their preferences (inline callout).
+	Changes []AccommodationChange
 }
 
 // AllocationReleased notifies a family their placement was released (unpaid).

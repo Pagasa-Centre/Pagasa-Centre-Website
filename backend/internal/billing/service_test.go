@@ -18,6 +18,7 @@ type recordingMailer struct {
 	email.NoopMailer
 	sponsorships []email.SponsorshipConfirmed
 	balancePaid  []email.BalancePaidConfirmation
+	accomChanged []email.AccommodationChangedNotice
 }
 
 func (m *recordingMailer) SendSponsorshipConfirmed(_ context.Context, p email.SponsorshipConfirmed) error {
@@ -27,6 +28,11 @@ func (m *recordingMailer) SendSponsorshipConfirmed(_ context.Context, p email.Sp
 
 func (m *recordingMailer) SendBalancePaidConfirmation(_ context.Context, p email.BalancePaidConfirmation) error {
 	m.balancePaid = append(m.balancePaid, p)
+	return nil
+}
+
+func (m *recordingMailer) SendAccommodationChanged(_ context.Context, p email.AccommodationChangedNotice) error {
+	m.accomChanged = append(m.accomChanged, p)
 	return nil
 }
 
@@ -299,3 +305,129 @@ func TestHandleInvoicePaid_emailsFamily(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+func TestOffPreferenceChanges(t *testing.T) {
+	names := map[string]string{
+		"lodge": "Lodge",
+		"cabin": "Cabin",
+		"tent":  "Tent",
+	}
+	cases := []struct {
+		name  string
+		c     domain.Camper
+		wantN int
+		tent  bool
+	}{
+		{
+			name: "matches first choice",
+			c: domain.Camper{
+				FirstName: "A", LastName: "One",
+				AttendanceType:             domain.AttendanceFullWeek,
+				AccommodationFirstChoice:   strPtr("lodge"),
+				AccommodationSecondChoice:  strPtr("cabin"),
+				AllocatedAccommodationCode: strPtr("lodge"),
+			},
+			wantN: 0,
+		},
+		{
+			name: "matches second choice",
+			c: domain.Camper{
+				FirstName: "B", LastName: "Two",
+				AttendanceType:             domain.AttendanceFullWeek,
+				AccommodationFirstChoice:   strPtr("lodge"),
+				AccommodationSecondChoice:  strPtr("cabin"),
+				AllocatedAccommodationCode: strPtr("cabin"),
+			},
+			wantN: 0,
+		},
+		{
+			name: "off preference",
+			c: domain.Camper{
+				FirstName: "C", LastName: "Three",
+				AttendanceType:             domain.AttendanceFullWeek,
+				AccommodationFirstChoice:   strPtr("lodge"),
+				AccommodationSecondChoice:  strPtr("cabin"),
+				AllocatedAccommodationCode: strPtr("tent"),
+			},
+			wantN: 1,
+			tent:  true,
+		},
+		{
+			name: "nil second choice still off preference",
+			c: domain.Camper{
+				FirstName: "D", LastName: "Four",
+				AttendanceType:             domain.AttendanceFullWeek,
+				AccommodationFirstChoice:   strPtr("lodge"),
+				AllocatedAccommodationCode: strPtr("tent"),
+			},
+			wantN: 1,
+			tent:  true,
+		},
+		{
+			name: "both choices empty skipped",
+			c: domain.Camper{
+				FirstName: "E", LastName: "Five",
+				AttendanceType:             domain.AttendanceFullWeek,
+				AllocatedAccommodationCode: strPtr("tent"),
+			},
+			wantN: 0,
+		},
+		{
+			name: "day pass skipped",
+			c: domain.Camper{
+				FirstName: "F", LastName: "Six",
+				AttendanceType:             domain.AttendanceDayPass,
+				AccommodationFirstChoice:   strPtr("lodge"),
+				AllocatedAccommodationCode: strPtr("tent"),
+			},
+			wantN: 0,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := offPreferenceChanges([]domain.Camper{tc.c}, names)
+			if len(got) != tc.wantN {
+				t.Fatalf("len = %d, want %d", len(got), tc.wantN)
+			}
+			if tc.wantN == 1 {
+				if got[0].Allocated != "Tent" {
+					t.Fatalf("allocated = %q, want Tent", got[0].Allocated)
+				}
+				if got[0].TentGuidance != tc.tent {
+					t.Fatalf("TentGuidance = %v, want %v", got[0].TentGuidance, tc.tent)
+				}
+			}
+		})
+	}
+}
+
+func TestSendAccommodationChangedNotice(t *testing.T) {
+	mailer := &recordingMailer{}
+	svc := NewService(nil, NewStripeBilling(), mailer, Config{})
+
+	changes := []email.AccommodationChange{{
+		CamperName:   "Alex Test",
+		FirstChoice:  "Lodge",
+		SecondChoice: "Cabin",
+		Allocated:    "Tent",
+		TentGuidance: true,
+	}}
+	svc.sendAccommodationChangedNotice(context.Background(), "family@example.com", "Sam", changes, true)
+
+	if len(mailer.accomChanged) != 1 {
+		t.Fatalf("expected 1 accommodation-changed email, got %d", len(mailer.accomChanged))
+	}
+	if !mailer.accomChanged[0].AwaitingPayment {
+		t.Fatal("expected AwaitingPayment true")
+	}
+	if mailer.accomChanged[0].ToEmail != "family@example.com" {
+		t.Fatalf("to = %q", mailer.accomChanged[0].ToEmail)
+	}
+
+	// No-op when no changes.
+	before := len(mailer.accomChanged)
+	svc.sendAccommodationChangedNotice(context.Background(), "family@example.com", "Sam", nil, true)
+	if len(mailer.accomChanged) != before {
+		t.Fatal("should not send when changes empty")
+	}
+}

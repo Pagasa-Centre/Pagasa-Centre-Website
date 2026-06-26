@@ -78,3 +78,13 @@ func (NoopMailer) SendSponsorshipConfirmed(_ context.Context, p SponsorshipConfi
 	log.Printf("[email noop] to=%s subject=%q (sponsorship confirmed)", p.ToEmail, subject)
 	return nil
 }
+
+func (NoopMailer) SendAccommodationChanged(_ context.Context, p AccommodationChangedNotice) error {
+	subject, _, err := renderAccommodationChanged(p)
+	if err != nil {
+		return err
+	}
+	log.Printf("[email noop] to=%s subject=%q changes=%d (accommodation changed)",
+		p.ToEmail, subject, len(p.Items))
+	return nil
+}

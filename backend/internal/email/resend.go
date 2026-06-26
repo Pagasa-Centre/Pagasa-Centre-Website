@@ -91,6 +91,14 @@ func (r *ResendMailer) SendSponsorshipConfirmed(ctx context.Context, p Sponsorsh
 	return r.send(ctx, p.ToEmail, subject, body)
 }
 
+func (r *ResendMailer) SendAccommodationChanged(ctx context.Context, p AccommodationChangedNotice) error {
+	subject, body, err := renderAccommodationChanged(p)
+	if err != nil {
+		return err
+	}
+	return r.send(ctx, p.ToEmail, subject, body)
+}
+
 type resendRequest struct {
 	From    string   `json:"from"`
 	To      []string `json:"to"`

@@ -272,6 +272,9 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 	if err := s.repo.SetInvoiceDetailsMeta(ctx, groupID, res.ID, res.DueAt, meta); err != nil {
 		return mapVersionErr(ctx, s.repo, groupID, err)
 	}
+	accNames := s.accommodationNames(ctx)
+	changes := offPreferenceChanges(campers, accNames)
+	s.sendAccommodationChangedNotice(ctx, g.ContactEmail, g.ContactFirstName, changes, true)
 	// Stripe is the primary sender. Only if Stripe couldn't email the invoice
 	// (e.g. restricted account) do we fall back to emailing the link ourselves.
 	if !res.StripeEmailed {
@@ -281,7 +284,8 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 			PayURL:      res.HostedURL,
 			DueDate:     res.DueAt.Format("2 Jan 2006"),
 			AmountLabel: formatAmountLabel(res.AmountDuePence, res.Currency),
-			Items:       balanceInvoiceItems(campers, s.accommodationNames(ctx), s.unitNames(ctx)),
+			Items:       balanceInvoiceItems(campers, accNames, s.unitNames(ctx)),
+			Changes:     changes,
 		}); err != nil {
 			log.Printf("billing: fallback balance invoice email to %s: %v", g.ContactEmail, err)
 		}
@@ -350,10 +354,12 @@ func (s *Service) sendSponsorshipConfirmedEmail(ctx context.Context, g *domain.G
 		log.Printf("billing: sponsorship email load campers (group %s): %v", g.ID, err)
 		return
 	}
+	accNames := s.accommodationNames(ctx)
 	if err := s.mailer.SendSponsorshipConfirmed(ctx, email.SponsorshipConfirmed{
 		ToEmail: g.ContactEmail,
 		ToName:  g.ContactFirstName,
-		Items:   balanceInvoiceItems(campers, s.accommodationNames(ctx), s.unitNames(ctx)),
+		Items:   balanceInvoiceItems(campers, accNames, s.unitNames(ctx)),
+		Changes: offPreferenceChanges(campers, accNames),
 	}); err != nil {
 		log.Printf("billing: sponsorship confirmed email to %s: %v", g.ContactEmail, err)
 	}
@@ -505,7 +511,9 @@ func (s *Service) HandleInvoicePaid(ctx context.Context, stripeInvoiceID, groupI
 		return err
 	}
 	campers, _ := s.repo.CampersForGroup(ctx, g.ID)
-	items := balanceInvoiceItems(campers, s.accommodationNames(ctx), s.unitNames(ctx))
+	accNames := s.accommodationNames(ctx)
+	items := balanceInvoiceItems(campers, accNames, s.unitNames(ctx))
+	changes := offPreferenceChanges(campers, accNames)
 	amountLabel := formatAmountLabel(amountPaidPence, currency)
 
 	// Confirm to the family that their place is fully paid and confirmed.
@@ -514,6 +522,7 @@ func (s *Service) HandleInvoicePaid(ctx context.Context, stripeInvoiceID, groupI
 		ToName:      g.ContactFirstName,
 		AmountLabel: amountLabel,
 		Items:       items,
+		Changes:     changes,
 	}); err != nil {
 		log.Printf("billing: balance-paid confirmation email to %s: %v", g.ContactEmail, err)
 	}
@@ -639,4 +648,68 @@ func formatAmountLabel(pence int64, currency string) string {
 		symbol = cur + " "
 	}
 	return fmt.Sprintf("%s%d.%02d", symbol, pence/100, pence%100)
+}
+
+func strVal(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return strings.TrimSpace(*p)
+}
+
+func accDisplayName(accNames map[string]string, code string) string {
+	if code == "" {
+		return ""
+	}
+	if display := accNames[code]; display != "" {
+		return display
+	}
+	return code
+}
+
+// offPreferenceChanges returns campers whose allocated tier is neither their
+// 1st nor 2nd choice. Skips when no preference is on record.
+func offPreferenceChanges(campers []domain.Camper, accNames map[string]string) []email.AccommodationChange {
+	var out []email.AccommodationChange
+	for _, c := range campers {
+		if c.AttendanceType != domain.AttendanceFullWeek {
+			continue
+		}
+		alloc := strVal(c.AllocatedAccommodationCode)
+		if alloc == "" {
+			continue
+		}
+		first := strVal(c.AccommodationFirstChoice)
+		second := strVal(c.AccommodationSecondChoice)
+		if first == "" && second == "" {
+			continue
+		}
+		if alloc == first || alloc == second {
+			continue
+		}
+		out = append(out, email.AccommodationChange{
+			CamperName:   c.FirstName + " " + c.LastName,
+			FirstChoice:  accDisplayName(accNames, first),
+			SecondChoice: accDisplayName(accNames, second),
+			Allocated:    accDisplayName(accNames, alloc),
+			TentGuidance: alloc == registration.AccommodationTent,
+		})
+	}
+	return out
+}
+
+// sendAccommodationChangedNotice emails the family when invoiced for
+// off-preference accommodation. Best-effort: must not fail the invoice send.
+func (s *Service) sendAccommodationChangedNotice(ctx context.Context, toEmail, toName string, changes []email.AccommodationChange, awaitingPayment bool) {
+	if s.mailer == nil || len(changes) == 0 {
+		return
+	}
+	if err := s.mailer.SendAccommodationChanged(ctx, email.AccommodationChangedNotice{
+		ToEmail:         toEmail,
+		ToName:          toName,
+		Items:           changes,
+		AwaitingPayment: awaitingPayment,
+	}); err != nil {
+		log.Printf("billing: accommodation changed email to %s: %v", toEmail, err)
+	}
 }

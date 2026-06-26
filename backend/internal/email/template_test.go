@@ -131,6 +131,80 @@ func TestRenderSponsorshipConfirmed(t *testing.T) {
 	}
 }
 
+func TestRenderSponsorshipConfirmed_withOffPreferenceCallout(t *testing.T) {
+	_, body, err := renderSponsorshipConfirmed(SponsorshipConfirmed{
+		ToEmail: "guest@example.com",
+		ToName:  "Sam",
+		Items:   []string{"Alex Test — Tent"},
+		Changes: []AccommodationChange{{
+			CamperName:   "Alex Test",
+			FirstChoice:  "Lodge",
+			SecondChoice: "Cabin",
+			Allocated:    "Tent",
+			TentGuidance: true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("renderSponsorshipConfirmed: %v", err)
+	}
+	if !strings.Contains(body, "different from what you requested") {
+		t.Errorf("body should include off-preference callout")
+	}
+	if !strings.Contains(body, "bring your own tent") {
+		t.Errorf("body should mention tent guidance")
+	}
+}
+
+func TestRenderAccommodationChanged(t *testing.T) {
+	subject, body, err := renderAccommodationChanged(AccommodationChangedNotice{
+		ToEmail: "family@example.com",
+		ToName:  "Sam",
+		Items: []AccommodationChange{{
+			CamperName:   "Alex Test",
+			FirstChoice:  "Lodge",
+			SecondChoice: "Cabin",
+			Allocated:    "Tent",
+			TentGuidance: true,
+		}},
+		AwaitingPayment: true,
+	})
+	if err != nil {
+		t.Fatalf("renderAccommodationChanged: %v", err)
+	}
+	if !strings.Contains(subject, "accommodation") {
+		t.Errorf("unexpected subject %q", subject)
+	}
+	if !strings.Contains(body, "different from what you requested") {
+		t.Errorf("body should apologise for the change")
+	}
+	if !strings.Contains(body, "Lodge (1st) / Cabin (2nd)") {
+		t.Errorf("body should show both preferences")
+	}
+	if !strings.Contains(body, "bring your own tent") {
+		t.Errorf("body should mention tent guidance")
+	}
+	if !strings.Contains(body, "Before you pay") {
+		t.Errorf("body should warn before paying when AwaitingPayment")
+	}
+
+	_, bodyNoPay, err := renderAccommodationChanged(AccommodationChangedNotice{
+		ToEmail: "family@example.com",
+		ToName:  "Sam",
+		Items: []AccommodationChange{{
+			CamperName:  "Alex Test",
+			FirstChoice: "Lodge",
+			Allocated:   "Cabin",
+		}},
+		AwaitingPayment: false,
+	})
+	if err != nil {
+		t.Fatalf("renderAccommodationChanged: %v", err)
+	}
+	if strings.Contains(bodyNoPay, "Before you pay") {
+		t.Errorf("body should omit payment note when not awaiting payment")
+	}
+}
+
 func TestFormatPence(t *testing.T) {
 	cases := []struct {
 		pence    int

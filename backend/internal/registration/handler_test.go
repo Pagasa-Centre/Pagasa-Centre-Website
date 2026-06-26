@@ -76,6 +76,10 @@ func (m *recordingMailer) SendSponsorshipConfirmed(context.Context, email.Sponso
 	return nil
 }
 
+func (m *recordingMailer) SendAccommodationChanged(context.Context, email.AccommodationChangedNotice) error {
+	return nil
+}
+
 func (m *recordingMailer) SendDepositConfirmation(_ context.Context, p email.DepositConfirmation) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
