@@ -182,8 +182,8 @@ func TestMaskFreeCode(t *testing.T) {
 		{"", ""},
 	}
 	for _, c := range cases {
-		if got := maskFreeCode(c.in); got != c.want {
-			t.Errorf("maskFreeCode(%q) = %q, want %q", c.in, got, c.want)
+		if got := MaskFreeCode(c.in); got != c.want {
+			t.Errorf("MaskFreeCode(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }

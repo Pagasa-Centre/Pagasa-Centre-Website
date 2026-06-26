@@ -390,16 +390,17 @@ func (s *Service) ListFreeCodes(ctx context.Context) ([]domain.FreeCode, error) 
 		return nil, commonerrors.Internal(err.Error())
 	}
 	for i := range codes {
-		codes[i].Code = maskFreeCode(codes[i].Code)
+		codes[i].Code = MaskFreeCode(codes[i].Code)
 	}
 	return codes, nil
 }
 
-// maskFreeCode hides everything but the last 4 characters, e.g.
+// MaskFreeCode hides everything but the last 4 characters, e.g.
 // "SPON-Z9FEHB9Y" -> "*********HB9Y". The suffix is kept so the same code is
 // still recognisable to whoever holds the full value, without revealing enough
-// to redeem it.
-func maskFreeCode(code string) string {
+// to redeem it. Used anywhere a code might be exposed to admins other than its
+// creator (listings, audit log, etc.).
+func MaskFreeCode(code string) string {
 	const visible = 4
 	r := []rune(code)
 	if len(r) <= visible {

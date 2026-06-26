@@ -45,8 +45,9 @@ func postGenerateFreeCode(auth middleware.AuthConfig, svc *registration.Service,
 			commonerrors.WriteError(w, err)
 			return
 		}
+		masked := registration.MaskFreeCode(code)
 		admin.Audit(rec, r, adminlog.ActionFreeCodeGenerated, nil,
-			actor+" generated sponsorship code "+code, map[string]string{"code": code})
+			actor+" generated sponsorship code "+masked, map[string]string{"code": masked})
 		render.Json(w, http.StatusOK, map[string]string{"code": code})
 	}
 }
