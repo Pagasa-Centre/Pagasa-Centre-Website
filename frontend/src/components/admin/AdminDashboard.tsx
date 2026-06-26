@@ -52,13 +52,13 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "name_desc", label: "Name Z–A" },
 ];
 
-// Sort by surname, then first name, case-insensitively.
+// Sort by first name, then surname, case-insensitively.
 function compareByName(a: AdminGroup, b: AdminGroup): number {
   return (
-    a.contact_last_name.localeCompare(b.contact_last_name, undefined, {
+    a.contact_first_name.localeCompare(b.contact_first_name, undefined, {
       sensitivity: "base",
     }) ||
-    a.contact_first_name.localeCompare(b.contact_first_name, undefined, {
+    a.contact_last_name.localeCompare(b.contact_last_name, undefined, {
       sensitivity: "base",
     })
   );
