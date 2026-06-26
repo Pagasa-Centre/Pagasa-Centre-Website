@@ -380,13 +380,32 @@ func isUniqueViolation(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "duplicate key")
 }
 
-// ListFreeCodes returns all generated sponsorship codes.
+// ListFreeCodes returns all generated sponsorship codes with the code value
+// masked. The full code is only ever returned once — at generation time, to
+// the admin who created it — so a different admin can't read a code from the
+// listing and redeem it before its intended recipient.
 func (s *Service) ListFreeCodes(ctx context.Context) ([]domain.FreeCode, error) {
 	codes, err := s.repo.ListFreeCodes(ctx)
 	if err != nil {
 		return nil, commonerrors.Internal(err.Error())
 	}
+	for i := range codes {
+		codes[i].Code = maskFreeCode(codes[i].Code)
+	}
 	return codes, nil
+}
+
+// maskFreeCode hides everything but the last 4 characters, e.g.
+// "SPON-Z9FEHB9Y" -> "*********HB9Y". The suffix is kept so the same code is
+// still recognisable to whoever holds the full value, without revealing enough
+// to redeem it.
+func maskFreeCode(code string) string {
+	const visible = 4
+	r := []rune(code)
+	if len(r) <= visible {
+		return strings.Repeat("*", len(r))
+	}
+	return strings.Repeat("*", len(r)-visible) + string(r[len(r)-visible:])
 }
 
 // RevokeFreeCode disables an unused code.

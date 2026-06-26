@@ -188,17 +188,25 @@ export default function AdminSponsoredCodesPage() {
           {generating ? "Generating…" : "Generate code"}
         </button>
         {generatedCode && (
-          <div className="p-3 bg-violet-50 border border-violet-200 rounded-lg flex flex-wrap items-center gap-2">
-            <code className="text-lg font-bold text-violet-900">
-              {generatedCode}
-            </code>
-            <button
-              type="button"
-              onClick={() => copyCode(generatedCode)}
-              className="px-3 py-1 text-xs font-semibold bg-white border border-violet-300 rounded-lg hover:bg-violet-100"
-            >
-              {copied ? "Copied!" : "Copy"}
-            </button>
+          <div className="p-3 bg-violet-50 border border-violet-200 rounded-lg flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <code className="text-lg font-bold text-violet-900">
+                {generatedCode}
+              </code>
+              <button
+                type="button"
+                onClick={() => copyCode(generatedCode)}
+                className="px-3 py-1 text-xs font-semibold bg-white border border-violet-300 rounded-lg hover:bg-violet-100"
+              >
+                {copied ? "Copied!" : "Copy"}
+              </button>
+            </div>
+            <p className="text-xs text-violet-800">
+              Copy this code now and send it to the recipient. For security, the
+              full code is shown only once — afterwards it appears hidden (e.g.
+              <span className="font-mono"> *********HB9Y</span>) and can&apos;t be
+              copied again.
+            </p>
           </div>
         )}
       </form>
@@ -208,6 +216,12 @@ export default function AdminSponsoredCodesPage() {
           No codes generated yet.
         </div>
       ) : (
+        <div className="flex flex-col gap-2">
+        <p className="text-xs text-neutral-500">
+          Codes are hidden for security — only the last few characters are
+          shown. The full code is visible once, to whoever generated it. Use the
+          note to identify each code.
+        </p>
         <ul className="bg-white border border-neutral-300 rounded-xl divide-y divide-neutral-200">
           {codes.map((c) => (
             <li
@@ -245,6 +259,7 @@ export default function AdminSponsoredCodesPage() {
             </li>
           ))}
         </ul>
+        </div>
       )}
     </div>
   );

@@ -174,6 +174,20 @@ func assertAPIErrorCode(t *testing.T, err error, code string) {
 	}
 }
 
+func TestMaskFreeCode(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"SPON-Z9FEHB9Y", "*********HB9Y"},
+		{"ABCD", "****"},
+		{"XYZ", "***"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := maskFreeCode(c.in); got != c.want {
+			t.Errorf("maskFreeCode(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func TestSubmit_invalidFreeCode(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
