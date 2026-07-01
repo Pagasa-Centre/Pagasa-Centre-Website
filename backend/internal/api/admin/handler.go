@@ -66,6 +66,7 @@ func Mount(
 		r.Post("/registrations/{groupID}/invoice", postInvoice(billSvc, rec, regRepo))
 		r.Post("/registrations/invoice-bulk", postInvoiceBulk(billSvc, rec, regRepo))
 		r.Post("/registrations/{groupID}/release", postRelease(billSvc, rec, regRepo))
+		r.Post("/registrations/{groupID}/delete", deleteRegistration(billSvc, rec))
 		r.Post("/registrations/{groupID}/invoice/resend", postResendInvoice(billSvc, rec, regRepo))
 		r.Patch("/registrations/{groupID}/invoice-due", patchInvoiceDue(billSvc, rec, regRepo))
 		r.Post("/billing/sweep", postBillingSweep(billSvc, rec))

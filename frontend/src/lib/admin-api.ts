@@ -300,6 +300,12 @@ export const adminApi = {
       body: JSON.stringify({ expected_version: expectedVersion }),
     }),
 
+  deleteRegistration: (groupId: string, expectedVersion: number) =>
+    adminFetch<void>(`/admin/registrations/${groupId}/delete`, {
+      method: "POST",
+      body: JSON.stringify({ expected_version: expectedVersion }),
+    }),
+
   resendInvoice: (groupId: string, expectedVersion: number) =>
     adminFetch<void>(`/admin/registrations/${groupId}/invoice/resend`, {
       method: "POST",

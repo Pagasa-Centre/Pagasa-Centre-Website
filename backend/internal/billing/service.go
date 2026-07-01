@@ -9,24 +9,41 @@ import (
 
 	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/registration"
+	"pagasacentre/backend/internal/sheets"
 	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/internal/registration/storage"
 )
 
+// stripeClient is the Stripe surface billing.Service needs. *StripeBilling satisfies it.
+type stripeClient interface {
+	EnsureCustomer(ctx context.Context, existingID, email, name, groupID string) (string, error)
+	CreateInvoice(ctx context.Context, customerID, groupID string, priceIDs []string, daysUntilDue int64) (InvoiceResult, error)
+	VoidInvoice(ctx context.Context, invoiceID string) error
+	VoidInvoiceIdempotent(ctx context.Context, invoiceID string) error
+	SendInvoiceEmail(ctx context.Context, invoiceID string) error
+	GetInvoice(ctx context.Context, invoiceID string) (InvoiceResult, error)
+	RefundPaymentIntent(ctx context.Context, paymentIntentID string) (int64, error)
+	RefundInvoice(ctx context.Context, invoiceID string) (int64, error)
+}
+
 // Service coordinates allocation, Stripe Invoices, and release sweeps.
 type Service struct {
 	repo   *storage.Repository
-	stripe *StripeBilling
+	stripe stripeClient
 	mailer email.Mailer
+	sheets sheets.Sync
 	cfg    Config
 }
 
-func NewService(repo *storage.Repository, stripe *StripeBilling, mailer email.Mailer, cfg Config) *Service {
+func NewService(repo *storage.Repository, stripe stripeClient, mailer email.Mailer, sheetSync sheets.Sync, cfg Config) *Service {
 	if cfg.InvoiceDueDays <= 0 {
 		cfg.InvoiceDueDays = 15
 	}
-	return &Service{repo: repo, stripe: stripe, mailer: mailer, cfg: cfg}
+	if sheetSync == nil {
+		sheetSync = sheets.NewNoopSync()
+	}
+	return &Service{repo: repo, stripe: stripe, mailer: mailer, sheets: sheetSync, cfg: cfg}
 }
 
 // Allocate persists White Team placements and sets billing_status=allocated.
@@ -410,6 +427,81 @@ func (s *Service) VoidAndRelease(ctx context.Context, groupID, reason, actor str
 		})
 	}
 	return nil
+}
+
+// DeleteSummary captures Stripe cleanup performed when a registration is deleted.
+type DeleteSummary struct {
+	ContactName     string
+	ContactEmail    string
+	DepositRefunded bool
+	BalanceRefunded bool
+	InvoiceVoided   bool
+	AmountPence     int64
+}
+
+// DeleteRegistration refunds/voids Stripe state, permanently removes the group
+// row, and best-effort cleans up the Google Sheet. Aborts before delete if any
+// non-idempotent Stripe step fails.
+func (s *Service) DeleteRegistration(ctx context.Context, groupID, actor string, expectedVersion int) (DeleteSummary, error) {
+	g, err := s.repo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		return DeleteSummary{}, commonerrors.Internal(err.Error())
+	}
+	if g == nil {
+		return DeleteSummary{}, commonerrors.NotFound("group not found")
+	}
+
+	summary := DeleteSummary{
+		ContactName:  strings.TrimSpace(g.ContactFirstName + " " + g.ContactLastName),
+		ContactEmail: g.ContactEmail,
+	}
+
+	var refundTotal int64
+
+	if g.PaymentStatus == domain.PaymentPaid && g.StripePaymentIntentID != nil && *g.StripePaymentIntentID != "" {
+		amt, err := s.stripe.RefundPaymentIntent(ctx, *g.StripePaymentIntentID)
+		if err != nil {
+			return DeleteSummary{}, commonerrors.BadRequest(
+				fmt.Sprintf("deposit refund failed; registration was not deleted: %v", err), nil)
+		}
+		summary.DepositRefunded = true
+		refundTotal += amt
+	}
+
+	if g.BillingStatus == domain.BillingBalancePaid && g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" {
+		amt, err := s.stripe.RefundInvoice(ctx, *g.StripeInvoiceID)
+		if err != nil {
+			return DeleteSummary{}, commonerrors.BadRequest(
+				fmt.Sprintf("balance refund failed; registration was not deleted: %v", err), nil)
+		}
+		summary.BalanceRefunded = true
+		refundTotal += amt
+	}
+
+	if g.BillingStatus == domain.BillingInvoiced && g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" {
+		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeInvoiceID); err != nil {
+			return DeleteSummary{}, commonerrors.BadRequest(
+				fmt.Sprintf("invoice void failed; registration was not deleted: %v", err), nil)
+		}
+		summary.InvoiceVoided = true
+	}
+
+	summary.AmountPence = refundTotal
+
+	meta := domain.ActionMeta{
+		Actor:           actor,
+		Action:          "registration_deleted",
+		ExpectedVersion: expectedVersion,
+	}
+	if err := s.repo.DeleteGroupMeta(ctx, groupID, meta); err != nil {
+		return DeleteSummary{}, mapVersionErr(ctx, s.repo, groupID, err)
+	}
+
+	if err := s.sheets.RemoveByGroupID(ctx, groupID); err != nil {
+		log.Printf("billing: remove group %s from sheet: %v", groupID, err)
+	}
+
+	return summary, nil
 }
 
 // ResendInvoice re-sends the Stripe invoice email.

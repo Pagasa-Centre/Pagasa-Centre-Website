@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -132,6 +133,34 @@ func postRelease(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstora
 			"Released allocation for "+admin.GroupSummary(g), nil)
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+func deleteRegistration(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body billing.VersionedBody
+		_ = request.Decode(r, &body)
+		groupID := chi.URLParam(r, "groupID")
+		actor := admin.ActorFrom(r.Context())
+		sum, err := svc.DeleteRegistration(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion))
+		if err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		summary := formatDeleteAuditSummary(sum)
+		admin.Audit(rec, r, adminlog.ActionRegistrationDeleted, nil, summary, sum)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func formatDeleteAuditSummary(sum billing.DeleteSummary) string {
+	text := "Deleted registration for " + sum.ContactName + " (" + sum.ContactEmail + ")"
+	if sum.AmountPence > 0 {
+		text += fmt.Sprintf("; refunded £%d.%02d", sum.AmountPence/100, sum.AmountPence%100)
+	}
+	if sum.InvoiceVoided {
+		text += "; voided open invoice"
+	}
+	return text
 }
 
 func postResendInvoice(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {

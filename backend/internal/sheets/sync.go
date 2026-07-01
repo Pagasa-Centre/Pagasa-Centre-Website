@@ -24,6 +24,10 @@ type Sync interface {
 	// (in either tab) whose group_id matches. Called when staff correct a
 	// group's contact details (e.g. a mistyped email) after registration.
 	UpdateContactByGroupID(ctx context.Context, groupID string, c ContactUpdate) error
+
+	// RemoveByGroupID deletes every row (in Paid and Pending tabs) whose
+	// group_id matches. Called when staff permanently delete a registration.
+	RemoveByGroupID(ctx context.Context, groupID string) error
 }
 
 // ContactUpdate carries the group-level contact fields that can be corrected
@@ -62,5 +66,11 @@ func (NoopSync) AppendPaidAndRemovePending(_ context.Context, groupID string, ro
 // UpdateContactByGroupID logs the call and returns nil.
 func (NoopSync) UpdateContactByGroupID(_ context.Context, groupID string, c ContactUpdate) error {
 	log.Printf("sheets noop: would update contact for group %s (%s)", groupID, c.Email)
+	return nil
+}
+
+// RemoveByGroupID logs the call and returns nil.
+func (NoopSync) RemoveByGroupID(_ context.Context, groupID string) error {
+	log.Printf("sheets noop: would remove rows for group %s", groupID)
 	return nil
 }

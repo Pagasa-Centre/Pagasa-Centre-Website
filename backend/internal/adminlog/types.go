@@ -34,4 +34,5 @@ const (
 	ActionFreeCodeGenerated   = "free_code_generated"
 	ActionFreeCodeRevoked     = "free_code_revoked"
 	ActionFreeConfirmed       = "free_confirmed"
+	ActionRegistrationDeleted = "registration_deleted"
 )

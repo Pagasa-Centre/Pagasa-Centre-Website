@@ -2,6 +2,7 @@ package billing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -10,6 +11,8 @@ import (
 	"github.com/stripe/stripe-go/v85/customer"
 	"github.com/stripe/stripe-go/v85/invoice"
 	"github.com/stripe/stripe-go/v85/invoiceitem"
+	"github.com/stripe/stripe-go/v85/invoicepayment"
+	"github.com/stripe/stripe-go/v85/refund"
 )
 
 // StripeBilling wraps Stripe Invoice operations.
@@ -170,4 +173,58 @@ func (s *StripeBilling) VoidInvoice(ctx context.Context, invoiceID string) error
 		return fmt.Errorf("void invoice: %w", err)
 	}
 	return nil
+}
+
+// VoidInvoiceIdempotent voids an open invoice, treating an already-void (or
+// otherwise non-open) invoice as success. Stripe has no dedicated
+// "already void" error code, so we inspect the invoice status first. This lets
+// a delete retry after a partial failure complete instead of aborting forever.
+func (s *StripeBilling) VoidInvoiceIdempotent(ctx context.Context, invoiceID string) error {
+	getParams := &stripe.InvoiceParams{}
+	getParams.Context = ctx
+	inv, err := invoice.Get(invoiceID, getParams)
+	if err != nil {
+		return fmt.Errorf("get invoice %s: %w", invoiceID, err)
+	}
+	if inv.Status != stripe.InvoiceStatusOpen {
+		// Already void/paid/uncollectible/draft — nothing to void.
+		return nil
+	}
+	return s.VoidInvoice(ctx, invoiceID)
+}
+
+// RefundPaymentIntent refunds a captured PaymentIntent. Returns the refunded
+// amount in pence. Treats charge_already_refunded as success so a delete retry
+// after a partial failure can still complete.
+func (s *StripeBilling) RefundPaymentIntent(ctx context.Context, paymentIntentID string) (int64, error) {
+	params := &stripe.RefundParams{PaymentIntent: stripe.String(paymentIntentID)}
+	params.Context = ctx
+	rf, err := refund.New(params)
+	if err != nil {
+		var se *stripe.Error
+		if errors.As(err, &se) && se.Code == stripe.ErrorCodeChargeAlreadyRefunded {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("refund payment intent %s: %w", paymentIntentID, err)
+	}
+	return rf.Amount, nil
+}
+
+// RefundInvoice refunds the payment associated with a paid balance invoice.
+// v85 invoices expose payments via InvoicePayment objects, not a top-level
+// PaymentIntent field.
+func (s *StripeBilling) RefundInvoice(ctx context.Context, invoiceID string) (int64, error) {
+	listParams := &stripe.InvoicePaymentListParams{Invoice: stripe.String(invoiceID)}
+	listParams.Context = ctx
+	it := invoicepayment.List(listParams)
+	for it.Next() {
+		ip := it.InvoicePayment()
+		if ip.Payment != nil && ip.Payment.PaymentIntent != nil {
+			return s.RefundPaymentIntent(ctx, ip.Payment.PaymentIntent.ID)
+		}
+	}
+	if err := it.Err(); err != nil {
+		return 0, fmt.Errorf("list invoice payments %s: %w", invoiceID, err)
+	}
+	return 0, nil
 }

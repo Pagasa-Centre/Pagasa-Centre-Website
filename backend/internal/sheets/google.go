@@ -127,7 +127,7 @@ func (g *GoogleSync) AppendPaidAndRemovePending(ctx context.Context, groupID str
 	if err := g.appendRows(ctx, g.paidTab, rows); err != nil {
 		return fmt.Errorf("append paid: %w", err)
 	}
-	if err := g.deletePendingByGroupID(ctx, groupID); err != nil {
+	if err := g.deleteByGroupID(ctx, groupID, g.pendingTab, g.pendingSheetID); err != nil {
 		// Logged but not fatal — Paid row is in, just means there's a
 		// stale Pending row the leaders may see briefly.
 		log.Printf("sheets: delete pending for group %s failed: %v", groupID, err)
@@ -245,17 +245,33 @@ func (g *GoogleSync) ensureHeaders(ctx context.Context, tab string) error {
 	return err
 }
 
-// deletePendingByGroupID reads column A of the Pending tab, finds every row
-// matching groupID, then issues a single batchUpdate with DeleteDimension
-// requests sorted descending by row index (so earlier indices remain valid
-// after each delete).
-func (g *GoogleSync) deletePendingByGroupID(ctx context.Context, groupID string) error {
+// RemoveByGroupID deletes every row whose group_id (column A) matches from
+// both the Paid and Pending tabs.
+func (g *GoogleSync) RemoveByGroupID(ctx context.Context, groupID string) error {
+	for _, spec := range []struct {
+		tab     string
+		sheetID int64
+	}{
+		{g.paidTab, g.paidSheetID},
+		{g.pendingTab, g.pendingSheetID},
+	} {
+		if err := g.deleteByGroupID(ctx, groupID, spec.tab, spec.sheetID); err != nil {
+			return fmt.Errorf("delete from %s: %w", spec.tab, err)
+		}
+	}
+	return nil
+}
+
+// deleteByGroupID reads column A of tab, finds every row matching groupID,
+// then issues a single batchUpdate with DeleteDimension requests sorted
+// descending by row index (so earlier indices remain valid after each delete).
+func (g *GoogleSync) deleteByGroupID(ctx context.Context, groupID, tab string, sheetID int64) error {
 	resp, err := g.svc.Spreadsheets.Values.
-		Get(g.spreadsheetID, g.pendingTab+"!A:A").
+		Get(g.spreadsheetID, tab+"!A:A").
 		Context(ctx).
 		Do()
 	if err != nil {
-		return fmt.Errorf("read pending column A: %w", err)
+		return fmt.Errorf("read column A: %w", err)
 	}
 
 	// Collect 0-based row indices (sheet API uses 0-based, with header at 0).
@@ -280,7 +296,7 @@ func (g *GoogleSync) deletePendingByGroupID(ctx context.Context, groupID string)
 		requests = append(requests, &sheetsapi.Request{
 			DeleteDimension: &sheetsapi.DeleteDimensionRequest{
 				Range: &sheetsapi.DimensionRange{
-					SheetId:    g.pendingSheetID,
+					SheetId:    sheetID,
 					Dimension:  "ROWS",
 					StartIndex: idx,
 					EndIndex:   idx + 1,

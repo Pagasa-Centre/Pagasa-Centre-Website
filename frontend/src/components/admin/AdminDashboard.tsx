@@ -195,6 +195,7 @@ const LAST_ACTION_LABELS: Record<string, string> = {
   contact_updated: "Contact updated",
   balance_paid: "Balance paid",
   free_confirmed: "Sponsorship confirmed",
+  registration_deleted: "Registration deleted",
 };
 
 function formatLastAction(g: AdminGroup): string | null {
@@ -557,6 +558,42 @@ export default function AdminDashboard() {
       await load();
     } catch (err) {
       await handleAdminError(err, "Release failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function deleteRegistration(g: AdminGroup) {
+    const name = `${g.contact_first_name} ${g.contact_last_name}`;
+    if (g.billing_status === "balance_paid") {
+      const typed = prompt(
+        `This will permanently delete ${name}'s registration and REFUND their full deposit and balance.\n\nType DELETE to confirm:`,
+      );
+      if (typed !== "DELETE") return;
+    } else if (g.payment_status === "paid") {
+      if (
+        !confirm(
+          `Permanently delete ${name}'s registration? This will REFUND the ${formatPence(g.total_amount_pence, g.currency)} deposit and cannot be undone.`,
+        )
+      ) {
+        return;
+      }
+    } else if (
+      !confirm(
+        `Permanently delete ${name}'s registration? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(`del-${g.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await adminApi.deleteRegistration(g.id, g.version);
+      setNotice(`Deleted ${g.contact_first_name}'s registration.`);
+      await load();
+    } catch (err) {
+      await handleAdminError(err, "Delete failed.");
     } finally {
       setBusy(null);
     }
@@ -1089,6 +1126,7 @@ export default function AdminDashboard() {
               onResend={() => resendInvoice(g)}
               onExtend={() => extendDue(g)}
               onRelease={() => releaseGroup(g)}
+              onDelete={() => deleteRegistration(g)}
             />
           ))}
         </div>
@@ -1357,6 +1395,7 @@ function GroupCard({
   onResend,
   onExtend,
   onRelease,
+  onDelete,
 }: {
   g: AdminGroup;
   accommodations: AdminAccommodation[];
@@ -1386,6 +1425,7 @@ function GroupCard({
   onResend: () => void;
   onExtend: () => void;
   onRelease: () => void;
+  onDelete: () => void;
 }) {
   const fw = fullWeekCampers(g);
   const cat = categorize(g);
@@ -1811,6 +1851,17 @@ function GroupCard({
             )}
           </div>
         )}
+      </div>
+
+      <div className="px-4 sm:px-5 pb-4 border-t border-neutral-100">
+        <button
+          type="button"
+          disabled={busy === `del-${g.id}`}
+          onClick={onDelete}
+          className="mt-3 px-4 py-2 text-sm font-semibold text-red-800 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50"
+        >
+          {busy === `del-${g.id}` ? "Deleting…" : "Delete registration"}
+        </button>
       </div>
     </article>
   );

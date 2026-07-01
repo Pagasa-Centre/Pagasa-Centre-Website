@@ -10,6 +10,7 @@ import (
 	"pagasacentre/backend/internal/registration"
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/internal/registration/storage"
+	"pagasacentre/backend/internal/sheets"
 	"pagasacentre/backend/internal/testhelper"
 )
 
@@ -75,7 +76,7 @@ func TestBalanceInvoiceItemsIncludesUnit(t *testing.T) {
 func TestValidateAllocatedUnit_blankAllowed(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	repo := storage.NewRepository(pool)
-	svc := NewService(repo, NewStripeBilling(), nil, Config{})
+	svc := NewService(repo, NewStripeBilling(), nil, nil, Config{})
 
 	if err := svc.validateAllocatedUnit(context.Background(), "lodge", ""); err != nil {
 		t.Fatalf("blank unit should be allowed: %v", err)
@@ -85,7 +86,7 @@ func TestValidateAllocatedUnit_blankAllowed(t *testing.T) {
 func TestValidateAllocatedUnit_rejectsMismatch(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	repo := storage.NewRepository(pool)
-	svc := NewService(repo, NewStripeBilling(), nil, Config{})
+	svc := NewService(repo, NewStripeBilling(), nil, nil, Config{})
 
 	err := svc.validateAllocatedUnit(context.Background(), "lodge", "caravan_1")
 	if err == nil {
@@ -97,7 +98,7 @@ func TestAllocate_persistsUnit(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
 	repo := storage.NewRepository(pool)
-	svc := NewService(repo, NewStripeBilling(), nil, Config{StripePriceChildUnder3: "price_child"})
+	svc := NewService(repo, NewStripeBilling(), nil, nil, Config{StripePriceChildUnder3: "price_child"})
 
 	// Seed a paid group with one full-week camper via raw SQL.
 	var groupID, camperID string
@@ -150,7 +151,7 @@ func TestAllocate_versionConflict(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
 	repo := storage.NewRepository(pool)
-	svc := NewService(repo, NewStripeBilling(), nil, Config{StripePriceChildUnder3: "price_child"})
+	svc := NewService(repo, NewStripeBilling(), nil, nil, Config{StripePriceChildUnder3: "price_child"})
 
 	var groupID, camperID string
 	err := pool.QueryRow(ctx, `
@@ -189,7 +190,7 @@ func TestConfirmFree_allocatedFreeGroup(t *testing.T) {
 	ctx := context.Background()
 	repo := storage.NewRepository(pool)
 	mailer := &recordingMailer{}
-	svc := NewService(repo, NewStripeBilling(), mailer, Config{})
+	svc := NewService(repo, NewStripeBilling(), mailer, nil, Config{})
 
 	var groupID string
 	err := pool.QueryRow(ctx, `
@@ -224,7 +225,7 @@ func TestConfirmFree_rejectsNonFreeGroup(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
 	repo := storage.NewRepository(pool)
-	svc := NewService(repo, NewStripeBilling(), nil, Config{})
+	svc := NewService(repo, NewStripeBilling(), nil, nil, Config{})
 
 	var groupID string
 	err := pool.QueryRow(ctx, `
@@ -248,7 +249,7 @@ func TestConfirmFree_rejectsNonAllocatedGroup(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
 	repo := storage.NewRepository(pool)
-	svc := NewService(repo, NewStripeBilling(), nil, Config{})
+	svc := NewService(repo, NewStripeBilling(), nil, nil, Config{})
 
 	var groupID string
 	err := pool.QueryRow(ctx, `
@@ -273,7 +274,7 @@ func TestHandleInvoicePaid_emailsFamily(t *testing.T) {
 	ctx := context.Background()
 	repo := storage.NewRepository(pool)
 	mailer := &recordingMailer{}
-	svc := NewService(repo, NewStripeBilling(), mailer, Config{})
+	svc := NewService(repo, NewStripeBilling(), mailer, nil, Config{})
 
 	var groupID string
 	err := pool.QueryRow(ctx, `
@@ -403,7 +404,7 @@ func TestOffPreferenceChanges(t *testing.T) {
 
 func TestSendAccommodationChangedNotice(t *testing.T) {
 	mailer := &recordingMailer{}
-	svc := NewService(nil, NewStripeBilling(), mailer, Config{})
+	svc := NewService(nil, NewStripeBilling(), mailer, nil, Config{})
 
 	changes := []email.AccommodationChange{{
 		CamperName:   "Alex Test",
@@ -429,5 +430,377 @@ func TestSendAccommodationChangedNotice(t *testing.T) {
 	svc.sendAccommodationChangedNotice(context.Background(), "family@example.com", "Sam", nil, true)
 	if len(mailer.accomChanged) != before {
 		t.Fatal("should not send when changes empty")
+	}
+}
+
+// stubStripe implements stripeClient for delete-registration tests.
+type stubStripe struct {
+	refundPI    func(ctx context.Context, id string) (int64, error)
+	refundInv   func(ctx context.Context, id string) (int64, error)
+	voidInv     func(ctx context.Context, id string) error
+	voidInvIdem func(ctx context.Context, id string) error
+}
+
+func (s *stubStripe) EnsureCustomer(context.Context, string, string, string, string) (string, error) {
+	return "", errors.New("unexpected EnsureCustomer")
+}
+func (s *stubStripe) CreateInvoice(context.Context, string, string, []string, int64) (InvoiceResult, error) {
+	return InvoiceResult{}, errors.New("unexpected CreateInvoice")
+}
+func (s *stubStripe) VoidInvoice(ctx context.Context, invoiceID string) error {
+	if s.voidInv != nil {
+		return s.voidInv(ctx, invoiceID)
+	}
+	return nil
+}
+func (s *stubStripe) VoidInvoiceIdempotent(ctx context.Context, invoiceID string) error {
+	if s.voidInvIdem != nil {
+		return s.voidInvIdem(ctx, invoiceID)
+	}
+	return nil
+}
+func (s *stubStripe) SendInvoiceEmail(context.Context, string) error {
+	return errors.New("unexpected SendInvoiceEmail")
+}
+func (s *stubStripe) GetInvoice(context.Context, string) (InvoiceResult, error) {
+	return InvoiceResult{}, errors.New("unexpected GetInvoice")
+}
+func (s *stubStripe) RefundPaymentIntent(ctx context.Context, id string) (int64, error) {
+	if s.refundPI != nil {
+		return s.refundPI(ctx, id)
+	}
+	return 0, nil
+}
+func (s *stubStripe) RefundInvoice(ctx context.Context, id string) (int64, error) {
+	if s.refundInv != nil {
+		return s.refundInv(ctx, id)
+	}
+	return 0, nil
+}
+
+type failingSheets struct {
+	sheets.NoopSync
+}
+
+func (failingSheets) RemoveByGroupID(context.Context, string) error {
+	return errors.New("sheet sync failed")
+}
+
+func TestDeleteRegistration_unpaid(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	stub := &stubStripe{}
+	svc := NewService(repo, stub, nil, nil, Config{})
+
+	var groupID, camperID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, total_amount_pence, currency, billing_status
+		) VALUES ('Day', 'Pass', 'day@example.com', '07000000000', 'pending', 0, 'GBP', 'none')
+		RETURNING id`).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+	err = pool.QueryRow(ctx, `
+		INSERT INTO registrations (
+			group_id, is_main_contact, first_name, last_name, gender, age,
+			cell_leader_name, is_cell_leader, attendance_type
+		) VALUES ($1, true, 'Alex', 'Day', 'male', 30, 'Leader', false, 'day_pass')
+		RETURNING id`, groupID).Scan(&camperID)
+	if err != nil {
+		t.Fatalf("insert camper: %v", err)
+	}
+
+	sum, err := svc.DeleteRegistration(ctx, groupID, "Admin", domain.SkipVersionCheck)
+	if err != nil {
+		t.Fatalf("DeleteRegistration: %v", err)
+	}
+	if sum.ContactEmail != "day@example.com" {
+		t.Fatalf("contact email = %q", sum.ContactEmail)
+	}
+	if sum.DepositRefunded || sum.BalanceRefunded || sum.InvoiceVoided {
+		t.Fatal("expected no Stripe cleanup for unpaid group")
+	}
+	g, err := repo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		t.Fatalf("FindGroupByID: %v", err)
+	}
+	if g != nil {
+		t.Fatal("group row should be gone")
+	}
+	campers, err := repo.CampersForGroup(ctx, groupID)
+	if err != nil {
+		t.Fatalf("CampersForGroup: %v", err)
+	}
+	if len(campers) != 0 {
+		t.Fatalf("expected 0 campers, got %d", len(campers))
+	}
+}
+
+func TestDeleteRegistration_paidDeposit(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	pi := "pi_test_deposit"
+	var refundCalled bool
+	stub := &stubStripe{
+		refundPI: func(_ context.Context, id string) (int64, error) {
+			refundCalled = true
+			if id != pi {
+				t.Fatalf("refund PI = %q, want %q", id, pi)
+			}
+			return 5000, nil
+		},
+	}
+	svc := NewService(repo, stub, nil, nil, Config{})
+
+	var groupID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, stripe_payment_intent_id, total_amount_pence, currency, billing_status
+		) VALUES ('Paid', 'Deposit', 'paid@example.com', '07000000000', 'paid', $1, 5000, 'GBP', 'none')
+		RETURNING id`, pi).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+
+	sum, err := svc.DeleteRegistration(ctx, groupID, "Admin", domain.SkipVersionCheck)
+	if err != nil {
+		t.Fatalf("DeleteRegistration: %v", err)
+	}
+	if !refundCalled {
+		t.Fatal("expected deposit refund")
+	}
+	if !sum.DepositRefunded || sum.AmountPence != 5000 {
+		t.Fatalf("summary = %+v", sum)
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g != nil {
+		t.Fatal("group should be deleted")
+	}
+}
+
+func TestDeleteRegistration_balancePaid(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	pi := "pi_test_full"
+	inv := "in_test_full"
+	var depositRefunded, balanceRefunded bool
+	stub := &stubStripe{
+		refundPI: func(_ context.Context, id string) (int64, error) {
+			depositRefunded = true
+			if id != pi {
+				t.Fatalf("deposit PI = %q", id)
+			}
+			return 5000, nil
+		},
+		refundInv: func(_ context.Context, id string) (int64, error) {
+			balanceRefunded = true
+			if id != inv {
+				t.Fatalf("invoice = %q", id)
+			}
+			return 12000, nil
+		},
+	}
+	svc := NewService(repo, stub, nil, nil, Config{})
+
+	var groupID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, stripe_payment_intent_id, stripe_invoice_id,
+			total_amount_pence, currency, billing_status
+		) VALUES ('Full', 'Paid', 'full@example.com', '07000000000', 'paid', $1, $2, 5000, 'GBP', 'balance_paid')
+		RETURNING id`, pi, inv).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+
+	sum, err := svc.DeleteRegistration(ctx, groupID, "Admin", domain.SkipVersionCheck)
+	if err != nil {
+		t.Fatalf("DeleteRegistration: %v", err)
+	}
+	if !depositRefunded || !balanceRefunded {
+		t.Fatal("expected both deposit and balance refunds")
+	}
+	if sum.AmountPence != 17000 {
+		t.Fatalf("AmountPence = %d, want 17000", sum.AmountPence)
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g != nil {
+		t.Fatal("group should be deleted")
+	}
+}
+
+func TestDeleteRegistration_refundFailureAborts(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	stub := &stubStripe{
+		refundPI: func(context.Context, string) (int64, error) {
+			return 0, errors.New("stripe down")
+		},
+	}
+	svc := NewService(repo, stub, nil, nil, Config{})
+
+	var groupID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, stripe_payment_intent_id, total_amount_pence, currency, billing_status
+		) VALUES ('Fail', 'Refund', 'fail@example.com', '07000000000', 'paid', 'pi_fail', 5000, 'GBP', 'none')
+		RETURNING id`).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+
+	_, err = svc.DeleteRegistration(ctx, groupID, "Admin", domain.SkipVersionCheck)
+	var apiErr commonerrors.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		t.Fatalf("expected bad_request, got %v", err)
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g == nil {
+		t.Fatal("group should still exist after refund failure")
+	}
+}
+
+func TestDeleteRegistration_staleVersion(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{})
+
+	var groupID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, total_amount_pence, currency, billing_status, version
+		) VALUES ('Stale', 'Version', 'stale@example.com', '07000000000', 'pending', 0, 'GBP', 'none', 5)
+		RETURNING id`).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+
+	_, err = svc.DeleteRegistration(ctx, groupID, "Admin", 1)
+	if !errors.As(err, &commonerrors.APIError{}) {
+		t.Fatalf("expected APIError, got %v", err)
+	}
+	var apiErr commonerrors.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "stale_state" {
+		t.Fatalf("expected stale_state, got %v", err)
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g == nil {
+		t.Fatal("group should still exist")
+	}
+}
+
+func TestDeleteRegistration_sheetFailureNonFatal(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, failingSheets{}, Config{})
+
+	var groupID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, total_amount_pence, currency, billing_status
+		) VALUES ('Sheet', 'Fail', 'sheet@example.com', '07000000000', 'pending', 0, 'GBP', 'none')
+		RETURNING id`).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+
+	_, err = svc.DeleteRegistration(ctx, groupID, "Admin", domain.SkipVersionCheck)
+	if err != nil {
+		t.Fatalf("DeleteRegistration should succeed despite sheet error: %v", err)
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g != nil {
+		t.Fatal("group should be deleted")
+	}
+}
+
+func TestDeleteRegistration_alreadyRefundedIdempotent(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	stub := &stubStripe{
+		refundPI: func(context.Context, string) (int64, error) {
+			return 0, nil // simulates charge_already_refunded -> 0 from helper
+		},
+	}
+	svc := NewService(repo, stub, nil, nil, Config{})
+
+	var groupID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, stripe_payment_intent_id, total_amount_pence, currency, billing_status
+		) VALUES ('Already', 'Refunded', 'already@example.com', '07000000000', 'paid', 'pi_done', 5000, 'GBP', 'none')
+		RETURNING id`).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+
+	_, err = svc.DeleteRegistration(ctx, groupID, "Admin", domain.SkipVersionCheck)
+	if err != nil {
+		t.Fatalf("DeleteRegistration: %v", err)
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g != nil {
+		t.Fatal("group should be deleted after idempotent refund")
+	}
+}
+
+func TestDeleteRegistration_invoicedVoidsAndDeletes(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	inv := "in_test_open"
+	var voided bool
+	stub := &stubStripe{
+		voidInvIdem: func(_ context.Context, id string) error {
+			voided = true
+			if id != inv {
+				t.Fatalf("void invoice = %q, want %q", id, inv)
+			}
+			return nil
+		},
+	}
+	svc := NewService(repo, stub, nil, nil, Config{})
+
+	var groupID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, stripe_payment_intent_id, stripe_invoice_id,
+			total_amount_pence, currency, billing_status
+		) VALUES ('Open', 'Invoice', 'open@example.com', '07000000000', 'paid', 'pi_dep', $1, 5000, 'GBP', 'invoiced')
+		RETURNING id`, inv).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+
+	sum, err := svc.DeleteRegistration(ctx, groupID, "Admin", domain.SkipVersionCheck)
+	if err != nil {
+		t.Fatalf("DeleteRegistration: %v", err)
+	}
+	if !voided || !sum.InvoiceVoided {
+		t.Fatalf("expected invoice voided, summary=%+v", sum)
+	}
+	// Deposit was paid, so it is refunded too (refundPI stub returns 0 -> ok).
+	if !sum.DepositRefunded {
+		t.Fatal("expected deposit refunded for paid invoiced group")
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g != nil {
+		t.Fatal("group should be deleted")
 	}
 }

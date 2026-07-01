@@ -115,7 +115,7 @@ func main() {
 		InvoiceDueDays:         cfg.InvoiceDueDays,
 		WhiteTeamEmail:         cfg.WhiteTeamEmail,
 	}
-	billSvc := billing.NewService(regRepo, billing.NewStripeBilling(), mailer, billCfg)
+	billSvc := billing.NewService(regRepo, billing.NewStripeBilling(), mailer, sheetSync, billCfg)
 
 	adminAuth := middleware.AuthConfig{
 		Password:         cfg.AdminPassword,

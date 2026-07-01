@@ -220,6 +220,36 @@ func (r *Repository) ClearInvoiceAndReleaseMeta(ctx context.Context, groupID str
 	return tx.Commit(ctx)
 }
 
+// DeleteGroupMeta permanently removes a registration group. Campers cascade-delete
+// via FK. Version is checked before delete so stale dashboards cannot remove a
+// concurrently modified group.
+func (r *Repository) DeleteGroupMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	if err != nil {
+		return err
+	}
+	if g == nil {
+		return fmt.Errorf("group %q not found", groupID)
+	}
+	if err := checkVersion(g, meta); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM registration_groups WHERE id = $1`, groupID)
+	if err != nil {
+		return fmt.Errorf("delete group: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrVersionConflict
+	}
+	return tx.Commit(ctx)
+}
+
 // MarkBalancePaidMeta sets balance_paid with attribution (Stripe webhook).
 func (r *Repository) MarkBalancePaidMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error {
 	extra := `, billing_status = 'balance_paid', balance_paid_at = $3`
