@@ -1,8 +1,9 @@
 import type { Event } from "@/types";
 
-// Shown on the Summer Camp CTA when registration is closed (e.g. before the
-// 15 June release). Edit this one line to change the wording everywhere.
-export const CAMP_REGISTRATION_CLOSED_LABEL = "Registration opens 15 June";
+// Shown on the Summer Camp CTA whenever registration is closed (either before
+// it opens or after the deadline passes / the White Team closes it). Edit this
+// one line to change the wording everywhere.
+export const CAMP_REGISTRATION_CLOSED_LABEL = "Registration closed";
 
 // TODO: when real photos exist in /public, set imageUrl on each event below.
 // Suggested filenames: /event-kci-womens.jpg, /event-g12-uk.jpg,
