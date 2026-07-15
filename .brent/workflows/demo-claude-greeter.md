@@ -3,7 +3,7 @@ name: demo-claude-greeter
 description: Demo — greet new PRs (runs on Anthropic / Claude)
 on:
   GitHubWebhook:
-    match: "event.github_webhook.event_type == 'pull_request' && event.github_webhook.payload.action == 'opened' && event.github_webhook.payload.pull_request.draft == false"
+    match: "event.github_webhook.event_type == 'pull_request' && (event.github_webhook.payload.action == 'ready_for_review' || (event.github_webhook.payload.action == 'opened' && event.github_webhook.payload.pull_request.draft == false))"
 model: claude-3-5-haiku-latest
 ---
 A new non-draft pull request was just opened. The `## Context` block below has the PR details.
