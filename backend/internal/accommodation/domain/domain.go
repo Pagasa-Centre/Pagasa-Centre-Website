@@ -8,7 +8,8 @@ type Type struct {
 }
 
 type Option struct {
-	Code        string `json:"code"`
-	DisplayName string `json:"display_name"`
-	Notes       string `json:"notes,omitempty"`
+	Code                     string `json:"code"`
+	DisplayName              string `json:"display_name"`
+	Notes                    string `json:"notes,omitempty"`
+	AvailableForRegistration bool   `json:"available_for_registration"`
 }

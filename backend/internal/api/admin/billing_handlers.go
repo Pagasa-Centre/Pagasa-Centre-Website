@@ -242,6 +242,42 @@ func listAccommodationUnits(repo unitsLister) http.HandlerFunc {
 	}
 }
 
+// putAccommodationAvailability toggles whether a tier is offered on the public
+// registration form. Disabling greys the tile out and rejects submissions that
+// pick it; admin allocation to the tier is unaffected.
+func putAccommodationAvailability(regRepo *regstorage.Repository, rec *adminlog.Recorder) http.HandlerFunc {
+	type body struct {
+		Available *bool `json:"available"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		var b body
+		if err := request.Decode(r, &b); err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		if b.Available == nil {
+			commonerrors.WriteError(w, commonerrors.BadRequest("missing 'available' boolean", nil))
+			return
+		}
+		code := chi.URLParam(r, "code")
+		if err := regRepo.SetAccommodationAvailableForRegistration(r.Context(), code, *b.Available); err != nil {
+			commonerrors.WriteError(w, commonerrors.Internal(err.Error()))
+			return
+		}
+		state := "hid"
+		if *b.Available {
+			state = "showed"
+		}
+		admin.Audit(rec, r, adminlog.ActionAccommodationAvailability, nil,
+			admin.ActorFrom(r.Context())+" "+state+" "+code+" on the registration form",
+			map[string]any{"code": code, "available_for_registration": *b.Available})
+		render.Json(w, http.StatusOK, map[string]any{
+			"code":                       code,
+			"available_for_registration": *b.Available,
+		})
+	}
+}
+
 type accommodationLister interface {
 	ListAccommodationTypes(context.Context) ([]domain.AccommodationType, error)
 }

@@ -285,6 +285,109 @@ func TestSubmit_doubleRedeemFreeCode(t *testing.T) {
 	}
 }
 
+func setAccommodationAvailability(t *testing.T, ctx context.Context, pool *pgxpool.Pool, code string, available bool) {
+	t.Helper()
+	if _, err := pool.Exec(ctx,
+		`UPDATE accommodation_types SET available_for_registration = $1 WHERE code = $2`,
+		available, code); err != nil {
+		t.Fatalf("set availability %s: %v", code, err)
+	}
+}
+
+func TestAccommodationAvailabilityRepo_roundTrip(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	t.Cleanup(func() { setAccommodationAvailability(t, context.Background(), pool, "lodge", true) })
+
+	if err := repo.SetAccommodationAvailableForRegistration(ctx, "lodge", false); err != nil {
+		t.Fatalf("set availability: %v", err)
+	}
+
+	avail, err := repo.AccommodationAvailability(ctx)
+	if err != nil {
+		t.Fatalf("availability map: %v", err)
+	}
+	if avail["lodge"] {
+		t.Fatalf("expected lodge disabled in availability map, got %v", avail)
+	}
+
+	types, err := repo.ListAccommodationTypes(ctx)
+	if err != nil {
+		t.Fatalf("list types: %v", err)
+	}
+	var found bool
+	for _, ty := range types {
+		if ty.Code == "lodge" {
+			found = true
+			if ty.AvailableForRegistration {
+				t.Fatalf("expected lodge.AvailableForRegistration=false")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("lodge not present in ListAccommodationTypes")
+	}
+
+	if err := repo.SetAccommodationAvailableForRegistration(ctx, "does_not_exist", false); err == nil {
+		t.Fatal("expected not-found error for unknown code")
+	}
+}
+
+func TestSubmit_disabledAccommodationRejected(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	svc := newIntegrationService(pool)
+
+	// validRequest picks lodge (1st) / cabin (2nd); disable the 1st choice.
+	// accommodation_types isn't truncated between tests, so restore afterwards.
+	setAccommodationAvailability(t, ctx, pool, "lodge", false)
+	t.Cleanup(func() { setAccommodationAvailability(t, context.Background(), pool, "lodge", true) })
+
+	_, err := svc.Submit(ctx, validRequest())
+	assertAPIErrorCode(t, err, "accommodation_unavailable")
+	if countGroups(t, ctx, pool) != 0 {
+		t.Fatalf("expected no group row after disabled-accommodation submit")
+	}
+}
+
+func TestSubmit_availableAccommodationSucceeds(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	svc := newIntegrationService(pool)
+	seedUnusedFreeCode(t, ctx, pool, "SPON-AVAIL001")
+
+	// lodge/cabin are available by default; the sponsored path skips Stripe so
+	// this proves the guard doesn't over-reject enabled tiers.
+	if _, err := svc.Submit(ctx, sponsoredRequest("SPON-AVAIL001", "avail@example.com")); err != nil {
+		t.Fatalf("Submit with available accommodation: %v", err)
+	}
+}
+
+func TestSubmit_dayPassBlankAccommodationSkipsGuard(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	svc := newIntegrationService(pool)
+	seedUnusedFreeCode(t, ctx, pool, "SPON-DAYPASS1")
+
+	// Even with a tier disabled, a day-pass camper (blank accommodation) is
+	// unaffected by the guard.
+	setAccommodationAvailability(t, ctx, pool, "lodge", false)
+	t.Cleanup(func() { setAccommodationAvailability(t, context.Background(), pool, "lodge", true) })
+
+	req := sponsoredRequest("SPON-DAYPASS1", "daypass@example.com")
+	req.Campers[0].Attendance = domain.AttendanceDTO{
+		Type:          domain.AttendanceDayPass,
+		Days:          []string{"mon"},
+		TshirtOption:  domain.TshirtOptionNone,
+		ShirtSize:     domain.ShirtSizeNotApplicable,
+		NeedsCatering: boolPtr(false),
+	}
+	if _, err := svc.Submit(ctx, req); err != nil {
+		t.Fatalf("day-pass Submit should skip accommodation guard: %v", err)
+	}
+}
+
 func TestRevokeFreeCode_rejectsUsedCode(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()

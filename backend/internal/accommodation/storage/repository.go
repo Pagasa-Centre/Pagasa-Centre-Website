@@ -17,7 +17,7 @@ func NewRepository(pool *pgxpool.Pool) *Repository { return &Repository{pool: po
 
 func (r *Repository) ListOptions(ctx context.Context) ([]domain.Option, error) {
 	const q = `
-		SELECT code, display_name, COALESCE(notes, '')
+		SELECT code, display_name, COALESCE(notes, ''), available_for_registration
 		  FROM accommodation_types
 		 ORDER BY sort_order, code`
 	rows, err := r.pool.Query(ctx, q)
@@ -29,7 +29,7 @@ func (r *Repository) ListOptions(ctx context.Context) ([]domain.Option, error) {
 	var out []domain.Option
 	for rows.Next() {
 		var o domain.Option
-		if err := rows.Scan(&o.Code, &o.DisplayName, &o.Notes); err != nil {
+		if err := rows.Scan(&o.Code, &o.DisplayName, &o.Notes, &o.AvailableForRegistration); err != nil {
 			return nil, fmt.Errorf("scan accommodation: %w", err)
 		}
 		out = append(out, o)

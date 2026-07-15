@@ -232,11 +232,11 @@ func (r *Repository) ListOverdueInvoiced(ctx context.Context, now time.Time) ([]
 
 // GetAccommodationType loads a tier including its Stripe Price id.
 func (r *Repository) GetAccommodationType(ctx context.Context, code string) (*domain.AccommodationType, error) {
-	const q = `SELECT code, display_name, capacity, stripe_price_id FROM accommodation_types WHERE code = $1`
+	const q = `SELECT code, display_name, capacity, stripe_price_id, available_for_registration FROM accommodation_types WHERE code = $1`
 	var t domain.AccommodationType
 	var capacity *int
 	var priceID *string
-	err := r.pool.QueryRow(ctx, q, code).Scan(&t.Code, &t.DisplayName, &capacity, &priceID)
+	err := r.pool.QueryRow(ctx, q, code).Scan(&t.Code, &t.DisplayName, &capacity, &priceID, &t.AvailableForRegistration)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -250,7 +250,7 @@ func (r *Repository) GetAccommodationType(ctx context.Context, code string) (*do
 
 // ListAccommodationTypes returns all tiers with capacity and Stripe Price ids.
 func (r *Repository) ListAccommodationTypes(ctx context.Context) ([]domain.AccommodationType, error) {
-	const q = `SELECT code, display_name, capacity, stripe_price_id FROM accommodation_types ORDER BY sort_order, code`
+	const q = `SELECT code, display_name, capacity, stripe_price_id, available_for_registration FROM accommodation_types ORDER BY sort_order, code`
 	rows, err := r.pool.Query(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list accommodation types: %w", err)
@@ -262,7 +262,7 @@ func (r *Repository) ListAccommodationTypes(ctx context.Context) ([]domain.Accom
 		var t domain.AccommodationType
 		var capacity *int
 		var priceID *string
-		if err := rows.Scan(&t.Code, &t.DisplayName, &capacity, &priceID); err != nil {
+		if err := rows.Scan(&t.Code, &t.DisplayName, &capacity, &priceID, &t.AvailableForRegistration); err != nil {
 			return nil, err
 		}
 		t.Capacity = capacity
@@ -270,6 +270,41 @@ func (r *Repository) ListAccommodationTypes(ctx context.Context) ([]domain.Accom
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+// AccommodationAvailability returns a map of code -> available_for_registration.
+func (r *Repository) AccommodationAvailability(ctx context.Context) (map[string]bool, error) {
+	const q = `SELECT code, available_for_registration FROM accommodation_types`
+	rows, err := r.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("accommodation availability: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string]bool)
+	for rows.Next() {
+		var code string
+		var available bool
+		if err := rows.Scan(&code, &available); err != nil {
+			return nil, err
+		}
+		out[code] = available
+	}
+	return out, rows.Err()
+}
+
+// SetAccommodationAvailableForRegistration toggles a tier's public availability.
+func (r *Repository) SetAccommodationAvailableForRegistration(ctx context.Context, code string, available bool) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE accommodation_types SET available_for_registration = $1 WHERE code = $2`,
+		available, code)
+	if err != nil {
+		return fmt.Errorf("set accommodation availability: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("accommodation %q not found", code)
+	}
+	return nil
 }
 
 // ListAccommodationUnits returns all physical units for admin allocation.

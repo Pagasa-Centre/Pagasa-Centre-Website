@@ -74,6 +74,11 @@ export default function CamperFieldset({
         },
       ]
     : [];
+  // Types the White Team has disabled for registration render as greyed,
+  // non-selectable tiles rather than being hidden.
+  const adminUnavailable: UnavailableCode[] = accommodations
+    .filter((a) => !a.available_for_registration)
+    .map((a) => ({ code: a.code, reason: "Not available" }));
 
   return (
     <fieldset className="bg-white border border-neutral-300 p-6 sm:p-8 rounded-xl shadow-sm flex flex-col gap-5">
@@ -355,7 +360,7 @@ export default function CamperFieldset({
             label="1st choice accommodation"
             value={value.accommodation_first_choice}
             accommodations={accommodations}
-            unavailable={childUnavailable}
+            unavailable={[...childUnavailable, ...adminUnavailable]}
             error={attErr("accommodation_first_choice")}
             onChange={(code) => {
               const patch: Partial<CamperState> = {
@@ -392,6 +397,7 @@ export default function CamperFieldset({
                     ]
                   : []),
                 ...childUnavailable,
+                ...adminUnavailable,
               ]}
               error={attErr("accommodation_second_choice")}
               onChange={(code) =>

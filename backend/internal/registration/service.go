@@ -97,6 +97,10 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 		}
 	}
 
+	if err := s.ensureAccommodationAvailable(ctx, req); err != nil {
+		return nil, err
+	}
+
 	total, currency, err := s.computeTotal(ctx, req)
 	if err != nil {
 		return nil, commonerrors.Internal(err.Error())
@@ -243,6 +247,35 @@ func ptrIfNotEmpty(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// ensureAccommodationAvailable rejects submissions whose 1st/2nd accommodation
+// choice points at a tier the White Team has disabled for registration. Only
+// codes explicitly disabled are rejected; blank choices (day-pass campers) and
+// unknown codes pass through unchanged.
+func (s *Service) ensureAccommodationAvailable(ctx context.Context, req domain.SubmitRequest) error {
+	avail, err := s.repo.AccommodationAvailability(ctx)
+	if err != nil {
+		return commonerrors.Internal(err.Error())
+	}
+	disabled := func(code string) bool {
+		code = strings.TrimSpace(code)
+		if code == "" {
+			return false
+		}
+		ok, present := avail[code]
+		return present && !ok
+	}
+	for _, c := range req.Campers {
+		if disabled(c.Attendance.AccommodationFirstChoice) ||
+			disabled(c.Attendance.AccommodationSecondChoice) {
+			return commonerrors.APIError{
+				Code:    "accommodation_unavailable",
+				Message: "One or more selected accommodation types are no longer available. Please refresh and choose again.",
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Service) computeTotal(ctx context.Context, req domain.SubmitRequest) (totalPence int, currency string, err error) {

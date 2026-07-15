@@ -93,6 +93,7 @@ export type Accommodation = {
   code: string;
   display_name: string;
   notes?: string;
+  available_for_registration: boolean;
 };
 
 export type ShirtSize = {

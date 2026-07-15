@@ -128,8 +128,9 @@ type AccommodationUnit struct {
 // AccommodationType mirrors accommodation_types for billing lookups.
 // Capacity is nil when the tier has no hard limit (tents, child-with-parent).
 type AccommodationType struct {
-	Code          string  `json:"code"`
-	DisplayName   string  `json:"display_name"`
-	Capacity      *int    `json:"capacity,omitempty"`
-	StripePriceID *string `json:"stripe_price_id,omitempty"`
+	Code                     string  `json:"code"`
+	DisplayName              string  `json:"display_name"`
+	Capacity                 *int    `json:"capacity,omitempty"`
+	StripePriceID            *string `json:"stripe_price_id,omitempty"`
+	AvailableForRegistration bool    `json:"available_for_registration"`
 }

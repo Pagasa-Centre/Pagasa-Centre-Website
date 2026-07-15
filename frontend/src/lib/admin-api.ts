@@ -80,6 +80,7 @@ export type AdminAccommodation = {
   display_name: string;
   capacity?: number | null;
   stripe_price_id?: string | null;
+  available_for_registration?: boolean;
 };
 
 export type AdminAccommodationUnit = {
@@ -261,6 +262,12 @@ export const adminApi = {
   accommodationUnits: () =>
     adminFetch<{ units: AdminAccommodationUnit[] }>(
       "/admin/accommodation-units",
+    ),
+
+  setAccommodationAvailability: (code: string, available: boolean) =>
+    adminFetch<{ code: string; available_for_registration: boolean }>(
+      `/admin/accommodations/${code}/availability`,
+      { method: "PUT", body: JSON.stringify({ available }) },
     ),
 
   saveAllocation: (

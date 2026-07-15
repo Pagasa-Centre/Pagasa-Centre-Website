@@ -59,6 +59,7 @@ func Mount(
 		r.Put("/registrations-open", putRegistrationsOpen(campRepo, rec))
 
 		r.Get("/accommodations", listAccommodationTypes(regRepo))
+		r.Put("/accommodations/{code}/availability", putAccommodationAvailability(regRepo, rec))
 		r.Get("/accommodation-units", listAccommodationUnits(regRepo))
 		r.Get("/events", listEvents(rec))
 		r.Put("/registrations/{groupID}/allocation", putAllocation(billSvc, rec, regRepo))

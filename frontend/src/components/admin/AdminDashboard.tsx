@@ -745,6 +745,37 @@ export default function AdminDashboard() {
     }
   }
 
+  async function toggleAccommodation(code: string, next: boolean) {
+    if (
+      !next &&
+      !window.confirm(
+        `Hide "${code}" from the registration form? It will appear greyed out and campers won't be able to select it as a 1st or 2nd choice.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(`acc-${code}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await adminApi.setAccommodationAvailability(code, next);
+      await load();
+      setNotice(
+        next
+          ? `"${code}" is now shown on the registration form.`
+          : `"${code}" is now hidden from the registration form.`,
+      );
+    } catch (err) {
+      setError(
+        err instanceof AdminApiError
+          ? err.detail.message
+          : `Could not update availability for "${code}".`,
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function logout() {
     await adminApi.logout();
     router.replace("/admin/login");
@@ -1023,6 +1054,8 @@ export default function AdminDashboard() {
         units={units}
         usage={usage}
         unitUsage={unitUsage}
+        onToggle={toggleAccommodation}
+        busy={busy}
       />
 
       {notice && (
@@ -1161,11 +1194,15 @@ function CapacityPanel({
   units,
   usage,
   unitUsage,
+  onToggle,
+  busy,
 }: {
   accommodations: AdminAccommodation[];
   units: AdminAccommodationUnit[];
   usage: Record<string, number>;
   unitUsage: Record<string, { used: number; groupIds: Set<string> }>;
+  onToggle: (code: string, next: boolean) => void;
+  busy: string | null;
 }) {
   if (accommodations.length === 0) return null;
 
@@ -1312,6 +1349,28 @@ function CapacityPanel({
                   })}
                 </ul>
               )}
+              {(() => {
+                const shown = a.available_for_registration !== false;
+                const toggling = busy === `acc-${a.code}`;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => onToggle(a.code, !shown)}
+                    disabled={toggling}
+                    className={`mt-3 w-full text-[11px] font-bold px-2 py-1.5 rounded-md border transition-colors disabled:opacity-60 ${
+                      shown
+                        ? "text-green-700 bg-green-50 border-green-200 hover:bg-green-100"
+                        : "text-amber-800 bg-amber-50 border-amber-200 hover:bg-amber-100"
+                    }`}
+                  >
+                    {toggling
+                      ? "Saving…"
+                      : shown
+                        ? "On registration form"
+                        : "Hidden from form"}
+                  </button>
+                );
+              })()}
             </div>
           );
         })}
