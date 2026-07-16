@@ -196,12 +196,13 @@ func main() {
 
 func applyStripePriceOverrides(ctx context.Context, repo *regstorage.Repository, cfg config.Config) {
 	pairs := map[string]string{
-		"lodge":          cfg.StripePriceLodge,
-		"cabin":          cfg.StripePriceCabin,
-		"static_caravan": cfg.StripePriceStaticCaravan,
-		"pod":            cfg.StripePricePod,
-		"tent":           cfg.StripePriceTent,
-		"child":          cfg.StripePriceChild312,
+		"lodge":            cfg.StripePriceLodge,
+		"cabin":            cfg.StripePriceCabin,
+		"static_caravan":   cfg.StripePriceStaticCaravan,
+		"pod":              cfg.StripePricePod,
+		"tent":             cfg.StripePriceTent,
+		"caravan_overflow": cfg.StripePriceTent,
+		"child":            cfg.StripePriceChild312,
 	}
 	for code, priceID := range pairs {
 		if priceID == "" {

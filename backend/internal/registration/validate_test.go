@@ -115,6 +115,13 @@ func TestValidate_FullWeekTentDoesNotRequireSecondChoice(t *testing.T) {
 	}
 }
 
+func TestValidate_FullWeekCaravanOverflowRequiresSecondChoice(t *testing.T) {
+	req := validRequest()
+	req.Campers[0].Attendance.AccommodationFirstChoice = "caravan_overflow"
+	req.Campers[0].Attendance.AccommodationSecondChoice = ""
+	assertFieldError(t, Validate(req), "campers[0].attendance.accommodation_second_choice")
+}
+
 func TestValidate_FullWeekChildAccommodationRejectedOverAgeLimit(t *testing.T) {
 	req := validRequest()
 	req.Campers[0].Age = MaxChildAccommodationAge + 1

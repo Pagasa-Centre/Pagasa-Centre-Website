@@ -133,6 +133,31 @@ func TestDayPassLine(t *testing.T) {
 	}
 }
 
+func TestResolvePriceID_caravanOverflowMatchesTent(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	price := "price_shared_tent_overflow"
+	if err := repo.UpdateAccommodationStripePrice(ctx, "tent", price); err != nil {
+		t.Fatalf("update tent price: %v", err)
+	}
+	if err := repo.UpdateAccommodationStripePrice(ctx, "caravan_overflow", price); err != nil {
+		t.Fatalf("update overflow price: %v", err)
+	}
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{})
+	tentID, err := svc.resolvePriceID(ctx, "tent", 25)
+	if err != nil {
+		t.Fatalf("resolve tent: %v", err)
+	}
+	overflowID, err := svc.resolvePriceID(ctx, "caravan_overflow", 25)
+	if err != nil {
+		t.Fatalf("resolve overflow: %v", err)
+	}
+	if tentID != overflowID {
+		t.Fatalf("tent=%q overflow=%q, want same price id", tentID, overflowID)
+	}
+}
+
 func TestValidateAllocatedUnit_blankAllowed(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	repo := storage.NewRepository(pool)
