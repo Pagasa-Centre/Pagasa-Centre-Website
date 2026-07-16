@@ -456,6 +456,141 @@ func (s *Service) VoidAndRelease(ctx context.Context, groupID, reason, actor str
 	return nil
 }
 
+// RemoveCamperSummary captures the outcome of removing one camper from a group.
+type RemoveCamperSummary struct {
+	CamperName    string
+	InvoiceVoided bool
+}
+
+// RemoveCamper hard-deletes one camper from a multi-person booking. No deposit
+// refund is issued. Blocks removal of the main contact, the last camper, or
+// anyone after the balance is paid. Voids an open invoice when present.
+func (s *Service) RemoveCamper(ctx context.Context, groupID, camperID, actor string, expectedVersion int) (RemoveCamperSummary, error) {
+	g, err := s.repo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		return RemoveCamperSummary{}, commonerrors.Internal(err.Error())
+	}
+	if g == nil {
+		return RemoveCamperSummary{}, commonerrors.NotFound("group not found")
+	}
+
+	campers, err := s.repo.CampersForGroup(ctx, groupID)
+	if err != nil {
+		return RemoveCamperSummary{}, commonerrors.Internal(err.Error())
+	}
+
+	var target *domain.Camper
+	for i := range campers {
+		if campers[i].ID == camperID {
+			target = &campers[i]
+			break
+		}
+	}
+	if target == nil {
+		return RemoveCamperSummary{}, commonerrors.NotFound("camper not found")
+	}
+
+	summary := RemoveCamperSummary{
+		CamperName: strings.TrimSpace(target.FirstName + " " + target.LastName),
+	}
+
+	if target.IsMainContact {
+		return RemoveCamperSummary{}, commonerrors.BadRequest("can't remove the main contact; edit the booking another way", nil)
+	}
+	if len(campers) <= 1 {
+		return RemoveCamperSummary{}, commonerrors.BadRequest("this is the last camper; delete the whole registration instead", nil)
+	}
+	if g.BillingStatus == domain.BillingBalancePaid {
+		return RemoveCamperSummary{}, commonerrors.BadRequest("balance already paid; refund/handle in Stripe first", nil)
+	}
+
+	newStatus := ""
+	if g.BillingStatus == domain.BillingInvoiced && g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" {
+		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeInvoiceID); err != nil {
+			return RemoveCamperSummary{}, commonerrors.BadRequest(
+				fmt.Sprintf("invoice void failed; camper was not removed: %v", err), nil)
+		}
+		summary.InvoiceVoided = true
+		newStatus = domain.BillingNone
+		for _, c := range campers {
+			if c.ID == camperID {
+				continue
+			}
+			if c.AttendanceType == domain.AttendanceFullWeek {
+				newStatus = domain.BillingAllocated
+				break
+			}
+		}
+	}
+
+	meta := domain.ActionMeta{
+		Actor:           actor,
+		Action:          "camper_removed",
+		ExpectedVersion: expectedVersion,
+	}
+	if err := s.repo.DeleteCamperMeta(ctx, groupID, camperID, newStatus, meta); err != nil {
+		return RemoveCamperSummary{}, mapVersionErr(ctx, s.repo, groupID, err)
+	}
+
+	if g.PaymentStatus == domain.PaymentPaid {
+		remaining, err := s.repo.CampersForGroup(ctx, groupID)
+		if err != nil {
+			log.Printf("billing: load campers after remove %s/%s: %v", groupID, camperID, err)
+		} else {
+			gAfter, err := s.repo.FindGroupByID(ctx, groupID)
+			if err != nil || gAfter == nil {
+				log.Printf("billing: reload group after remove %s: %v", groupID, err)
+			} else {
+				if err := s.sheets.RemoveByGroupID(ctx, groupID); err != nil {
+					log.Printf("billing: remove group %s from sheet after camper remove: %v", groupID, err)
+				}
+				rows := sheetRowsForGroup(gAfter, remaining)
+				if err := s.sheets.AppendPaidAndRemovePending(ctx, groupID, rows); err != nil {
+					log.Printf("billing: re-sync sheet for group %s after camper remove: %v", groupID, err)
+				}
+			}
+		}
+	}
+
+	return summary, nil
+}
+
+func sheetRowsForGroup(g *domain.Group, campers []domain.Camper) []sheets.Row {
+	rows := make([]sheets.Row, 0, len(campers))
+	for _, c := range campers {
+		rows = append(rows, sheets.Row{
+			GroupID:                   g.ID,
+			PaymentStatus:             g.PaymentStatus,
+			SubmittedAt:               g.CreatedAt,
+			PaidAt:                    g.PaidAt,
+			TotalAmountPence:          g.TotalAmountPence,
+			Currency:                  g.Currency,
+			ContactFirstName:          g.ContactFirstName,
+			ContactLastName:           g.ContactLastName,
+			ContactEmail:              g.ContactEmail,
+			ContactPhone:              g.ContactPhone,
+			IsMainContact:             c.IsMainContact,
+			FirstName:                 c.FirstName,
+			LastName:                  c.LastName,
+			Gender:                    c.Gender,
+			Age:                       c.Age,
+			CellLeaderName:            c.CellLeaderName,
+			IsCellLeader:              c.IsCellLeader,
+			AttendanceType:            c.AttendanceType,
+			ShirtSize:                 c.ShirtSize,
+			DietaryRequirements:       c.DietaryRequirements,
+			NeedsCoach:                c.NeedsCoach,
+			AccommodationFirstChoice:  c.AccommodationFirstChoice,
+			AccommodationSecondChoice: c.AccommodationSecondChoice,
+			RoommateRequests:          c.RoommateRequests,
+			DayPassDays:               c.DayPassDays,
+			DayPassTshirtOption:       c.DayPassTshirtOption,
+			DayPassNeedsCatering:      c.DayPassNeedsCatering,
+		})
+	}
+	return rows
+}
+
 // DeleteSummary captures Stripe cleanup performed when a registration is deleted.
 type DeleteSummary struct {
 	ContactName     string

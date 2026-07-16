@@ -94,6 +94,7 @@ export type AdminAccommodationUnit = {
 export type AdminCamper = {
   id: string;
   group_id: string;
+  is_main_contact?: boolean;
   first_name: string;
   last_name: string;
   attendance_type: string;
@@ -319,6 +320,15 @@ export const adminApi = {
       method: "POST",
       body: JSON.stringify({ expected_version: expectedVersion }),
     }),
+
+  removeCamper: (groupId: string, camperId: string, expectedVersion: number) =>
+    adminFetch<void>(
+      `/admin/registrations/${groupId}/campers/${camperId}/delete`,
+      {
+        method: "POST",
+        body: JSON.stringify({ expected_version: expectedVersion }),
+      },
+    ),
 
   resendInvoice: (groupId: string, expectedVersion: number) =>
     adminFetch<void>(`/admin/registrations/${groupId}/invoice/resend`, {

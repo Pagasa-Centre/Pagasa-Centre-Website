@@ -36,6 +36,7 @@ const (
 	ActionFreeCodeRevoked     = "free_code_revoked"
 	ActionFreeConfirmed       = "free_confirmed"
 	ActionRegistrationDeleted = "registration_deleted"
+	ActionCamperRemoved         = "camper_removed"
 
 	ActionAccommodationAvailability = "accommodation_availability"
 )

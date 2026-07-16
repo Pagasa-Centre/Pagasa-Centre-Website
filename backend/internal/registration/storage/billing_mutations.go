@@ -220,6 +220,46 @@ func (r *Repository) ClearInvoiceAndReleaseMeta(ctx context.Context, groupID str
 	return tx.Commit(ctx)
 }
 
+// DeleteCamperMeta removes one camper row from a group. newBillingStatus, when
+// non-empty, reverts the group's billing_status and clears invoice fields
+// (used after voiding a now-stale invoice).
+func (r *Repository) DeleteCamperMeta(ctx context.Context, groupID, camperID, newBillingStatus string, meta domain.ActionMeta) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	if err != nil {
+		return err
+	}
+	if g == nil {
+		return fmt.Errorf("group %q not found", groupID)
+	}
+	if err := checkVersion(g, meta); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM registrations WHERE id = $1 AND group_id = $2`, camperID, groupID)
+	if err != nil {
+		return fmt.Errorf("delete camper: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("camper %q not in group %q", camperID, groupID)
+	}
+	if newBillingStatus == "" {
+		if err := stampExec(ctx, tx, groupID, meta, ""); err != nil {
+			return err
+		}
+	} else {
+		extra := `, billing_status = $3, stripe_invoice_id = NULL, invoice_due_at = NULL`
+		if err := stampExec(ctx, tx, groupID, meta, extra, newBillingStatus); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
 // DeleteGroupMeta permanently removes a registration group. Campers cascade-delete
 // via FK. Version is checked before delete so stale dashboards cannot remove a
 // concurrently modified group.

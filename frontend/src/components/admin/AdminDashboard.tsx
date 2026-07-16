@@ -192,6 +192,7 @@ const LAST_ACTION_LABELS: Record<string, string> = {
   balance_paid: "Balance paid",
   free_confirmed: "Sponsorship confirmed",
   registration_deleted: "Registration deleted",
+  camper_removed: "Camper removed",
 };
 
 function formatLastAction(g: AdminGroup): string | null {
@@ -578,6 +579,28 @@ export default function AdminDashboard() {
       await load();
     } catch (err) {
       await handleAdminError(err, "Release failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function removeCamperFromGroup(g: AdminGroup, c: AdminCamper) {
+    if (
+      !confirm(
+        `Remove ${c.first_name} ${c.last_name} from ${g.contact_first_name}'s booking? This can't be undone.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(`rmcamper-${c.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await adminApi.removeCamper(g.id, c.id, g.version);
+      setNotice(`Removed ${c.first_name} from ${g.contact_first_name}'s booking.`);
+      await load();
+    } catch (err) {
+      await handleAdminError(err, "Remove camper failed.");
     } finally {
       setBusy(null);
     }
@@ -1181,6 +1204,7 @@ export default function AdminDashboard() {
               onCancel={() => cancelGroup(g)}
               onRelease={() => releaseGroup(g)}
               onDelete={() => deleteRegistration(g)}
+              onRemoveCamper={(c) => removeCamperFromGroup(g, c)}
             />
           ))}
         </div>
@@ -1452,6 +1476,14 @@ function unitsForTier(
     .sort((a, b) => a.sort_order - b.sort_order || a.code.localeCompare(b.code));
 }
 
+function canRemoveCamper(g: AdminGroup, c: AdminCamper): boolean {
+  return (
+    g.campers.length > 1 &&
+    !c.is_main_contact &&
+    g.billing_status !== "balance_paid"
+  );
+}
+
 function GroupCard({
   g,
   accommodations,
@@ -1477,6 +1509,7 @@ function GroupCard({
   onCancel,
   onRelease,
   onDelete,
+  onRemoveCamper,
 }: {
   g: AdminGroup;
   accommodations: AdminAccommodation[];
@@ -1508,6 +1541,7 @@ function GroupCard({
   onCancel: () => void;
   onRelease: () => void;
   onDelete: () => void;
+  onRemoveCamper: (c: AdminCamper) => void;
 }) {
   const fw = fullWeekCampers(g);
   const cat = categorize(g);
@@ -1772,6 +1806,16 @@ function GroupCard({
                           Under {MIN_DEPOSIT_AGE}: no balance to pay
                         </span>
                       )}
+                    {canRemoveCamper(g, c) && (
+                      <button
+                        type="button"
+                        disabled={busy === `rmcamper-${c.id}`}
+                        onClick={() => onRemoveCamper(c)}
+                        className="px-3 py-1.5 text-xs font-semibold text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50"
+                      >
+                        {busy === `rmcamper-${c.id}` ? "Removing…" : "Remove"}
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -1818,14 +1862,26 @@ function GroupCard({
                         Age {c.age}
                       </span>
                     </span>
-                    <span className="text-sm text-neutral-700 font-semibold text-right">
-                      {accName(c.allocated_accommodation_code)}
-                      {c.allocated_unit_code && (
-                        <span className="block text-xs font-medium text-neutral-500">
-                          {unitName(c.allocated_unit_code)}
-                        </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-neutral-700 font-semibold text-right">
+                        {accName(c.allocated_accommodation_code)}
+                        {c.allocated_unit_code && (
+                          <span className="block text-xs font-medium text-neutral-500">
+                            {unitName(c.allocated_unit_code)}
+                          </span>
+                        )}
+                      </span>
+                      {canRemoveCamper(g, c) && (
+                        <button
+                          type="button"
+                          disabled={busy === `rmcamper-${c.id}`}
+                          onClick={() => onRemoveCamper(c)}
+                          className="px-3 py-1.5 text-xs font-semibold text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50 shrink-0"
+                        >
+                          {busy === `rmcamper-${c.id}` ? "Removing…" : "Remove"}
+                        </button>
                       )}
-                    </span>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1848,9 +1904,21 @@ function GroupCard({
                             Age {c.age}
                           </span>
                         </span>
-                        <span className="text-sm text-neutral-700 font-semibold text-right">
-                          Day pass ({days} {days === 1 ? "day" : "days"})
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-neutral-700 font-semibold text-right">
+                            Day pass ({days} {days === 1 ? "day" : "days"})
+                          </span>
+                          {canRemoveCamper(g, c) && (
+                            <button
+                              type="button"
+                              disabled={busy === `rmcamper-${c.id}`}
+                              onClick={() => onRemoveCamper(c)}
+                              className="px-3 py-1.5 text-xs font-semibold text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50 shrink-0"
+                            >
+                              {busy === `rmcamper-${c.id}` ? "Removing…" : "Remove"}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })}

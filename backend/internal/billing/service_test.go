@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/registration"
@@ -861,5 +862,264 @@ func TestDeleteRegistration_invoicedVoidsAndDeletes(t *testing.T) {
 	g, _ := repo.FindGroupByID(ctx, groupID)
 	if g != nil {
 		t.Fatal("group should be deleted")
+	}
+}
+
+func insertThreeCamperGroup(ctx context.Context, t *testing.T, pool *pgxpool.Pool, billingStatus string, stripeInvoiceID *string) (groupID, mainID, camper2ID, camper3ID string) {
+	t.Helper()
+	inv := any(nil)
+	if stripeInvoiceID != nil {
+		inv = *stripeInvoiceID
+	}
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, stripe_payment_intent_id, stripe_invoice_id,
+			total_amount_pence, currency, billing_status, version
+		) VALUES ('Sam', 'Family', 'family@example.com', '07000000000', 'paid', 'pi_test', $1, 15000, 'GBP', $2, 1)
+		RETURNING id`, inv, billingStatus).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+	for _, spec := range []struct {
+		id    *string
+		main  bool
+		name  string
+		alloc *string
+	}{
+		{&mainID, true, "Sam", strPtr("lodge")},
+		{&camper2ID, false, "Alex", strPtr("lodge")},
+		{&camper3ID, false, "Jordan", strPtr("tent")},
+	} {
+		err = pool.QueryRow(ctx, `
+			INSERT INTO registrations (
+				group_id, is_main_contact, first_name, last_name, gender, age,
+				cell_leader_name, is_cell_leader, attendance_type,
+				allocated_accommodation_code
+			) VALUES ($1, $2, $3, 'Test', 'male', 25, 'Leader', false, 'full_week', $4)
+			RETURNING id`, groupID, spec.main, spec.name, spec.alloc).Scan(spec.id)
+		if err != nil {
+			t.Fatalf("insert camper %s: %v", spec.name, err)
+		}
+	}
+	return groupID, mainID, camper2ID, camper3ID
+}
+
+func countTierAllocations(ctx context.Context, pool *pgxpool.Pool, groupID, tier string) int {
+	var n int
+	_ = pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM registrations
+		WHERE group_id = $1 AND allocated_accommodation_code = $2`, groupID, tier).Scan(&n)
+	return n
+}
+
+func TestRemoveCamper_success(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{})
+
+	groupID, _, camper2ID, camper3ID := insertThreeCamperGroup(ctx, t, pool, domain.BillingAllocated, nil)
+
+	sum, err := svc.RemoveCamper(ctx, groupID, camper2ID, "Admin", 1)
+	if err != nil {
+		t.Fatalf("RemoveCamper: %v", err)
+	}
+	if sum.CamperName != "Alex Test" {
+		t.Fatalf("camper name = %q", sum.CamperName)
+	}
+	if sum.InvoiceVoided {
+		t.Fatal("expected no invoice void")
+	}
+
+	campers, err := repo.CampersForGroup(ctx, groupID)
+	if err != nil {
+		t.Fatalf("CampersForGroup: %v", err)
+	}
+	if len(campers) != 2 {
+		t.Fatalf("expected 2 campers, got %d", len(campers))
+	}
+	ids := map[string]bool{campers[0].ID: true, campers[1].ID: true}
+	if !ids[camper3ID] || ids[camper2ID] {
+		t.Fatalf("wrong campers remain: %+v", campers)
+	}
+
+	g, err := repo.FindGroupByID(ctx, groupID)
+	if err != nil || g == nil {
+		t.Fatalf("FindGroupByID: %v", err)
+	}
+	if g.Version != 2 {
+		t.Fatalf("version = %d, want 2", g.Version)
+	}
+	if g.LastAction == nil || *g.LastAction != "camper_removed" {
+		t.Fatalf("last_action = %v", g.LastAction)
+	}
+}
+
+func TestRemoveCamper_mainContactBlocked(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{})
+
+	groupID, mainID, _, _ := insertThreeCamperGroup(ctx, t, pool, domain.BillingAllocated, nil)
+
+	_, err := svc.RemoveCamper(ctx, groupID, mainID, "Admin", domain.SkipVersionCheck)
+	var apiErr commonerrors.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		t.Fatalf("expected bad_request, got %v", err)
+	}
+	campers, _ := repo.CampersForGroup(ctx, groupID)
+	if len(campers) != 3 {
+		t.Fatalf("expected 3 campers unchanged, got %d", len(campers))
+	}
+}
+
+func TestRemoveCamper_lastCamperBlocked(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{})
+
+	var groupID, camperID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, total_amount_pence, currency, billing_status
+		) VALUES ('Solo', 'Camper', 'solo@example.com', '07000000000', 'paid', 5000, 'GBP', 'none')
+		RETURNING id`).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+	err = pool.QueryRow(ctx, `
+		INSERT INTO registrations (
+			group_id, is_main_contact, first_name, last_name, gender, age,
+			cell_leader_name, is_cell_leader, attendance_type
+		) VALUES ($1, false, 'Only', 'Person', 'male', 30, 'Leader', false, 'full_week')
+		RETURNING id`, groupID).Scan(&camperID)
+	if err != nil {
+		t.Fatalf("insert camper: %v", err)
+	}
+
+	_, err = svc.RemoveCamper(ctx, groupID, camperID, "Admin", domain.SkipVersionCheck)
+	var apiErr commonerrors.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		t.Fatalf("expected bad_request, got %v", err)
+	}
+}
+
+func TestRemoveCamper_balancePaidBlocked(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{})
+
+	groupID, _, camper2ID, _ := insertThreeCamperGroup(ctx, t, pool, domain.BillingBalancePaid, nil)
+
+	_, err := svc.RemoveCamper(ctx, groupID, camper2ID, "Admin", domain.SkipVersionCheck)
+	var apiErr commonerrors.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		t.Fatalf("expected bad_request, got %v", err)
+	}
+}
+
+func TestRemoveCamper_invoicedVoidsAndReverts(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	inv := "in_remove_camper"
+	var voided bool
+	stub := &stubStripe{
+		voidInvIdem: func(_ context.Context, id string) error {
+			voided = true
+			if id != inv {
+				t.Fatalf("void invoice = %q, want %q", id, inv)
+			}
+			return nil
+		},
+	}
+	svc := NewService(repo, stub, nil, nil, Config{})
+
+	groupID, _, camper2ID, _ := insertThreeCamperGroup(ctx, t, pool, domain.BillingInvoiced, &inv)
+
+	sum, err := svc.RemoveCamper(ctx, groupID, camper2ID, "Admin", domain.SkipVersionCheck)
+	if err != nil {
+		t.Fatalf("RemoveCamper: %v", err)
+	}
+	if !voided || !sum.InvoiceVoided {
+		t.Fatalf("expected invoice voided, summary=%+v", sum)
+	}
+
+	g, err := repo.FindGroupByID(ctx, groupID)
+	if err != nil || g == nil {
+		t.Fatalf("FindGroupByID: %v", err)
+	}
+	if g.BillingStatus != domain.BillingAllocated {
+		t.Fatalf("billing_status = %q, want allocated", g.BillingStatus)
+	}
+	if g.StripeInvoiceID != nil {
+		t.Fatalf("stripe_invoice_id should be cleared, got %v", g.StripeInvoiceID)
+	}
+	if g.InvoiceDueAt != nil {
+		t.Fatal("invoice_due_at should be cleared")
+	}
+	campers, _ := repo.CampersForGroup(ctx, groupID)
+	if len(campers) != 2 {
+		t.Fatalf("expected 2 campers, got %d", len(campers))
+	}
+}
+
+func TestRemoveCamper_freesAllocation(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{})
+
+	groupID, _, camper2ID, _ := insertThreeCamperGroup(ctx, t, pool, domain.BillingAllocated, nil)
+	before := countTierAllocations(ctx, pool, groupID, "lodge")
+	if before != 2 {
+		t.Fatalf("lodge count before = %d, want 2", before)
+	}
+
+	_, err := svc.RemoveCamper(ctx, groupID, camper2ID, "Admin", domain.SkipVersionCheck)
+	if err != nil {
+		t.Fatalf("RemoveCamper: %v", err)
+	}
+	after := countTierAllocations(ctx, pool, groupID, "lodge")
+	if after != 1 {
+		t.Fatalf("lodge count after = %d, want 1", after)
+	}
+}
+
+func TestRemoveCamper_staleVersion(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{})
+
+	groupID, _, camper2ID, _ := insertThreeCamperGroup(ctx, t, pool, domain.BillingAllocated, nil)
+
+	_, err := svc.RemoveCamper(ctx, groupID, camper2ID, "Admin", 99)
+	var apiErr commonerrors.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "stale_state" {
+		t.Fatalf("expected stale_state, got %v", err)
+	}
+}
+
+func TestRemoveCamper_sheetFailureNonFatal(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, failingSheets{}, Config{})
+
+	groupID, _, camper2ID, _ := insertThreeCamperGroup(ctx, t, pool, domain.BillingAllocated, nil)
+
+	_, err := svc.RemoveCamper(ctx, groupID, camper2ID, "Admin", domain.SkipVersionCheck)
+	if err != nil {
+		t.Fatalf("RemoveCamper should succeed despite sheet error: %v", err)
+	}
+	campers, _ := repo.CampersForGroup(ctx, groupID)
+	if len(campers) != 2 {
+		t.Fatalf("expected 2 campers, got %d", len(campers))
 	}
 }

@@ -138,6 +138,29 @@ func postRelease(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstora
 	}
 }
 
+func deleteCamper(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body billing.VersionedBody
+		_ = request.Decode(r, &body)
+		groupID := chi.URLParam(r, "groupID")
+		camperID := chi.URLParam(r, "camperID")
+		actor := admin.ActorFrom(r.Context())
+		sum, err := svc.RemoveCamper(r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion))
+		if err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
+		gid := groupID
+		summary := "Removed " + sum.CamperName + " from " + admin.GroupSummary(g)
+		if sum.InvoiceVoided {
+			summary += "; voided open invoice"
+		}
+		admin.Audit(rec, r, adminlog.ActionCamperRemoved, &gid, summary, sum)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 func deleteRegistration(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
