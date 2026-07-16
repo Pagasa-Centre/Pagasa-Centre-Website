@@ -30,7 +30,6 @@ type Category =
   | "to_invoice"
   | "awaiting"
   | "paid"
-  | "daypass"
   | "unpaid";
 
 type TabKey = "to_allocate" | "to_invoice" | "awaiting" | "paid" | "all";
@@ -91,7 +90,6 @@ function isOverdue(g: AdminGroup): boolean {
 
 function categorize(g: AdminGroup): Category {
   if (g.payment_status !== "paid") return "unpaid";
-  if (fullWeekCampers(g).length === 0) return "daypass";
   switch (g.billing_status) {
     case "invoiced":
       return "awaiting";
@@ -101,8 +99,10 @@ function categorize(g: AdminGroup): Category {
       return "paid";
     case "allocated":
       return "to_invoice";
-    default: // "none" or "released" → still needs (re)allocation
-      return "to_allocate";
+    default: // "none" or "released"
+      // Day-pass-only groups have no accommodation to allocate, so they go
+      // straight to "ready to invoice"; everyone else needs (re)allocation.
+      return fullWeekCampers(g).length === 0 ? "to_invoice" : "to_allocate";
   }
 }
 
@@ -144,11 +144,6 @@ function statusBadge(g: AdminGroup): { label: string; className: string } {
             label: "Paid in full",
             className: "bg-green-100 text-green-800 border-green-200",
           };
-    case "daypass":
-      return {
-        label: "Day pass only",
-        className: "bg-neutral-200 text-neutral-600 border-neutral-300",
-      };
     default:
       return {
         label: "Deposit unpaid",
@@ -1693,11 +1688,7 @@ function GroupCard({
       </div>
 
       <div className="p-4 sm:p-5">
-        {fw.length === 0 ? (
-          <p className="text-sm text-neutral-500 italic">
-            Day pass only — no balance invoice needed.
-          </p>
-        ) : canEditAlloc ? (
+        {canEditAlloc ? (
           <div className="flex flex-col gap-3">
             <p className="text-sm font-semibold text-neutral-700">
               {isEditing
@@ -1812,31 +1803,59 @@ function GroupCard({
             </div>
           </div>
         ) : (
-          // Allocated / invoiced / paid → read-only summary of who's where
+          // Allocated / invoiced / paid (or day-pass-only) → read-only summary
           <div className="flex flex-col gap-3">
-            <div className="flex flex-col divide-y divide-neutral-100 border border-neutral-200 rounded-lg">
-              {fw.map((c) => (
-                <div
-                  key={c.id}
-                  className="flex items-center justify-between gap-3 p-3"
-                >
-                  <span className="font-medium text-neutral-800">
-                    {c.first_name} {c.last_name}{" "}
-                    <span className="ml-1 text-xs font-semibold text-neutral-600 bg-neutral-100 px-2 py-0.5 rounded-full">
-                      Age {c.age}
-                    </span>
-                  </span>
-                  <span className="text-sm text-neutral-700 font-semibold text-right">
-                    {accName(c.allocated_accommodation_code)}
-                    {c.allocated_unit_code && (
-                      <span className="block text-xs font-medium text-neutral-500">
-                        {unitName(c.allocated_unit_code)}
+            {fw.length > 0 && (
+              <div className="flex flex-col divide-y divide-neutral-100 border border-neutral-200 rounded-lg">
+                {fw.map((c) => (
+                  <div
+                    key={c.id}
+                    className="flex items-center justify-between gap-3 p-3"
+                  >
+                    <span className="font-medium text-neutral-800">
+                      {c.first_name} {c.last_name}{" "}
+                      <span className="ml-1 text-xs font-semibold text-neutral-600 bg-neutral-100 px-2 py-0.5 rounded-full">
+                        Age {c.age}
                       </span>
-                    )}
-                  </span>
-                </div>
-              ))}
-            </div>
+                    </span>
+                    <span className="text-sm text-neutral-700 font-semibold text-right">
+                      {accName(c.allocated_accommodation_code)}
+                      {c.allocated_unit_code && (
+                        <span className="block text-xs font-medium text-neutral-500">
+                          {unitName(c.allocated_unit_code)}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {g.campers.some((c) => c.attendance_type === "day_pass") && (
+              <div className="flex flex-col divide-y divide-neutral-100 border border-neutral-200 rounded-lg">
+                {g.campers
+                  .filter((c) => c.attendance_type === "day_pass")
+                  .map((c) => {
+                    const days = c.day_pass_days?.length ?? 0;
+                    return (
+                      <div
+                        key={c.id}
+                        className="flex items-center justify-between gap-3 p-3"
+                      >
+                        <span className="font-medium text-neutral-800">
+                          {c.first_name} {c.last_name}{" "}
+                          <span className="ml-1 text-xs font-semibold text-neutral-600 bg-neutral-100 px-2 py-0.5 rounded-full">
+                            Age {c.age}
+                          </span>
+                        </span>
+                        <span className="text-sm text-neutral-700 font-semibold text-right">
+                          Day pass ({days} {days === 1 ? "day" : "days"})
+                        </span>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
 
             {cat === "to_invoice" && (
               <div className="flex flex-wrap items-center gap-2">
@@ -1860,24 +1879,30 @@ function GroupCard({
                   >
                     {busy === `inv-${g.id}`
                       ? "Sending…"
-                      : "Send balance invoice"}
+                      : fw.length === 0
+                        ? "Send day-pass invoice"
+                        : "Send balance invoice"}
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={onEdit}
-                  className="px-4 py-2.5 text-sm font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100"
-                >
-                  Edit allocation
-                </button>
-                <button
-                  type="button"
-                  disabled={busy === `reset-${g.id}`}
-                  onClick={onReset}
-                  className="px-4 py-2.5 text-sm font-semibold text-red-700 bg-white border border-red-200 rounded-lg hover:bg-red-50"
-                >
-                  Reset allocation
-                </button>
+                {fw.length > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={onEdit}
+                      className="px-4 py-2.5 text-sm font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100"
+                    >
+                      Edit allocation
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy === `reset-${g.id}`}
+                      onClick={onReset}
+                      className="px-4 py-2.5 text-sm font-semibold text-red-700 bg-white border border-red-200 rounded-lg hover:bg-red-50"
+                    >
+                      Reset allocation
+                    </button>
+                  </>
+                )}
                 {!g.is_free && (
                   <span className="text-xs text-neutral-500">
                     Stripe will email a secure payment link.

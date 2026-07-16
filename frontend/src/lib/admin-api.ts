@@ -100,6 +100,7 @@ export type AdminCamper = {
   age: number;
   accommodation_first_choice?: string | null;
   accommodation_second_choice?: string | null;
+  day_pass_days?: string[] | null;
   allocated_accommodation_code?: string | null;
   allocated_unit_code?: string | null;
   billed_stripe_price_id?: string | null;

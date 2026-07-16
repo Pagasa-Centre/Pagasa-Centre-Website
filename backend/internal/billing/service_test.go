@@ -73,6 +73,65 @@ func TestBalanceInvoiceItemsIncludesUnit(t *testing.T) {
 	}
 }
 
+func TestBalanceInvoiceItemsIncludesDayPass(t *testing.T) {
+	items := balanceInvoiceItems(
+		[]domain.Camper{
+			{
+				FirstName:                  "Josh",
+				LastName:                   "Basco",
+				AttendanceType:             domain.AttendanceFullWeek,
+				AllocatedAccommodationCode: strPtr("lodge"),
+			},
+			{
+				FirstName:      "Sam",
+				LastName:       "Visitor",
+				AttendanceType: domain.AttendanceDayPass,
+				DayPassDays:    []string{"mon", "tue"},
+			},
+			{
+				FirstName:      "Solo",
+				LastName:       "Day",
+				AttendanceType: domain.AttendanceDayPass,
+				DayPassDays:    []string{"wed"},
+			},
+		},
+		map[string]string{"lodge": "Lodge"},
+		map[string]string{},
+	)
+	if len(items) != 3 {
+		t.Fatalf("items = %v, want 3", items)
+	}
+	if items[0] != "Josh Basco — Lodge" {
+		t.Errorf("full-week line = %q", items[0])
+	}
+	if items[1] != "Sam Visitor — Day pass (2 days)" {
+		t.Errorf("day-pass line = %q, want plural", items[1])
+	}
+	if items[2] != "Solo Day — Day pass (1 day)" {
+		t.Errorf("day-pass line = %q, want singular", items[2])
+	}
+}
+
+func TestDayPassLine(t *testing.T) {
+	line, ok := dayPassLine(domain.Camper{
+		AttendanceType: domain.AttendanceDayPass,
+		DayPassDays:    []string{"mon", "tue", "wed"},
+	}, "price_day")
+	if !ok {
+		t.Fatal("expected a day-pass line")
+	}
+	if line.PriceID != "price_day" || line.Quantity != 3 {
+		t.Fatalf("got %+v, want {price_day 3}", line)
+	}
+
+	if _, ok := dayPassLine(domain.Camper{AttendanceType: domain.AttendanceFullWeek}, "price_day"); ok {
+		t.Error("full-week camper should not produce a day-pass line")
+	}
+	if _, ok := dayPassLine(domain.Camper{AttendanceType: domain.AttendanceDayPass}, "price_day"); ok {
+		t.Error("day-pass camper with no days should not produce a line")
+	}
+}
+
 func TestValidateAllocatedUnit_blankAllowed(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	repo := storage.NewRepository(pool)
@@ -444,7 +503,7 @@ type stubStripe struct {
 func (s *stubStripe) EnsureCustomer(context.Context, string, string, string, string) (string, error) {
 	return "", errors.New("unexpected EnsureCustomer")
 }
-func (s *stubStripe) CreateInvoice(context.Context, string, string, []string, int64) (InvoiceResult, error) {
+func (s *stubStripe) CreateInvoice(context.Context, string, string, []InvoiceLine, int64) (InvoiceResult, error) {
 	return InvoiceResult{}, errors.New("unexpected CreateInvoice")
 }
 func (s *stubStripe) VoidInvoice(ctx context.Context, invoiceID string) error {

@@ -40,6 +40,13 @@ func (s *StripeBilling) EnsureCustomer(ctx context.Context, existingID, email, n
 	return c.ID, nil
 }
 
+// InvoiceLine is one billed item: a Stripe Price and how many units of it.
+// Quantity < 1 is treated as 1.
+type InvoiceLine struct {
+	PriceID  string
+	Quantity int64
+}
+
 // InvoiceResult is the outcome of creating/looking up a balance invoice.
 type InvoiceResult struct {
 	ID             string
@@ -59,7 +66,7 @@ func (s *StripeBilling) CreateInvoice(
 	ctx context.Context,
 	customerID string,
 	groupID string,
-	priceIDs []string,
+	lines []InvoiceLine,
 	daysUntilDue int64,
 ) (InvoiceResult, error) {
 	// Create the draft invoice FIRST, then attach each line item directly to it
@@ -84,20 +91,25 @@ func (s *StripeBilling) CreateInvoice(
 		return InvoiceResult{}, fmt.Errorf("create invoice: %w", err)
 	}
 
-	for _, priceID := range priceIDs {
-		if priceID == "" {
+	for _, line := range lines {
+		if line.PriceID == "" {
 			continue
+		}
+		qty := line.Quantity
+		if qty < 1 {
+			qty = 1
 		}
 		itemParams := &stripe.InvoiceItemParams{
 			Customer: stripe.String(customerID),
 			Pricing: &stripe.InvoiceItemPricingParams{
-				Price: stripe.String(priceID),
+				Price: stripe.String(line.PriceID),
 			},
-			Invoice: stripe.String(inv.ID),
+			Quantity: stripe.Int64(qty),
+			Invoice:  stripe.String(inv.ID),
 		}
 		itemParams.Context = ctx
 		if _, err := invoiceitem.New(itemParams); err != nil {
-			return InvoiceResult{}, fmt.Errorf("create invoice item for price %s: %w", priceID, err)
+			return InvoiceResult{}, fmt.Errorf("create invoice item for price %s: %w", line.PriceID, err)
 		}
 	}
 

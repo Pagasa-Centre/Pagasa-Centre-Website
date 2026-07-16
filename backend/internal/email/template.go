@@ -383,7 +383,7 @@ const depositConfirmationHTML = `<!DOCTYPE html>
   {{else if .IsFree}}
   <p>Thank you for registering {{.CamperCount}} camper{{if ne .CamperCount 1}}s{{end}} for <strong>PC Summer Camp 2026</strong>. Your registration is fully sponsored by the church — there is nothing to pay.</p>
   {{else}}
-  <p>Thank you for registering {{.CamperCount}} camper{{if ne .CamperCount 1}}s{{end}} for <strong>PC Summer Camp 2026</strong>. Day-pass attendance doesn't require a deposit — any catering or t-shirt fees will be settled directly with the camp team.</p>
+  <p>Thank you for registering {{.CamperCount}} camper{{if ne .CamperCount 1}}s{{end}} for <strong>PC Summer Camp 2026</strong>. Day-pass attendance is charged at £40 per day. The White Team will email you an invoice to pay online — there's nothing to pay right now.</p>
   {{end}}
 
   <h2 style="font-size: 16px; margin: 24px 0 8px;">What happens next</h2>

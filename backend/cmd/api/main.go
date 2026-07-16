@@ -112,6 +112,7 @@ func main() {
 
 	billCfg := billing.Config{
 		StripePriceChildUnder3: cfg.StripePriceChildUnder3,
+		StripePriceDayPass:     cfg.StripePriceDayPass,
 		InvoiceDueDays:         cfg.InvoiceDueDays,
 		WhiteTeamEmail:         cfg.WhiteTeamEmail,
 	}

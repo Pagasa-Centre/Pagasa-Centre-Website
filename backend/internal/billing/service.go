@@ -18,7 +18,7 @@ import (
 // stripeClient is the Stripe surface billing.Service needs. *StripeBilling satisfies it.
 type stripeClient interface {
 	EnsureCustomer(ctx context.Context, existingID, email, name, groupID string) (string, error)
-	CreateInvoice(ctx context.Context, customerID, groupID string, priceIDs []string, daysUntilDue int64) (InvoiceResult, error)
+	CreateInvoice(ctx context.Context, customerID, groupID string, lines []InvoiceLine, daysUntilDue int64) (InvoiceResult, error)
 	VoidInvoice(ctx context.Context, invoiceID string) error
 	VoidInvoiceIdempotent(ctx context.Context, invoiceID string) error
 	SendInvoiceEmail(ctx context.Context, invoiceID string) error
@@ -225,40 +225,62 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 	if g.PaymentStatus != domain.PaymentPaid {
 		return commonerrors.BadRequest("deposit must be paid first", nil)
 	}
+	campers, err := s.repo.CampersForGroup(ctx, groupID)
+	if err != nil {
+		return commonerrors.Internal(err.Error())
+	}
+	hasFullWeek := false
+	for _, c := range campers {
+		if c.AttendanceType == domain.AttendanceFullWeek {
+			hasFullWeek = true
+			break
+		}
+	}
+
 	switch g.BillingStatus {
 	case domain.BillingBalancePaid:
 		return commonerrors.BadRequest("balance already paid", nil)
 	case domain.BillingInvoiced:
 		return commonerrors.BadRequest("invoice already sent", nil)
 	case domain.BillingNone, domain.BillingReleased:
-		return commonerrors.BadRequest("group must be allocated before invoicing", nil)
+		// Full-week campers must be allocated before invoicing. Day-pass-only
+		// groups have no accommodation to allocate, so they invoice straight
+		// from "none".
+		if hasFullWeek {
+			return commonerrors.BadRequest("group must be allocated before invoicing", nil)
+		}
 	}
 
-	campers, err := s.repo.CampersForGroup(ctx, groupID)
-	if err != nil {
-		return commonerrors.Internal(err.Error())
-	}
-	var priceIDs []string
+	var lines []InvoiceLine
 	for _, c := range campers {
-		if c.AttendanceType != domain.AttendanceFullWeek {
-			continue
+		switch c.AttendanceType {
+		case domain.AttendanceFullWeek:
+			if c.AllocatedAccommodationCode == nil || strings.TrimSpace(*c.AllocatedAccommodationCode) == "" {
+				return commonerrors.BadRequest(fmt.Sprintf("camper %s %s is not allocated", c.FirstName, c.LastName), nil)
+			}
+			// Re-resolve the Stripe Price from the CURRENT accommodation config at
+			// send time rather than replaying the value stored when the allocation
+			// was first saved. This self-heals when Price IDs are corrected after
+			// allocation (e.g. env vars set later), instead of erroring on a stale
+			// "No such price".
+			priceID, err := s.resolvePriceID(ctx, strings.TrimSpace(*c.AllocatedAccommodationCode), c.Age)
+			if err != nil {
+				return commonerrors.BadRequest(err.Error(), nil)
+			}
+			lines = append(lines, InvoiceLine{PriceID: priceID, Quantity: 1})
+		case domain.AttendanceDayPass:
+			line, ok := dayPassLine(c, s.cfg.StripePriceDayPass)
+			if !ok {
+				continue
+			}
+			if line.PriceID == "" {
+				return commonerrors.BadRequest("STRIPE_PRICE_DAY_PASS is not configured", nil)
+			}
+			lines = append(lines, line)
 		}
-		if c.AllocatedAccommodationCode == nil || strings.TrimSpace(*c.AllocatedAccommodationCode) == "" {
-			return commonerrors.BadRequest(fmt.Sprintf("camper %s %s is not allocated", c.FirstName, c.LastName), nil)
-		}
-		// Re-resolve the Stripe Price from the CURRENT accommodation config at
-		// send time rather than replaying the value stored when the allocation
-		// was first saved. This self-heals when Price IDs are corrected after
-		// allocation (e.g. env vars set later), instead of erroring on a stale
-		// "No such price".
-		priceID, err := s.resolvePriceID(ctx, strings.TrimSpace(*c.AllocatedAccommodationCode), c.Age)
-		if err != nil {
-			return commonerrors.BadRequest(err.Error(), nil)
-		}
-		priceIDs = append(priceIDs, priceID)
 	}
-	if len(priceIDs) == 0 {
-		return commonerrors.BadRequest("no full-week campers to invoice", nil)
+	if len(lines) == 0 {
+		return commonerrors.BadRequest("nothing to invoice", nil)
 	}
 
 	customerID := ""
@@ -277,7 +299,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 	}
 
 	res, err := s.stripe.CreateInvoice(
-		ctx, customerID, g.ID, priceIDs, int64(s.cfg.InvoiceDueDays))
+		ctx, customerID, g.ID, lines, int64(s.cfg.InvoiceDueDays))
 	if err != nil {
 		return commonerrors.Internal(err.Error())
 	}
@@ -702,9 +724,33 @@ func (s *Service) unitNames(ctx context.Context) map[string]string {
 
 // balanceInvoiceItems produces one "Name — Accommodation [Unit]" line per
 // full-week camper, for the invoice email body.
+// dayPassLine returns the invoice line for a day-pass camper: the day-pass
+// price charged once per selected day. ok is false for non-day-pass campers or
+// when no days are recorded (validation guarantees >=1; defensive).
+func dayPassLine(c domain.Camper, priceID string) (InvoiceLine, bool) {
+	if c.AttendanceType != domain.AttendanceDayPass {
+		return InvoiceLine{}, false
+	}
+	if len(c.DayPassDays) == 0 {
+		return InvoiceLine{}, false
+	}
+	return InvoiceLine{PriceID: priceID, Quantity: int64(len(c.DayPassDays))}, true
+}
+
 func balanceInvoiceItems(campers []domain.Camper, accNames, unitNames map[string]string) []string {
 	var items []string
 	for _, c := range campers {
+		if c.AttendanceType == domain.AttendanceDayPass {
+			if n := len(c.DayPassDays); n > 0 {
+				unit := "day"
+				if n != 1 {
+					unit = "days"
+				}
+				items = append(items, fmt.Sprintf("%s %s — Day pass (%d %s)",
+					c.FirstName, c.LastName, n, unit))
+			}
+			continue
+		}
 		if c.AttendanceType != domain.AttendanceFullWeek {
 			continue
 		}
