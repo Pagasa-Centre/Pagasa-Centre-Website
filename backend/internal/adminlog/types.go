@@ -25,6 +25,7 @@ const (
 	ActionInvoiceSent         = "invoice_sent"
 	ActionInvoiceResent       = "invoice_resent"
 	ActionRelease             = "release"
+	ActionCancel              = "cancel"
 	ActionExtendDue           = "extend_due"
 	ActionContactUpdated      = "contact_updated"
 	ActionRegistrationsToggle = "registrations_toggle"

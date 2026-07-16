@@ -116,21 +116,24 @@ func postUnallocate(svc *billing.Service, rec *adminlog.Recorder, regRepo *regst
 	}
 }
 
-func postRelease(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+func postRelease(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository, cancelled bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
 		actor := admin.ActorFrom(r.Context())
-		reason := "released by White Team"
-		if err := svc.VoidAndRelease(r.Context(), groupID, reason, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
+		reason, verb, action := "released by White Team", "Released", adminlog.ActionRelease
+		if cancelled {
+			reason, verb, action = "cancelled by White Team", "Cancelled", adminlog.ActionCancel
+		}
+		if err := svc.VoidAndRelease(r.Context(), groupID, reason, actor,
+			billing.ExpectedVersion(body.ExpectedVersion), cancelled); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
 		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
 		gid := groupID
-		admin.Audit(rec, r, adminlog.ActionRelease, &gid,
-			"Released allocation for "+admin.GroupSummary(g), nil)
+		admin.Audit(rec, r, action, &gid, verb+" allocation for "+admin.GroupSummary(g), nil)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

@@ -81,6 +81,21 @@ func renderAllocationReleased(p AllocationReleased) (subject, htmlBody string, e
 	for _, n := range p.CamperNames {
 		names += "<li>" + template.HTMLEscapeString(n) + "</li>"
 	}
+	if p.Cancelled {
+		htmlBody = fmt.Sprintf(`<!DOCTYPE html><html><body style="font-family:sans-serif;color:#333">
+<p>Dear %s,</p>
+<p>Your accommodation allocation for PC Summer Camp 2026 has been released by the White Team for one of the following reasons:</p>
+<ol>
+  <li>You chose a different accommodation option from the one originally assigned to you.</li>
+  <li>There was a minor error in your invoice.</li>
+</ol>
+<ul>%s</ul>
+<p>A revised invoice will be issued to you shortly.</p>
+<p>Thank you for your patience and understanding!</p>
+<p>God bless,<br>Pag-Asa Centre</p>
+</body></html>`, template.HTMLEscapeString(p.ToName), names)
+		return subject, htmlBody, nil
+	}
 	reason := template.HTMLEscapeString(p.Reason)
 	htmlBody = fmt.Sprintf(`<!DOCTYPE html><html><body style="font-family:sans-serif;color:#333">
 <p>Dear %s,</p>

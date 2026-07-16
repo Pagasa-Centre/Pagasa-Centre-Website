@@ -98,6 +98,7 @@ type AllocationReleased struct {
 	ToName      string
 	CamperNames []string
 	Reason      string
+	Cancelled   bool // true = "Cancel" button (new copy); false = "Release" button + cron
 }
 
 // WhiteTeamNotification is an internal ops email to WHITE_TEAM_EMAIL.

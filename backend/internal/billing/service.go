@@ -383,7 +383,7 @@ func (s *Service) sendSponsorshipConfirmedEmail(ctx context.Context, g *domain.G
 }
 
 // VoidAndRelease voids the Stripe invoice (if any) and clears allocations.
-func (s *Service) VoidAndRelease(ctx context.Context, groupID, reason, actor string, expectedVersion int) error {
+func (s *Service) VoidAndRelease(ctx context.Context, groupID, reason, actor string, expectedVersion int, cancelled bool) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
 		return commonerrors.Internal(err.Error())
@@ -398,9 +398,13 @@ func (s *Service) VoidAndRelease(ctx context.Context, groupID, reason, actor str
 			// Continue — DB release still needed if Stripe already void/paid.
 		}
 	}
+	action := "released"
+	if cancelled {
+		action = "cancel"
+	}
 	meta := domain.ActionMeta{
 		Actor:           actor,
-		Action:          "released",
+		Action:          action,
 		ExpectedVersion: expectedVersion,
 	}
 	if err := s.repo.ClearInvoiceAndReleaseMeta(ctx, groupID, meta); err != nil {
@@ -414,6 +418,7 @@ func (s *Service) VoidAndRelease(ctx context.Context, groupID, reason, actor str
 		ToName:      g.ContactFirstName,
 		CamperNames: names,
 		Reason:      reason,
+		Cancelled:   cancelled,
 	}); err != nil {
 		log.Printf("billing: allocation released email to %s: %v", g.ContactEmail, err)
 	}
@@ -650,7 +655,7 @@ func (s *Service) SweepOverdue(ctx context.Context) (int, error) {
 	}
 	n := 0
 	for _, g := range overdue {
-		if err := s.VoidAndRelease(ctx, g.ID, "unpaid after invoice due date", "system", domain.SkipVersionCheck); err != nil {
+		if err := s.VoidAndRelease(ctx, g.ID, "unpaid after invoice due date", "system", domain.SkipVersionCheck, false); err != nil {
 			log.Printf("billing: sweep release group %s: %v", g.ID, err)
 			continue
 		}

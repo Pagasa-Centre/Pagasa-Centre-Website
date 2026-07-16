@@ -307,6 +307,12 @@ export const adminApi = {
       body: JSON.stringify({ expected_version: expectedVersion }),
     }),
 
+  cancel: (groupId: string, expectedVersion: number) =>
+    adminFetch<void>(`/admin/registrations/${groupId}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({ expected_version: expectedVersion }),
+    }),
+
   deleteRegistration: (groupId: string, expectedVersion: number) =>
     adminFetch<void>(`/admin/registrations/${groupId}/delete`, {
       method: "POST",

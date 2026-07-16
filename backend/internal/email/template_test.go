@@ -205,6 +205,62 @@ func TestRenderAccommodationChanged(t *testing.T) {
 	}
 }
 
+func TestRenderAllocationReleased_Cancelled(t *testing.T) {
+	subject, body, err := renderAllocationReleased(AllocationReleased{
+		ToEmail:     "family@example.com",
+		ToName:      "Bianca",
+		CamperNames: []string{"Bianca Test"},
+		Cancelled:   true,
+	})
+	if err != nil {
+		t.Fatalf("renderAllocationReleased: %v", err)
+	}
+	if !strings.Contains(subject, "accommodation allocation released") {
+		t.Errorf("unexpected subject %q", subject)
+	}
+	for _, want := range []string{
+		"released by the White Team",
+		"You chose a different accommodation option",
+		"A revised invoice will be issued",
+		"Bianca Test",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body should contain %q", want)
+		}
+	}
+	if strings.Contains(body, "not paid by the due date") {
+		t.Errorf("cancelled body should not contain overdue wording")
+	}
+}
+
+func TestRenderAllocationReleased_Released(t *testing.T) {
+	subject, body, err := renderAllocationReleased(AllocationReleased{
+		ToEmail:     "family@example.com",
+		ToName:      "Bianca",
+		CamperNames: []string{"Bianca Test"},
+		Reason:      "released by White Team",
+		Cancelled:   false,
+	})
+	if err != nil {
+		t.Fatalf("renderAllocationReleased: %v", err)
+	}
+	if !strings.Contains(subject, "accommodation allocation released") {
+		t.Errorf("unexpected subject %q", subject)
+	}
+	for _, want := range []string{
+		"not paid by the due date",
+		"released by White Team",
+		"Bianca Test",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body should contain %q", want)
+		}
+	}
+	if strings.Contains(body, "A revised invoice will be issued") {
+		t.Errorf("release body should not contain cancel wording")
+	}
+}
+
 func TestFormatPence(t *testing.T) {
 	cases := []struct {
 		pence    int

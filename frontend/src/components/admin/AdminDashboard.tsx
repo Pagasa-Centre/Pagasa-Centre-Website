@@ -191,6 +191,7 @@ const LAST_ACTION_LABELS: Record<string, string> = {
   invoice_sent: "Invoiced",
   invoice_resent: "Invoice re-sent",
   release: "Released",
+  cancel: "Cancelled",
   extend_due: "Due date extended",
   contact_updated: "Contact updated",
   balance_paid: "Balance paid",
@@ -536,6 +537,30 @@ export default function AdminDashboard() {
       await load();
     } catch (err) {
       await handleAdminError(err, "Bulk send failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function cancelGroup(g: AdminGroup) {
+    if (
+      !confirm(
+        `Cancel this allocation for ${g.contact_first_name} ${g.contact_last_name}?\n\nThis voids their current invoice and emails them that a revised invoice is coming.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(`cancel-${g.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await adminApi.cancel(g.id, g.version);
+      setNotice(
+        `Cancelled ${g.contact_first_name}'s allocation — revised-invoice email sent.`,
+      );
+      await load();
+    } catch (err) {
+      await handleAdminError(err, "Cancel failed.");
     } finally {
       setBusy(null);
     }
@@ -1158,6 +1183,7 @@ export default function AdminDashboard() {
               onConfirmFree={() => confirmFreeGroup(g)}
               onResend={() => resendInvoice(g)}
               onExtend={() => extendDue(g)}
+              onCancel={() => cancelGroup(g)}
               onRelease={() => releaseGroup(g)}
               onDelete={() => deleteRegistration(g)}
             />
@@ -1453,6 +1479,7 @@ function GroupCard({
   onConfirmFree,
   onResend,
   onExtend,
+  onCancel,
   onRelease,
   onDelete,
 }: {
@@ -1483,6 +1510,7 @@ function GroupCard({
   onConfirmFree: () => void;
   onResend: () => void;
   onExtend: () => void;
+  onCancel: () => void;
   onRelease: () => void;
   onDelete: () => void;
 }) {
@@ -1887,11 +1915,19 @@ function GroupCard({
                   </button>
                   <button
                     type="button"
+                    disabled={busy === `cancel-${g.id}`}
+                    onClick={onCancel}
+                    className="px-4 py-2 text-sm font-semibold text-amber-700 bg-white border border-amber-200 rounded-lg hover:bg-amber-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
                     disabled={busy === `rel-${g.id}`}
                     onClick={onRelease}
                     className="px-4 py-2 text-sm font-semibold text-red-700 bg-white border border-red-200 rounded-lg hover:bg-red-50"
                   >
-                    Cancel & release
+                    Release
                   </button>
                 </div>
               </div>
