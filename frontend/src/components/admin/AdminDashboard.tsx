@@ -1673,12 +1673,38 @@ function ConvertDayVisitorPanel({
   onConfirm: (data: ConvertDayVisitorData) => void;
   onCancel: () => void;
 }) {
+  // Pre-fill from the camper's original selections so the White Team only has
+  // to pick the days. A full-week camper always has a real shirt size and (as
+  // part of the package) a T-shirt and catering, so we default to a
+  // shirt-requiring option with their size and catering on — honoring any
+  // explicitly stored day-pass values if they somehow exist.
+  const initialShirtSize =
+    camper.shirt_size && camper.shirt_size !== SHIRT_SIZE_NOT_APPLICABLE
+      ? camper.shirt_size
+      : "";
+  const initialTshirt: "" | "team_activities" | "tshirt_only" | "none" =
+    camper.day_pass_tshirt_option === "team_activities" ||
+    camper.day_pass_tshirt_option === "tshirt_only" ||
+    camper.day_pass_tshirt_option === "none"
+      ? camper.day_pass_tshirt_option
+      : initialShirtSize
+        ? "team_activities"
+        : "none";
+  const initialCatering =
+    typeof camper.day_pass_needs_catering === "boolean"
+      ? camper.day_pass_needs_catering
+      : true;
+
   const [days, setDays] = useState<string[]>([]);
   const [tshirtOption, setTshirtOption] = useState<
     "" | "team_activities" | "tshirt_only" | "none"
-  >("");
-  const [shirtSize, setShirtSize] = useState("");
-  const [needsCatering, setNeedsCatering] = useState<boolean | null>(null);
+  >(initialTshirt);
+  const [shirtSize, setShirtSize] = useState(
+    initialTshirt === "none" ? SHIRT_SIZE_NOT_APPLICABLE : initialShirtSize,
+  );
+  const [needsCatering, setNeedsCatering] = useState<boolean | null>(
+    initialCatering,
+  );
 
   const canSubmit =
     days.length > 0 &&
