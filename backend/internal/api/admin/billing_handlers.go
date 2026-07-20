@@ -221,9 +221,8 @@ func postConvertDayVisitor(svc *billing.Service, rec *adminlog.Recorder, regRepo
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
 		gid := groupID
-		summary := "Converted " + sum.CamperName + " to day visitor for " + admin.GroupSummary(g)
+		summary := "Converted " + sum.CamperName + " to day visitor"
 		if sum.InvoiceVoided {
 			summary += "; voided open invoice"
 		}

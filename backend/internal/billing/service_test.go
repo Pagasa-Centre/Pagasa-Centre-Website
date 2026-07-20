@@ -1514,6 +1514,20 @@ func TestConvertCamperToDayVisitor_allocated(t *testing.T) {
 	if converted.DepositCreditPence != 5000 {
 		t.Fatalf("deposit_credit_pence = %d", converted.DepositCreditPence)
 	}
+	if converted.DayPassTshirtOption == nil || *converted.DayPassTshirtOption != domain.TshirtOptionNone {
+		t.Fatalf("day_pass_tshirt_option = %v", converted.DayPassTshirtOption)
+	}
+	if converted.DayPassNeedsCatering == nil || !*converted.DayPassNeedsCatering {
+		t.Fatalf("day_pass_needs_catering = %v", converted.DayPassNeedsCatering)
+	}
+
+	g, err := repo.FindGroupByID(ctx, groupID)
+	if err != nil || g == nil {
+		t.Fatalf("FindGroupByID: %v", err)
+	}
+	if g.Version != 2 {
+		t.Fatalf("version = %d, want 2", g.Version)
+	}
 }
 
 func TestConvertCamperToDayVisitor_multiConvertTwoCredits(t *testing.T) {
@@ -1585,6 +1599,51 @@ func TestConvertCamperToDayVisitor_invoicedVoidsAndReverts(t *testing.T) {
 	}
 	if g.StripeInvoiceID != nil {
 		t.Fatal("stripe_invoice_id should be cleared")
+	}
+}
+
+func TestConvertCamperToDayVisitor_invoicedRevertsToNoneWhenDayPassOnly(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	stub := &stubStripe{
+		voidInvIdem: func(context.Context, string) error { return nil },
+		ensureCust: func(_ context.Context, _, _, _, _ string) (string, error) {
+			return "cus_none", nil
+		},
+	}
+	svc := NewService(repo, stub, nil, nil, Config{DepositPricePence: 5000})
+
+	var groupID, camperID string
+	inv := "in_solo"
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, stripe_payment_intent_id, stripe_invoice_id,
+			total_amount_pence, currency, billing_status, version
+		) VALUES ('Solo', 'Camper', 'solo@example.com', '07000000000', 'paid', 'pi_test', $1, 5000, 'GBP', 'invoiced', 1)
+		RETURNING id`, inv).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+	err = pool.QueryRow(ctx, `
+		INSERT INTO registrations (
+			group_id, is_main_contact, first_name, last_name, gender, age,
+			cell_leader_name, is_cell_leader, attendance_type,
+			allocated_accommodation_code
+		) VALUES ($1, true, 'Solo', 'Camper', 'male', 25, 'Leader', false, 'full_week', 'lodge')
+		RETURNING id`, groupID).Scan(&camperID)
+	if err != nil {
+		t.Fatalf("insert camper: %v", err)
+	}
+
+	_, err = svc.ConvertCamperToDayVisitor(ctx, groupID, camperID, "Admin", 1, validConvertRequest())
+	if err != nil {
+		t.Fatalf("ConvertCamperToDayVisitor: %v", err)
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g == nil || g.BillingStatus != domain.BillingNone {
+		t.Fatalf("billing_status = %v, want none", g)
 	}
 }
 
