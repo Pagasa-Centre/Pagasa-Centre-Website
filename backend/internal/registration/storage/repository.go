@@ -45,7 +45,8 @@ const camperSelectCols = `
 	shirt_size, dietary_requirements, needs_coach,
 	accommodation_first_choice, accommodation_second_choice, roommate_requests,
 	day_pass_days, day_pass_tshirt_option, day_pass_needs_catering,
-	allocated_accommodation_code, allocated_unit_code, billed_stripe_price_id, created_at`
+	allocated_accommodation_code, allocated_unit_code, billed_stripe_price_id,
+	deposit_credit_pence, created_at`
 
 func scanCamper(row pgx.Row) (domain.Camper, error) {
 	var c domain.Camper
@@ -55,7 +56,8 @@ func scanCamper(row pgx.Row) (domain.Camper, error) {
 		&c.ShirtSize, &c.DietaryRequirements, &c.NeedsCoach,
 		&c.AccommodationFirstChoice, &c.AccommodationSecondChoice, &c.RoommateRequests,
 		&c.DayPassDays, &c.DayPassTshirtOption, &c.DayPassNeedsCatering,
-		&c.AllocatedAccommodationCode, &c.AllocatedUnitCode, &c.BilledStripePriceID, &c.CreatedAt,
+		&c.AllocatedAccommodationCode, &c.AllocatedUnitCode, &c.BilledStripePriceID,
+		&c.DepositCreditPence, &c.CreatedAt,
 	)
 	return c, err
 }

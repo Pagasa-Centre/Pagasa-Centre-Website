@@ -31,3 +31,12 @@ type ExtendDueRequest struct {
 type VersionedBody struct {
 	ExpectedVersion *int `json:"expected_version,omitempty"`
 }
+
+// ConvertToDayVisitorRequest is POST .../campers/{camperID}/convert-day-visitor.
+type ConvertToDayVisitorRequest struct {
+	ExpectedVersion *int     `json:"expected_version,omitempty"`
+	Days            []string `json:"days"`
+	TshirtOption    string   `json:"tshirt_option"`
+	ShirtSize       string   `json:"shirt_size"`
+	NeedsCatering   *bool    `json:"needs_catering"`
+}

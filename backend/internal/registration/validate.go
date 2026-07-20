@@ -61,7 +61,7 @@ func Validate(req domain.SubmitRequest) error {
 		case domain.AttendanceFullWeek:
 			validateFullWeek(prefix+".attendance", c.Attendance, c.Age, fields)
 		case domain.AttendanceDayPass:
-			validateDayPass(prefix+".attendance", c.Attendance, fields)
+			ValidateDayPass(prefix+".attendance", c.Attendance, fields)
 		default:
 			fields[prefix+".attendance.type"] = "must be 'full_week' or 'day_pass'"
 		}
@@ -114,7 +114,7 @@ func validateFullWeek(prefix string, a domain.AttendanceDTO, age int, fields map
 	}
 }
 
-func validateDayPass(prefix string, a domain.AttendanceDTO, fields map[string]string) {
+func ValidateDayPass(prefix string, a domain.AttendanceDTO, fields map[string]string) {
 	if len(a.Days) == 0 {
 		fields[prefix+".days"] = "select at least one day"
 	}

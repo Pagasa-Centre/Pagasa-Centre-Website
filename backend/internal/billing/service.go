@@ -25,6 +25,7 @@ type stripeClient interface {
 	GetInvoice(ctx context.Context, invoiceID string) (InvoiceResult, error)
 	RefundPaymentIntent(ctx context.Context, paymentIntentID string) (int64, error)
 	RefundInvoice(ctx context.Context, invoiceID string) (int64, error)
+	CreditCustomerBalance(ctx context.Context, customerID string, amountPence int64, currency, description, idempotencyKey string) error
 }
 
 // Service coordinates allocation, Stripe Invoices, and release sweeps.
@@ -701,6 +702,174 @@ func (s *Service) RemoveCamper(ctx context.Context, groupID, camperID, actor str
 				rows := sheetRowsForGroup(gAfter, remaining)
 				if err := s.sheets.AppendPaidAndRemovePending(ctx, groupID, rows); err != nil {
 					log.Printf("billing: re-sync sheet for group %s after camper remove: %v", groupID, err)
+				}
+			}
+		}
+	}
+
+	return summary, nil
+}
+
+// ConvertSummary captures the outcome of converting a full-week camper to day-visitor.
+type ConvertSummary struct {
+	CamperName       string
+	InvoiceVoided    bool
+	DepositCreditPence int
+}
+
+// ConvertCamperToDayVisitor rewrites one full-week camper as a day-visitor in place.
+// A Stripe customer-balance credit is applied immediately when the deposit was paid.
+func (s *Service) ConvertCamperToDayVisitor(
+	ctx context.Context,
+	groupID, camperID, actor string,
+	expectedVersion int,
+	req ConvertToDayVisitorRequest,
+) (ConvertSummary, error) {
+	g, err := s.repo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		return ConvertSummary{}, commonerrors.Internal(err.Error())
+	}
+	if g == nil {
+		return ConvertSummary{}, commonerrors.NotFound("group not found")
+	}
+
+	campers, err := s.repo.CampersForGroup(ctx, groupID)
+	if err != nil {
+		return ConvertSummary{}, commonerrors.Internal(err.Error())
+	}
+
+	var target *domain.Camper
+	for i := range campers {
+		if campers[i].ID == camperID {
+			target = &campers[i]
+			break
+		}
+	}
+	if target == nil {
+		return ConvertSummary{}, commonerrors.NotFound("camper not found")
+	}
+
+	summary := ConvertSummary{
+		CamperName: strings.TrimSpace(target.FirstName + " " + target.LastName),
+	}
+
+	if target.AttendanceType != domain.AttendanceFullWeek {
+		return ConvertSummary{}, commonerrors.BadRequest("only full-week campers can be converted", nil)
+	}
+	if g.IsFree {
+		return ConvertSummary{}, commonerrors.BadRequest(
+			"church-sponsored registrations can't be converted here; handle manually", nil)
+	}
+	if g.BillingStatus == domain.BillingBalancePaid {
+		return ConvertSummary{}, commonerrors.BadRequest("balance already paid; handle in Stripe first", nil)
+	}
+
+	fields := map[string]string{}
+	registration.ValidateDayPass("attendance", domain.AttendanceDTO{
+		Type:          domain.AttendanceDayPass,
+		Days:          req.Days,
+		TshirtOption:  req.TshirtOption,
+		ShirtSize:     req.ShirtSize,
+		NeedsCatering: req.NeedsCatering,
+	}, fields)
+	if len(fields) > 0 {
+		return ConvertSummary{}, commonerrors.ValidationFailed(fields)
+	}
+
+	depositCreditPence := 0
+	if g.PaymentStatus == domain.PaymentPaid && target.Age >= registration.MinDepositAge {
+		depositCreditPence = s.cfg.DepositPricePence
+	}
+	summary.DepositCreditPence = depositCreditPence
+
+	if depositCreditPence > 0 {
+		customerID := ""
+		if g.StripeCustomerID != nil {
+			customerID = *g.StripeCustomerID
+		}
+		name := strings.TrimSpace(g.ContactFirstName + " " + g.ContactLastName)
+		customerID, err = s.stripe.EnsureCustomer(ctx, customerID, g.ContactEmail, name, g.ID)
+		if err != nil {
+			return ConvertSummary{}, commonerrors.Internal(err.Error())
+		}
+		if customerID != "" && (g.StripeCustomerID == nil || *g.StripeCustomerID != customerID) {
+			if err := s.repo.SetStripeCustomerID(ctx, groupID, customerID); err != nil {
+				return ConvertSummary{}, commonerrors.Internal(err.Error())
+			}
+		}
+		if err := s.stripe.CreditCustomerBalance(
+			ctx, customerID, int64(depositCreditPence), g.Currency,
+			"Deposit credit (converted to day visitor)", "deposit-credit-"+camperID,
+		); err != nil {
+			return ConvertSummary{}, commonerrors.Internal(err.Error())
+		}
+	}
+
+	newStatus := ""
+	if g.BillingStatus == domain.BillingInvoiced && g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" {
+		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeInvoiceID); err != nil {
+			return ConvertSummary{}, commonerrors.BadRequest(
+				fmt.Sprintf("invoice void failed; camper was not converted: %v", err), nil)
+		}
+		summary.InvoiceVoided = true
+		newStatus = domain.BillingNone
+		for _, c := range campers {
+			if c.ID == camperID {
+				continue
+			}
+			if c.AttendanceType == domain.AttendanceFullWeek {
+				newStatus = domain.BillingAllocated
+				break
+			}
+		}
+	}
+
+	var shirtSize *string
+	switch req.TshirtOption {
+	case domain.TshirtOptionNone:
+		na := domain.ShirtSizeNotApplicable
+		shirtSize = &na
+	default:
+		ss := strings.TrimSpace(req.ShirtSize)
+		shirtSize = &ss
+	}
+	needsCatering := false
+	if req.NeedsCatering != nil {
+		needsCatering = *req.NeedsCatering
+	}
+
+	dp := storage.DayPassFields{
+		Days:          req.Days,
+		TshirtOption:  req.TshirtOption,
+		ShirtSize:     shirtSize,
+		NeedsCatering: needsCatering,
+		Dietary:       target.DietaryRequirements,
+	}
+
+	meta := domain.ActionMeta{
+		Actor:           actor,
+		Action:          "camper_converted",
+		ExpectedVersion: expectedVersion,
+	}
+	if err := s.repo.ConvertCamperToDayPassMeta(ctx, groupID, camperID, dp, depositCreditPence, newStatus, meta); err != nil {
+		return ConvertSummary{}, mapVersionErr(ctx, s.repo, groupID, err)
+	}
+
+	if g.PaymentStatus == domain.PaymentPaid {
+		remaining, err := s.repo.CampersForGroup(ctx, groupID)
+		if err != nil {
+			log.Printf("billing: load campers after convert %s/%s: %v", groupID, camperID, err)
+		} else {
+			gAfter, err := s.repo.FindGroupByID(ctx, groupID)
+			if err != nil || gAfter == nil {
+				log.Printf("billing: reload group after convert %s: %v", groupID, err)
+			} else {
+				if err := s.sheets.RemoveByGroupID(ctx, groupID); err != nil {
+					log.Printf("billing: remove group %s from sheet after camper convert: %v", groupID, err)
+				}
+				rows := sheetRowsForGroup(gAfter, remaining)
+				if err := s.sheets.AppendPaidAndRemovePending(ctx, groupID, rows); err != nil {
+					log.Printf("billing: re-sync sheet for group %s after camper convert: %v", groupID, err)
 				}
 			}
 		}

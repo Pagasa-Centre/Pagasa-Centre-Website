@@ -5,6 +5,7 @@ type Config struct {
 	StripePriceChildUnder3 string
 	StripePriceDayPass     string
 	StripePriceCoach       string
+	DepositPricePence      int
 	InvoiceDueDays         int
 	WhiteTeamEmail         string
 }

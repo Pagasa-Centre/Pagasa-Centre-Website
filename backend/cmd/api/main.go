@@ -110,10 +110,16 @@ func main() {
 
 	paySvc := payment.NewService(pool, regRepo, mailer, sheetSync, cfg.PublicBaseURL)
 
+	depositPence := 5000
+	if p, err := campRepo.GetPrice(ctx, "deposit"); err == nil && p.AmountPence > 0 {
+		depositPence = p.AmountPence
+	}
+
 	billCfg := billing.Config{
 		StripePriceChildUnder3: cfg.StripePriceChildUnder3,
 		StripePriceDayPass:     cfg.StripePriceDayPass,
 		StripePriceCoach:       cfg.StripePriceCoach,
+		DepositPricePence:      depositPence,
 		InvoiceDueDays:         cfg.InvoiceDueDays,
 		WhiteTeamEmail:         cfg.WhiteTeamEmail,
 	}

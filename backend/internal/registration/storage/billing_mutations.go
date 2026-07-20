@@ -294,6 +294,78 @@ func (r *Repository) DeleteCamperMeta(ctx context.Context, groupID, camperID, ne
 	return tx.Commit(ctx)
 }
 
+// DayPassFields holds day-visitor details applied during a full-week conversion.
+type DayPassFields struct {
+	Days           []string
+	TshirtOption   string
+	ShirtSize      *string
+	NeedsCatering  bool
+	Dietary        *string
+}
+
+// ConvertCamperToDayPassMeta rewrites one camper as a day-visitor, clearing
+// accommodation/coach/allocation and recording any deposit credit applied in Stripe.
+func (r *Repository) ConvertCamperToDayPassMeta(
+	ctx context.Context,
+	groupID, camperID string,
+	dp DayPassFields,
+	depositCreditPence int,
+	newBillingStatus string,
+	meta domain.ActionMeta,
+) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	if err != nil {
+		return err
+	}
+	if g == nil {
+		return fmt.Errorf("group %q not found", groupID)
+	}
+	if err := checkVersion(g, meta); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE registrations SET
+			attendance_type = 'day_pass',
+			day_pass_days = $3,
+			day_pass_tshirt_option = $4,
+			day_pass_needs_catering = $5,
+			shirt_size = $6,
+			dietary_requirements = COALESCE($7, dietary_requirements),
+			needs_coach = NULL,
+			accommodation_first_choice = NULL,
+			accommodation_second_choice = NULL,
+			roommate_requests = NULL,
+			allocated_accommodation_code = NULL,
+			allocated_unit_code = NULL,
+			billed_stripe_price_id = NULL,
+			deposit_credit_pence = $8
+		WHERE id = $1 AND group_id = $2`,
+		camperID, groupID, dp.Days, dp.TshirtOption, dp.NeedsCatering, dp.ShirtSize, dp.Dietary, depositCreditPence)
+	if err != nil {
+		return fmt.Errorf("convert camper to day pass: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("camper %q not in group %q", camperID, groupID)
+	}
+	if newBillingStatus == "" {
+		if err := stampExec(ctx, tx, groupID, meta, ""); err != nil {
+			return err
+		}
+	} else {
+		extra := `, billing_status = $3, stripe_invoice_id = NULL, invoice_due_at = NULL`
+		if err := stampExec(ctx, tx, groupID, meta, extra, newBillingStatus); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
 // DeleteGroupMeta permanently removes a registration group. Campers cascade-delete
 // via FK. Version is checked before delete so stale dashboards cannot remove a
 // concurrently modified group.

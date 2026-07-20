@@ -103,6 +103,11 @@ export type AdminCamper = {
   accommodation_first_choice?: string | null;
   accommodation_second_choice?: string | null;
   day_pass_days?: string[] | null;
+  day_pass_tshirt_option?: string | null;
+  day_pass_needs_catering?: boolean | null;
+  shirt_size?: string | null;
+  dietary_requirements?: string | null;
+  deposit_credit_pence?: number;
   allocated_accommodation_code?: string | null;
   allocated_unit_code?: string | null;
   billed_stripe_price_id?: string | null;
@@ -347,6 +352,28 @@ export const adminApi = {
       {
         method: "POST",
         body: JSON.stringify({ expected_version: expectedVersion }),
+      },
+    ),
+
+  convertToDayVisitor: (
+    groupId: string,
+    camperId: string,
+    data: {
+      days: string[];
+      tshirt_option: string;
+      shirt_size: string;
+      needs_catering: boolean;
+    },
+    expectedVersion: number,
+  ) =>
+    adminFetch<void>(
+      `/admin/registrations/${groupId}/campers/${camperId}/convert-day-visitor`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          expected_version: expectedVersion,
+          ...data,
+        }),
       },
     ),
 

@@ -15,10 +15,14 @@ import {
 } from "@/lib/admin-api";
 import {
   ACCOMMODATION_CHILD_CODE,
+  DAY_PASS_DAYS,
   MAX_CHILD_ACCOMMODATION_AGE,
   MIN_DEPOSIT_AGE,
+  SHIRT_SIZE_NOT_APPLICABLE,
   formatPence,
 } from "@/lib/camp";
+import { camp, type ShirtSize } from "@/lib/api";
+import ShirtSizeSelect from "@/components/camp/ShirtSizeSelect";
 
 type AllocState = Record<string, string>; // camperId -> accommodation tier code
 type UnitAllocState = Record<string, string>; // camperId -> unit code
@@ -239,6 +243,7 @@ const LAST_ACTION_LABELS: Record<string, string> = {
   free_confirmed: "Sponsorship confirmed",
   registration_deleted: "Registration deleted",
   camper_removed: "Camper removed",
+  camper_converted: "Converted to day visitor",
   coach_invoice_sent: "Coach invoice sent",
 };
 
@@ -272,6 +277,7 @@ export default function AdminDashboard() {
   const [streamReconnecting, setStreamReconnecting] = useState(false);
   // Group IDs whose (already-saved) allocation is being re-edited.
   const [editing, setEditing] = useState<Record<string, boolean>>({});
+  const [shirtSizes, setShirtSizes] = useState<ShirtSize[]>([]);
 
   const accName = useCallback(
     (code: string | null | undefined): string => {
@@ -292,16 +298,18 @@ export default function AdminDashboard() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [reg, acc, unitRes, cfg] = await Promise.all([
+      const [reg, acc, unitRes, cfg, sizesRes] = await Promise.all([
         adminApi.listRegistrations(),
         adminApi.accommodations(),
         adminApi.accommodationUnits(),
         adminApi.campConfig(),
+        camp.shirtSizes(),
       ]);
       setGroups(reg.groups);
       setAccommodations(acc.accommodations);
       setUnits(unitRes.units);
       setRegistrationsOpen(cfg.registrations_open);
+      setShirtSizes(sizesRes.sizes);
       const next: Record<string, AllocState> = {};
       const nextUnits: Record<string, UnitAllocState> = {};
       for (const g of reg.groups) {
@@ -702,6 +710,32 @@ export default function AdminDashboard() {
       await load();
     } catch (err) {
       await handleAdminError(err, "Remove camper failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function convertToDayVisitor(
+    g: AdminGroup,
+    c: AdminCamper,
+    data: {
+      days: string[];
+      tshirt_option: string;
+      shirt_size: string;
+      needs_catering: boolean;
+    },
+  ) {
+    setBusy(`convert-${c.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await adminApi.convertToDayVisitor(g.id, c.id, data, g.version);
+      setNotice(
+        `Converted ${c.first_name} ${c.last_name} to a day visitor.`,
+      );
+      await load();
+    } catch (err) {
+      await handleAdminError(err, "Convert to day visitor failed.");
     } finally {
       setBusy(null);
     }
@@ -1323,6 +1357,8 @@ export default function AdminDashboard() {
               onRelease={() => releaseGroup(g)}
               onDelete={() => deleteRegistration(g)}
               onRemoveCamper={(c) => removeCamperFromGroup(g, c)}
+              onConvertToDayVisitor={(c, data) => convertToDayVisitor(g, c, data)}
+              shirtSizes={shirtSizes}
               onSendCoachInvoice={() => sendCoachInvoice(g)}
             />
           ))}
@@ -1603,6 +1639,209 @@ function canRemoveCamper(g: AdminGroup, c: AdminCamper): boolean {
   );
 }
 
+function canConvertCamper(g: AdminGroup, c: AdminCamper): boolean {
+  return (
+    c.attendance_type === "full_week" &&
+    g.billing_status !== "balance_paid" &&
+    !g.is_free
+  );
+}
+
+function depositCreditEligible(g: AdminGroup, c: AdminCamper): boolean {
+  return g.payment_status === "paid" && c.age >= MIN_DEPOSIT_AGE && !g.is_free;
+}
+
+type ConvertDayVisitorData = {
+  days: string[];
+  tshirt_option: string;
+  shirt_size: string;
+  needs_catering: boolean;
+};
+
+function ConvertDayVisitorPanel({
+  camper,
+  shirtSizes,
+  busy,
+  depositEligible,
+  onConfirm,
+  onCancel,
+}: {
+  camper: AdminCamper;
+  shirtSizes: ShirtSize[];
+  busy: boolean;
+  depositEligible: boolean;
+  onConfirm: (data: ConvertDayVisitorData) => void;
+  onCancel: () => void;
+}) {
+  const [days, setDays] = useState<string[]>([]);
+  const [tshirtOption, setTshirtOption] = useState<
+    "" | "team_activities" | "tshirt_only" | "none"
+  >("");
+  const [shirtSize, setShirtSize] = useState("");
+  const [needsCatering, setNeedsCatering] = useState<boolean | null>(null);
+
+  const canSubmit =
+    days.length > 0 &&
+    tshirtOption !== "" &&
+    needsCatering !== null &&
+    (tshirtOption === "none" || shirtSize !== "");
+
+  return (
+    <div className="mt-2 w-full basis-full rounded-lg border border-amber-200 bg-amber-50 p-4 flex flex-col gap-4">
+      <p className="text-sm font-semibold text-amber-900">
+        Convert {camper.first_name} to day visitor
+      </p>
+      {depositEligible && (
+        <p className="text-xs text-amber-800">
+          Their £50 deposit will be credited toward the day-pass invoice in Stripe.
+        </p>
+      )}
+      <div className="flex flex-col gap-2">
+        <span className="text-xs font-bold uppercase tracking-widest text-neutral-700">
+          Days attending <span className="text-primary">*</span>
+        </span>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {DAY_PASS_DAYS.map((d) => {
+            const checked = days.includes(d.code);
+            return (
+              <label
+                key={d.code}
+                className={`flex items-center gap-3 p-3 border cursor-pointer text-sm text-neutral-800 transition-colors ${
+                  checked
+                    ? "bg-primary/5 border-primary"
+                    : "bg-white border-neutral-300 hover:border-primary/60"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) => {
+                    setDays((prev) =>
+                      e.target.checked
+                        ? [...prev, d.code]
+                        : prev.filter((x) => x !== d.code),
+                    );
+                  }}
+                  className="w-4 h-4 text-primary focus:ring-primary"
+                />
+                {d.label}
+              </label>
+            );
+          })}
+        </div>
+      </div>
+      <div className="flex flex-col gap-2">
+        <span className="text-xs font-bold uppercase tracking-widest text-neutral-700">
+          T-shirt <span className="text-primary">*</span>
+        </span>
+        <div className="flex flex-col gap-2">
+          {(
+            [
+              {
+                v: "team_activities" as const,
+                label:
+                  "Participating in team activities (T-shirt required)",
+              },
+              {
+                v: "tshirt_only" as const,
+                label: "Purchasing an official camp T-shirt",
+              },
+              { v: "none" as const, label: "Not purchasing a T-shirt" },
+            ] as const
+          ).map((opt) => (
+            <label
+              key={opt.v}
+              className="flex items-start gap-3 text-sm text-neutral-800"
+            >
+              <input
+                type="radio"
+                name={`convert-${camper.id}-tshirt`}
+                value={opt.v}
+                checked={tshirtOption === opt.v}
+                onChange={() => {
+                  setTshirtOption(opt.v);
+                  setShirtSize(
+                    opt.v === "none" ? SHIRT_SIZE_NOT_APPLICABLE : "",
+                  );
+                }}
+                className="text-primary focus:ring-primary mt-0.5"
+              />
+              <span>{opt.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      <ShirtSizeSelect
+        id={`convert-${camper.id}-shirt`}
+        name={`convert-${camper.id}-shirt`}
+        value={tshirtOption === "none" ? "" : shirtSize}
+        sizes={shirtSizes}
+        required={tshirtOption !== "none" && tshirtOption !== ""}
+        disabled={tshirtOption === "none"}
+        onChange={setShirtSize}
+      />
+      <div className="flex flex-col gap-2">
+        <span className="text-xs font-bold uppercase tracking-widest text-neutral-700">
+          Catering required? <span className="text-primary">*</span>
+        </span>
+        <div className="flex gap-4">
+          {(
+            [
+              { v: true, label: "Yes" },
+              { v: false, label: "No" },
+            ] as const
+          ).map((opt) => (
+            <label
+              key={String(opt.v)}
+              className="flex items-center gap-2 text-sm text-neutral-800"
+            >
+              <input
+                type="radio"
+                name={`convert-${camper.id}-catering`}
+                checked={needsCatering === opt.v}
+                onChange={() => setNeedsCatering(opt.v)}
+                className="text-primary focus:ring-primary"
+              />
+              {opt.label}
+            </label>
+          ))}
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={busy || !canSubmit}
+          onClick={() => {
+            if (!canSubmit || needsCatering === null) {
+              return;
+            }
+            onConfirm({
+              days,
+              tshirt_option: tshirtOption,
+              shirt_size:
+                tshirtOption === "none"
+                  ? SHIRT_SIZE_NOT_APPLICABLE
+                  : shirtSize,
+              needs_catering: needsCatering,
+            });
+          }}
+          className="px-5 py-2.5 text-sm font-bold text-white bg-neutral-800 rounded-lg hover:bg-neutral-700 disabled:opacity-40"
+        >
+          {busy ? "Converting…" : "Confirm conversion"}
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onCancel}
+          className="px-4 py-2.5 text-sm font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function GroupCard({
   g,
   accommodations,
@@ -1629,6 +1868,8 @@ function GroupCard({
   onRelease,
   onDelete,
   onRemoveCamper,
+  onConvertToDayVisitor,
+  shirtSizes,
   onSendCoachInvoice,
 }: {
   g: AdminGroup;
@@ -1662,6 +1903,8 @@ function GroupCard({
   onRelease: () => void;
   onDelete: () => void;
   onRemoveCamper: (c: AdminCamper) => void;
+  onConvertToDayVisitor: (c: AdminCamper, data: ConvertDayVisitorData) => Promise<void>;
+  shirtSizes: ShirtSize[];
   onSendCoachInvoice: () => void;
 }) {
   const fw = fullWeekCampers(g);
@@ -1673,6 +1916,7 @@ function GroupCard({
   const canEditAlloc = cat === "to_allocate" || (cat === "to_invoice" && isEditing);
 
   const [contactOpen, setContactOpen] = useState(false);
+  const [convertCamperId, setConvertCamperId] = useState<string | null>(null);
   const [cFirst, setCFirst] = useState(g.contact_first_name);
   const [cLast, setCLast] = useState(g.contact_last_name);
   const [cEmail, setCEmail] = useState(g.contact_email);
@@ -1942,6 +2186,36 @@ function GroupCard({
                         {busy === `rmcamper-${c.id}` ? "Removing…" : "Remove"}
                       </button>
                     )}
+                    {canConvertCamper(g, c) && (
+                      <button
+                        type="button"
+                        disabled={busy === `convert-${c.id}`}
+                        onClick={() =>
+                          setConvertCamperId((id) =>
+                            id === c.id ? null : c.id,
+                          )
+                        }
+                        className="px-3 py-1.5 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 disabled:opacity-50"
+                      >
+                        {convertCamperId === c.id
+                          ? "Close"
+                          : "Convert to day visitor"}
+                      </button>
+                    )}
+                    {convertCamperId === c.id && (
+                      <ConvertDayVisitorPanel
+                        camper={c}
+                        shirtSizes={shirtSizes}
+                        busy={busy === `convert-${c.id}`}
+                        depositEligible={depositCreditEligible(g, c)}
+                        onConfirm={(data) => {
+                          void onConvertToDayVisitor(c, data).then(() =>
+                            setConvertCamperId(null),
+                          );
+                        }}
+                        onCancel={() => setConvertCamperId(null)}
+                      />
+                    )}
                   </div>
                 );
               })}
@@ -1980,7 +2254,7 @@ function GroupCard({
                 {fw.map((c) => (
                   <div
                     key={c.id}
-                    className="flex items-center justify-between gap-3 p-3"
+                    className="flex flex-wrap items-center justify-between gap-3 p-3"
                   >
                     <span className="font-medium text-neutral-800">
                       {c.first_name} {c.last_name}{" "}
@@ -1993,7 +2267,7 @@ function GroupCard({
                         </span>
                       )}
                     </span>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="text-sm text-neutral-700 font-semibold text-right">
                         {accName(c.allocated_accommodation_code)}
                         {c.allocated_unit_code && (
@@ -2012,7 +2286,37 @@ function GroupCard({
                           {busy === `rmcamper-${c.id}` ? "Removing…" : "Remove"}
                         </button>
                       )}
+                      {canConvertCamper(g, c) && (
+                        <button
+                          type="button"
+                          disabled={busy === `convert-${c.id}`}
+                          onClick={() =>
+                            setConvertCamperId((id) =>
+                              id === c.id ? null : c.id,
+                            )
+                          }
+                          className="px-3 py-1.5 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 disabled:opacity-50 shrink-0"
+                        >
+                          {convertCamperId === c.id
+                            ? "Close"
+                            : "Convert to day visitor"}
+                        </button>
+                      )}
                     </div>
+                    {convertCamperId === c.id && (
+                      <ConvertDayVisitorPanel
+                        camper={c}
+                        shirtSizes={shirtSizes}
+                        busy={busy === `convert-${c.id}`}
+                        depositEligible={depositCreditEligible(g, c)}
+                        onConfirm={(data) => {
+                          void onConvertToDayVisitor(c, data).then(() =>
+                            setConvertCamperId(null),
+                          );
+                        }}
+                        onCancel={() => setConvertCamperId(null)}
+                      />
+                    )}
                   </div>
                 ))}
               </div>

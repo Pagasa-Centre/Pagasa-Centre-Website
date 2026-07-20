@@ -591,12 +591,20 @@ func TestSendAccommodationChangedNotice(t *testing.T) {
 
 // stubStripe implements stripeClient for delete-registration tests.
 type stubStripe struct {
-	refundPI     func(ctx context.Context, id string) (int64, error)
-	refundInv    func(ctx context.Context, id string) (int64, error)
-	voidInv      func(ctx context.Context, id string) error
-	voidInvIdem  func(ctx context.Context, id string) error
-	ensureCust   func(ctx context.Context, existingID, email, name, groupID string) (string, error)
+	refundPI      func(ctx context.Context, id string) (int64, error)
+	refundInv     func(ctx context.Context, id string) (int64, error)
+	voidInv       func(ctx context.Context, id string) error
+	voidInvIdem   func(ctx context.Context, id string) error
+	ensureCust    func(ctx context.Context, existingID, email, name, groupID string) (string, error)
 	createInvoice func(ctx context.Context, customerID, groupID string, lines []InvoiceLine, daysUntilDue int64, invoiceType string) (InvoiceResult, error)
+	creditBalance func(ctx context.Context, customerID string, amountPence int64, currency, description, idempotencyKey string) error
+	creditCalls   []creditCall
+}
+
+type creditCall struct {
+	customerID     string
+	amountPence    int64
+	idempotencyKey string
 }
 
 func (s *stubStripe) EnsureCustomer(ctx context.Context, existingID, email, name, groupID string) (string, error) {
@@ -640,6 +648,22 @@ func (s *stubStripe) RefundInvoice(ctx context.Context, id string) (int64, error
 		return s.refundInv(ctx, id)
 	}
 	return 0, nil
+}
+func (s *stubStripe) CreditCustomerBalance(
+	ctx context.Context,
+	customerID string,
+	amountPence int64,
+	currency, description, idempotencyKey string,
+) error {
+	s.creditCalls = append(s.creditCalls, creditCall{
+		customerID:     customerID,
+		amountPence:    amountPence,
+		idempotencyKey: idempotencyKey,
+	})
+	if s.creditBalance != nil {
+		return s.creditBalance(ctx, customerID, amountPence, currency, description, idempotencyKey)
+	}
+	return nil
 }
 
 type failingSheets struct {
@@ -1418,5 +1442,241 @@ func TestHandleCoachInvoicePaid(t *testing.T) {
 	// Idempotent on repeat.
 	if err := svc.HandleCoachInvoicePaid(ctx, "in_coach_paid", groupID); err != nil {
 		t.Fatalf("HandleCoachInvoicePaid repeat: %v", err)
+	}
+}
+
+func validConvertRequest() ConvertToDayVisitorRequest {
+	needs := true
+	return ConvertToDayVisitorRequest{
+		Days:          []string{"mon", "tue"},
+		TshirtOption:  domain.TshirtOptionNone,
+		ShirtSize:     domain.ShirtSizeNotApplicable,
+		NeedsCatering: &needs,
+	}
+}
+
+func TestConvertCamperToDayVisitor_allocated(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	stub := &stubStripe{
+		ensureCust: func(_ context.Context, _, _, _, _ string) (string, error) {
+			return "cus_convert", nil
+		},
+	}
+	svc := NewService(repo, stub, nil, nil, Config{DepositPricePence: 5000})
+
+	groupID, _, camper2ID, _ := insertThreeCamperGroup(ctx, t, pool, domain.BillingAllocated, nil)
+
+	sum, err := svc.ConvertCamperToDayVisitor(ctx, groupID, camper2ID, "Admin", 1, validConvertRequest())
+	if err != nil {
+		t.Fatalf("ConvertCamperToDayVisitor: %v", err)
+	}
+	if sum.CamperName != "Alex Test" {
+		t.Fatalf("camper name = %q", sum.CamperName)
+	}
+	if sum.DepositCreditPence != 5000 {
+		t.Fatalf("credit pence = %d, want 5000", sum.DepositCreditPence)
+	}
+	if sum.InvoiceVoided {
+		t.Fatal("expected no invoice void")
+	}
+	if len(stub.creditCalls) != 1 {
+		t.Fatalf("credit calls = %d, want 1", len(stub.creditCalls))
+	}
+	if stub.creditCalls[0].amountPence != 5000 {
+		t.Fatalf("credit amount = %d", stub.creditCalls[0].amountPence)
+	}
+	wantKey := "deposit-credit-" + camper2ID
+	if stub.creditCalls[0].idempotencyKey != wantKey {
+		t.Fatalf("idempotency key = %q, want %q", stub.creditCalls[0].idempotencyKey, wantKey)
+	}
+
+	campers, _ := repo.CampersForGroup(ctx, groupID)
+	var converted domain.Camper
+	for _, c := range campers {
+		if c.ID == camper2ID {
+			converted = c
+		}
+	}
+	if converted.AttendanceType != domain.AttendanceDayPass {
+		t.Fatalf("attendance = %q", converted.AttendanceType)
+	}
+	if len(converted.DayPassDays) != 2 {
+		t.Fatalf("day_pass_days = %v", converted.DayPassDays)
+	}
+	if converted.AllocatedAccommodationCode != nil {
+		t.Fatal("allocation should be cleared")
+	}
+	if converted.NeedsCoach != nil {
+		t.Fatal("needs_coach should be cleared")
+	}
+	if converted.DepositCreditPence != 5000 {
+		t.Fatalf("deposit_credit_pence = %d", converted.DepositCreditPence)
+	}
+}
+
+func TestConvertCamperToDayVisitor_multiConvertTwoCredits(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	stub := &stubStripe{
+		ensureCust: func(_ context.Context, _, _, _, _ string) (string, error) {
+			return "cus_multi", nil
+		},
+	}
+	svc := NewService(repo, stub, nil, nil, Config{DepositPricePence: 5000})
+
+	groupID, _, camper2ID, camper3ID := insertThreeCamperGroup(ctx, t, pool, domain.BillingAllocated, nil)
+
+	if _, err := svc.ConvertCamperToDayVisitor(ctx, groupID, camper2ID, "Admin", 1, validConvertRequest()); err != nil {
+		t.Fatalf("first convert: %v", err)
+	}
+	if _, err := svc.ConvertCamperToDayVisitor(ctx, groupID, camper3ID, "Admin", 2, validConvertRequest()); err != nil {
+		t.Fatalf("second convert: %v", err)
+	}
+	if len(stub.creditCalls) != 2 {
+		t.Fatalf("credit calls = %d, want 2", len(stub.creditCalls))
+	}
+	keys := map[string]bool{
+		stub.creditCalls[0].idempotencyKey: true,
+		stub.creditCalls[1].idempotencyKey: true,
+	}
+	if !keys["deposit-credit-"+camper2ID] || !keys["deposit-credit-"+camper3ID] {
+		t.Fatalf("unexpected idempotency keys: %+v", stub.creditCalls)
+	}
+}
+
+func TestConvertCamperToDayVisitor_invoicedVoidsAndReverts(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	voided := false
+	stub := &stubStripe{
+		voidInvIdem: func(_ context.Context, id string) error {
+			if id != "in_open" {
+				t.Fatalf("void id = %q", id)
+			}
+			voided = true
+			return nil
+		},
+		ensureCust: func(_ context.Context, _, _, _, _ string) (string, error) {
+			return "cus_void", nil
+		},
+	}
+	svc := NewService(repo, stub, nil, nil, Config{DepositPricePence: 5000})
+
+	inv := "in_open"
+	groupID, _, camper2ID, _ := insertThreeCamperGroup(ctx, t, pool, domain.BillingInvoiced, &inv)
+
+	sum, err := svc.ConvertCamperToDayVisitor(ctx, groupID, camper2ID, "Admin", domain.SkipVersionCheck, validConvertRequest())
+	if err != nil {
+		t.Fatalf("ConvertCamperToDayVisitor: %v", err)
+	}
+	if !voided {
+		t.Fatal("expected invoice void")
+	}
+	if !sum.InvoiceVoided {
+		t.Fatal("summary should report invoice voided")
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g == nil || g.BillingStatus != domain.BillingAllocated {
+		t.Fatalf("billing_status = %v, want allocated", g)
+	}
+	if g.StripeInvoiceID != nil {
+		t.Fatal("stripe_invoice_id should be cleared")
+	}
+}
+
+func TestConvertCamperToDayVisitor_guards(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	stub := &stubStripe{}
+	svc := NewService(repo, stub, nil, nil, Config{DepositPricePence: 5000})
+
+	t.Run("balance_paid", func(t *testing.T) {
+		groupID, _, camper2ID, _ := insertThreeCamperGroup(ctx, t, pool, domain.BillingBalancePaid, nil)
+		_, err := svc.ConvertCamperToDayVisitor(ctx, groupID, camper2ID, "Admin", domain.SkipVersionCheck, validConvertRequest())
+		var apiErr commonerrors.APIError
+		if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+			t.Fatalf("expected bad_request, got %v", err)
+		}
+	})
+
+	t.Run("day_pass_camper", func(t *testing.T) {
+		groupID := insertCoachGroup(ctx, t, pool, domain.BillingAllocated, "lodge", false)
+		campers, _ := repo.CampersForGroup(ctx, groupID)
+		_, err := pool.Exec(ctx, `UPDATE registrations SET attendance_type = 'day_pass', day_pass_days = '{mon}' WHERE id = $1`, campers[0].ID)
+		if err != nil {
+			t.Fatalf("update camper: %v", err)
+		}
+		_, err = svc.ConvertCamperToDayVisitor(ctx, groupID, campers[0].ID, "Admin", domain.SkipVersionCheck, validConvertRequest())
+		var apiErr commonerrors.APIError
+		if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+			t.Fatalf("expected bad_request, got %v", err)
+		}
+	})
+
+	t.Run("empty_days", func(t *testing.T) {
+		groupID, _, camper2ID, _ := insertThreeCamperGroup(ctx, t, pool, domain.BillingAllocated, nil)
+		req := validConvertRequest()
+		req.Days = nil
+		_, err := svc.ConvertCamperToDayVisitor(ctx, groupID, camper2ID, "Admin", domain.SkipVersionCheck, req)
+		var apiErr commonerrors.APIError
+		if !errors.As(err, &apiErr) || apiErr.Code != "validation_failed" {
+			t.Fatalf("expected validation_failed, got %v", err)
+		}
+	})
+
+	t.Run("is_free", func(t *testing.T) {
+		groupID := insertCoachGroup(ctx, t, pool, domain.BillingAllocated, "lodge", true)
+		campers, _ := repo.CampersForGroup(ctx, groupID)
+		_, err := svc.ConvertCamperToDayVisitor(ctx, groupID, campers[0].ID, "Admin", domain.SkipVersionCheck, validConvertRequest())
+		var apiErr commonerrors.APIError
+		if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+			t.Fatalf("expected bad_request, got %v", err)
+		}
+		if len(stub.creditCalls) != 0 {
+			t.Fatal("free group should not trigger credit")
+		}
+	})
+}
+
+func TestConvertCamperToDayVisitor_under4NoCredit(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	stub := &stubStripe{}
+	svc := NewService(repo, stub, nil, nil, Config{DepositPricePence: 5000})
+
+	groupID, _, _, _ := insertThreeCamperGroup(ctx, t, pool, domain.BillingAllocated, nil)
+	var youngID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registrations (
+			group_id, is_main_contact, first_name, last_name, gender, age,
+			cell_leader_name, is_cell_leader, attendance_type,
+			allocated_accommodation_code
+		) VALUES ($1, false, 'Baby', 'Test', 'male', 2, 'Leader', false, 'full_week', 'lodge')
+		RETURNING id`, groupID).Scan(&youngID)
+	if err != nil {
+		t.Fatalf("insert young camper: %v", err)
+	}
+
+	sum, err := svc.ConvertCamperToDayVisitor(ctx, groupID, youngID, "Admin", domain.SkipVersionCheck, validConvertRequest())
+	if err != nil {
+		t.Fatalf("ConvertCamperToDayVisitor: %v", err)
+	}
+	if sum.DepositCreditPence != 0 {
+		t.Fatalf("credit pence = %d, want 0", sum.DepositCreditPence)
+	}
+	if len(stub.creditCalls) != 0 {
+		t.Fatal("under-4 should not trigger credit")
+	}
+	campers, _ := repo.CampersForGroup(ctx, groupID)
+	for _, c := range campers {
+		if c.ID == youngID && c.DepositCreditPence != 0 {
+			t.Fatalf("deposit_credit_pence = %d", c.DepositCreditPence)
+		}
 	}
 }

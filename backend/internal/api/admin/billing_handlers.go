@@ -205,6 +205,33 @@ func deleteCamper(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstor
 	}
 }
 
+func postConvertDayVisitor(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body billing.ConvertToDayVisitorRequest
+		if err := request.Decode(r, &body); err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		groupID := chi.URLParam(r, "groupID")
+		camperID := chi.URLParam(r, "camperID")
+		actor := admin.ActorFrom(r.Context())
+		sum, err := svc.ConvertCamperToDayVisitor(
+			r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion), body)
+		if err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
+		gid := groupID
+		summary := "Converted " + sum.CamperName + " to day visitor for " + admin.GroupSummary(g)
+		if sum.InvoiceVoided {
+			summary += "; voided open invoice"
+		}
+		admin.Audit(rec, r, adminlog.ActionCamperConverted, &gid, summary, sum)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 func deleteRegistration(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody

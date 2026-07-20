@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/stripe/stripe-go/v85"
 	"github.com/stripe/stripe-go/v85/customer"
+	"github.com/stripe/stripe-go/v85/customerbalancetransaction"
 	"github.com/stripe/stripe-go/v85/invoice"
 	"github.com/stripe/stripe-go/v85/invoiceitem"
 	"github.com/stripe/stripe-go/v85/invoicepayment"
@@ -241,4 +243,31 @@ func (s *StripeBilling) RefundInvoice(ctx context.Context, invoiceID string) (in
 		return 0, fmt.Errorf("list invoice payments %s: %w", invoiceID, err)
 	}
 	return 0, nil
+}
+
+// CreditCustomerBalance adds a credit to the Stripe customer's balance. amountPence
+// is a positive credit amount; Stripe expects a negative Amount on the transaction.
+func (s *StripeBilling) CreditCustomerBalance(
+	ctx context.Context,
+	customerID string,
+	amountPence int64,
+	currency, description, idempotencyKey string,
+) error {
+	if amountPence <= 0 {
+		return fmt.Errorf("credit amount must be positive")
+	}
+	params := &stripe.CustomerBalanceTransactionParams{
+		Customer:    stripe.String(customerID),
+		Amount:      stripe.Int64(-amountPence),
+		Currency:    stripe.String(strings.ToLower(currency)),
+		Description: stripe.String(description),
+	}
+	params.Context = ctx
+	if idempotencyKey != "" {
+		params.SetIdempotencyKey(idempotencyKey)
+	}
+	if _, err := customerbalancetransaction.New(params); err != nil {
+		return fmt.Errorf("credit customer balance: %w", err)
+	}
+	return nil
 }

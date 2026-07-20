@@ -37,6 +37,7 @@ const (
 	ActionFreeConfirmed       = "free_confirmed"
 	ActionRegistrationDeleted = "registration_deleted"
 	ActionCamperRemoved         = "camper_removed"
+	ActionCamperConverted       = "camper_converted"
 	ActionCoachInvoiceSent      = "coach_invoice_sent"
 
 	ActionAccommodationAvailability = "accommodation_availability"
