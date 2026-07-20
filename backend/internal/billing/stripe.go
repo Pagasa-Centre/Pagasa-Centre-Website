@@ -68,6 +68,7 @@ func (s *StripeBilling) CreateInvoice(
 	groupID string,
 	lines []InvoiceLine,
 	daysUntilDue int64,
+	invoiceType string,
 ) (InvoiceResult, error) {
 	// Create the draft invoice FIRST, then attach each line item directly to it
 	// by invoice id. This is deliberately NOT the "create pending items, then
@@ -82,7 +83,8 @@ func (s *StripeBilling) CreateInvoice(
 		DaysUntilDue:     stripe.Int64(daysUntilDue),
 		AutoAdvance:      stripe.Bool(true),
 		Metadata: map[string]string{
-			"group_id": groupID,
+			"group_id":     groupID,
+			"invoice_type": invoiceType,
 		},
 	}
 	invParams.Context = ctx

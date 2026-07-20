@@ -77,6 +77,21 @@ func (r *Repository) FindGroupByStripeInvoiceID(ctx context.Context, invoiceID s
 	return &g, nil
 }
 
+// FindGroupByStripeCoachInvoiceID looks up a group by its coach invoice id.
+func (r *Repository) FindGroupByStripeCoachInvoiceID(ctx context.Context, invoiceID string) (*domain.Group, error) {
+	const q = `SELECT ` + groupSelectCols + `
+		  FROM registration_groups
+		 WHERE stripe_coach_invoice_id = $1`
+	g, err := scanGroup(r.pool.QueryRow(ctx, q, invoiceID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find group by coach invoice: %w", err)
+	}
+	return &g, nil
+}
+
 // CamperAllocation is one camper's White Team placement.
 type CamperAllocation struct {
 	CamperID                   string

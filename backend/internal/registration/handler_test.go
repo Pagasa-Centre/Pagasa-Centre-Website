@@ -76,6 +76,10 @@ func (m *recordingMailer) SendSponsorshipConfirmed(context.Context, email.Sponso
 	return nil
 }
 
+func (m *recordingMailer) SendCoachInvoice(context.Context, email.CoachInvoice) error {
+	return nil
+}
+
 func (m *recordingMailer) SendAccommodationChanged(context.Context, email.AccommodationChangedNotice) error {
 	return nil
 }

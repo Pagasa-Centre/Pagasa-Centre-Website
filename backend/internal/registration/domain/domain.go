@@ -64,6 +64,11 @@ type Group struct {
 	LastActionBy          *string    `json:"last_action_by,omitempty"`
 	LastActionAt          *time.Time `json:"last_action_at,omitempty"`
 	IsFree                bool       `json:"is_free"`
+
+	CoachIncludedInBalance bool       `json:"coach_included_in_balance"`
+	StripeCoachInvoiceID   *string    `json:"stripe_coach_invoice_id,omitempty"`
+	CoachInvoiceDueAt      *time.Time `json:"coach_invoice_due_at,omitempty"`
+	CoachFeePaidAt         *time.Time `json:"coach_fee_paid_at,omitempty"`
 }
 
 // FreeCode is a row from free_codes for admin listing.

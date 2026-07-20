@@ -71,6 +71,52 @@ function fullWeekCampers(g: AdminGroup): AdminCamper[] {
   return g.campers.filter((c) => c.attendance_type === "full_week");
 }
 
+// Number of full-week campers who need the coach and are old enough to pay
+// (children under MIN_DEPOSIT_AGE ride free). Mirrors backend coachEligibleCount.
+function coachEligibleCount(g: AdminGroup): number {
+  return g.campers.filter(
+    (c) =>
+      c.attendance_type === "full_week" &&
+      !!c.needs_coach &&
+      c.age >= MIN_DEPOSIT_AGE,
+  ).length;
+}
+
+function coachChargedAlready(g: AdminGroup): boolean {
+  return !!g.coach_included_in_balance || !!g.stripe_coach_invoice_id;
+}
+
+function coachPaid(g: AdminGroup): boolean {
+  return (
+    (!!g.coach_included_in_balance && g.billing_status === "balance_paid") ||
+    !!g.coach_fee_paid_at
+  );
+}
+
+// canSendCoachInvoice mirrors the backend guard: eligible passengers, not free,
+// not already charged, and the balance invoice is already sent/paid (so coach
+// could not be folded in).
+function canSendCoachInvoice(g: AdminGroup): boolean {
+  return (
+    coachEligibleCount(g) > 0 &&
+    !g.is_free &&
+    !coachChargedAlready(g) &&
+    (g.billing_status === "invoiced" || g.billing_status === "balance_paid")
+  );
+}
+
+// coachStatusLabel is a short human summary for the group card.
+function coachStatusLabel(g: AdminGroup): string | null {
+  if (coachEligibleCount(g) === 0) return null;
+  if (coachPaid(g)) return "Coach paid";
+  if (g.coach_included_in_balance) return "Coach on balance invoice";
+  if (g.stripe_coach_invoice_id) return "Coach invoiced";
+  if (g.billing_status === "invoiced" || g.billing_status === "balance_paid") {
+    return "Coach fee not charged";
+  }
+  return "Coach fee added when invoiced";
+}
+
 // True when the selected tier is neither the camper's 1st nor 2nd choice.
 function isOffPreference(c: AdminCamper, selected: string): boolean {
   if (!selected) return false;
@@ -193,6 +239,7 @@ const LAST_ACTION_LABELS: Record<string, string> = {
   free_confirmed: "Sponsorship confirmed",
   registration_deleted: "Registration deleted",
   camper_removed: "Camper removed",
+  coach_invoice_sent: "Coach invoice sent",
 };
 
 function formatLastAction(g: AdminGroup): string | null {
@@ -500,6 +547,60 @@ export default function AdminDashboard() {
       await load();
     } catch (err) {
       await handleAdminError(err, "Invoice failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function sendCoachInvoice(g: AdminGroup) {
+    const n = coachEligibleCount(g);
+    if (
+      !confirm(
+        `Send a separate coach invoice (${n} passenger${n === 1 ? "" : "s"}) to ${g.contact_first_name} ${g.contact_last_name}? They'll get a Stripe payment link by email.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(`coach-${g.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await adminApi.sendCoachInvoice(g.id, g.version);
+      setNotice(`Coach invoice emailed to ${g.contact_email}.`);
+      await load();
+    } catch (err) {
+      await handleAdminError(err, "Coach invoice failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function sendAllCoachInvoices() {
+    const ids = groups.filter(canSendCoachInvoice).map((g) => g.id);
+    if (ids.length === 0) return;
+    if (
+      !confirm(
+        `Send separate coach invoices to ${ids.length} group(s) now? Each gets a Stripe payment link by email.`,
+      )
+    ) {
+      return;
+    }
+    setBusy("bulk-coach");
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await adminApi.sendCoachInvoiceBulk(ids);
+      if (res && typeof res === "object" && "errors" in res) {
+        const errs = (res as { errors: Record<string, string> }).errors;
+        setError(
+          `Sent, but ${Object.keys(errs).length} group(s) failed. Try those again individually.`,
+        );
+      } else {
+        setNotice(`Sent ${ids.length} coach invoice(s).`);
+      }
+      await load();
+    } catch (err) {
+      await handleAdminError(err, "Bulk coach send failed.");
     } finally {
       setBusy(null);
     }
@@ -853,6 +954,11 @@ export default function AdminDashboard() {
     [groups],
   );
 
+  const coachInvoiceableCount = useMemo(
+    () => groups.filter(canSendCoachInvoice).length,
+    [groups],
+  );
+
   // How many beds are currently held per accommodation code. A camper holds a
   // spot once their allocation is saved; releasing a group clears the code, so
   // this naturally only counts live allocations.
@@ -1166,6 +1272,18 @@ export default function AdminDashboard() {
             Send all {invoiceableCount} invoices
           </button>
         )}
+        {(tab === "awaiting" || tab === "paid" || tab === "all") &&
+          coachInvoiceableCount > 0 && (
+            <button
+              type="button"
+              disabled={busy === "bulk-coach"}
+              onClick={sendAllCoachInvoices}
+              className="px-4 py-2 text-sm font-bold text-white bg-sky-600 rounded-lg hover:bg-sky-700 disabled:opacity-50"
+            >
+              Send {coachInvoiceableCount} coach invoice
+              {coachInvoiceableCount === 1 ? "" : "s"}
+            </button>
+          )}
       </div>
 
       {/* Groups */}
@@ -1205,6 +1323,7 @@ export default function AdminDashboard() {
               onRelease={() => releaseGroup(g)}
               onDelete={() => deleteRegistration(g)}
               onRemoveCamper={(c) => removeCamperFromGroup(g, c)}
+              onSendCoachInvoice={() => sendCoachInvoice(g)}
             />
           ))}
         </div>
@@ -1510,6 +1629,7 @@ function GroupCard({
   onRelease,
   onDelete,
   onRemoveCamper,
+  onSendCoachInvoice,
 }: {
   g: AdminGroup;
   accommodations: AdminAccommodation[];
@@ -1542,6 +1662,7 @@ function GroupCard({
   onRelease: () => void;
   onDelete: () => void;
   onRemoveCamper: (c: AdminCamper) => void;
+  onSendCoachInvoice: () => void;
 }) {
   const fw = fullWeekCampers(g);
   const cat = categorize(g);
@@ -1747,6 +1868,11 @@ function GroupCard({
                         <span className="ml-2 text-xs font-semibold text-neutral-600 bg-neutral-100 px-2 py-0.5 rounded-full">
                           Age {c.age}
                         </span>
+                        {!!c.needs_coach && (
+                          <span className="ml-2 text-xs font-semibold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full">
+                            Coach
+                          </span>
+                        )}
                       </p>
                       <p className="text-xs text-neutral-500 mt-1">
                         <span className="font-semibold">1st:</span>{" "}
@@ -1861,6 +1987,11 @@ function GroupCard({
                       <span className="ml-1 text-xs font-semibold text-neutral-600 bg-neutral-100 px-2 py-0.5 rounded-full">
                         Age {c.age}
                       </span>
+                      {!!c.needs_coach && (
+                        <span className="ml-1 text-xs font-semibold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full">
+                          Coach
+                        </span>
+                      )}
                     </span>
                     <div className="flex items-center gap-2">
                       <span className="text-sm text-neutral-700 font-semibold text-right">
@@ -1922,6 +2053,25 @@ function GroupCard({
                       </div>
                     );
                   })}
+              </div>
+            )}
+
+            {coachStatusLabel(g) && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2">
+                <span className="text-xs font-semibold text-sky-800">
+                  {coachStatusLabel(g)} · {coachEligibleCount(g)} passenger
+                  {coachEligibleCount(g) === 1 ? "" : "s"}
+                </span>
+                {canSendCoachInvoice(g) && (
+                  <button
+                    type="button"
+                    disabled={busy === `coach-${g.id}`}
+                    onClick={onSendCoachInvoice}
+                    className="px-3 py-1.5 text-xs font-bold text-white bg-sky-600 rounded-lg hover:bg-sky-700 disabled:opacity-50"
+                  >
+                    {busy === `coach-${g.id}` ? "Sending…" : "Send coach invoice"}
+                  </button>
+                )}
               </div>
             )}
 

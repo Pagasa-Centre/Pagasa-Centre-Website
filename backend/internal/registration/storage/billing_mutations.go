@@ -161,8 +161,10 @@ func (r *Repository) ConfirmFreeMeta(ctx context.Context, groupID string, meta d
 	return tx.Commit(ctx)
 }
 
-// SetInvoiceDetailsMeta records invoice id/due and moves to invoiced with attribution.
-func (r *Repository) SetInvoiceDetailsMeta(ctx context.Context, groupID, invoiceID string, dueAt time.Time, meta domain.ActionMeta) error {
+// SetInvoiceDetailsMeta records invoice id/due and moves to invoiced with
+// attribution. coachIncluded records whether the coach fee was folded into this
+// balance invoice, so we never also send a separate coach invoice for the group.
+func (r *Repository) SetInvoiceDetailsMeta(ctx context.Context, groupID, invoiceID string, dueAt time.Time, coachIncluded bool, meta domain.ActionMeta) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -179,11 +181,43 @@ func (r *Repository) SetInvoiceDetailsMeta(ctx context.Context, groupID, invoice
 	if err := checkVersion(g, meta); err != nil {
 		return err
 	}
-	extra := `, stripe_invoice_id = $3, invoice_due_at = $4, billing_status = 'invoiced'`
-	if err := stampExec(ctx, tx, groupID, meta, extra, invoiceID, dueAt.UTC()); err != nil {
+	extra := `, stripe_invoice_id = $3, invoice_due_at = $4, billing_status = 'invoiced', coach_included_in_balance = $5`
+	if err := stampExec(ctx, tx, groupID, meta, extra, invoiceID, dueAt.UTC(), coachIncluded); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// SetCoachInvoiceMeta records a separate coach invoice id/due without touching
+// billing_status (coach is tracked in parallel to the balance lifecycle).
+func (r *Repository) SetCoachInvoiceMeta(ctx context.Context, groupID, coachInvoiceID string, dueAt time.Time, meta domain.ActionMeta) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	if err != nil {
+		return err
+	}
+	if g == nil {
+		return fmt.Errorf("group %q not found", groupID)
+	}
+	if err := checkVersion(g, meta); err != nil {
+		return err
+	}
+	extra := `, stripe_coach_invoice_id = $3, coach_invoice_due_at = $4`
+	if err := stampExec(ctx, tx, groupID, meta, extra, coachInvoiceID, dueAt.UTC()); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// MarkCoachFeePaidMeta stamps coach_fee_paid_at (Stripe webhook).
+func (r *Repository) MarkCoachFeePaidMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error {
+	extra := `, coach_fee_paid_at = $3`
+	return r.stampGroupPool(ctx, groupID, meta, extra, time.Now().UTC())
 }
 
 // ClearInvoiceAndReleaseMeta voids invoice state, releases allocation, stamps attribution.

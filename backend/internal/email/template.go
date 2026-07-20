@@ -242,6 +242,46 @@ func renderBalanceInvoice(p BalanceInvoice) (subject, htmlBody string, err error
 	return subject, htmlBody, nil
 }
 
+func renderCoachInvoice(p CoachInvoice) (subject, htmlBody string, err error) {
+	subject = "Your PC Summer Camp 2026 coach fee is ready to pay"
+	due := ""
+	if p.DueDate != "" {
+		due = fmt.Sprintf(
+			`<p>Please pay by <strong>%s</strong>.</p>`,
+			template.HTMLEscapeString(p.DueDate))
+	}
+	amount := ""
+	if p.AmountLabel != "" {
+		amount = fmt.Sprintf(`<p>Amount due: <strong>%s</strong></p>`, template.HTMLEscapeString(p.AmountLabel))
+	}
+	passengers := "passenger"
+	if p.PassengerCount != 1 {
+		passengers = "passengers"
+	}
+	htmlBody = fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en"><body style="font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; color:#1a1a1a; line-height:1.55; max-width:600px; margin:0 auto; padding:24px;">
+  <h1 style="font-size:22px; margin:0 0 16px;">Your camp coach fee is ready to pay</h1>
+  <p>Hi %s,</p>
+  <p>You opted for a spot on the coach to <strong>PC Summer Camp 2026</strong>. This covers %d coach %s. Please pay to confirm your seat(s).</p>
+  %s
+  %s
+  <p style="margin:24px 0;">
+    <a href="%s" style="display:inline-block; background:#3ea463; color:#fff; padding:12px 22px; text-decoration:none; font-weight:bold; border-radius:8px;">Pay your coach fee</a>
+  </p>
+  <p style="font-size:13px; color:#666;">Or copy this link into your browser:<br>%s</p>
+  <p style="margin-top:32px;">God bless,<br>The PC Summer Camp 2026 team</p>
+</body></html>`,
+		template.HTMLEscapeString(p.ToName),
+		p.PassengerCount,
+		passengers,
+		amount,
+		due,
+		template.HTMLEscapeString(p.PayURL),
+		template.HTMLEscapeString(p.PayURL),
+	)
+	return subject, htmlBody, nil
+}
+
 func renderBalancePaid(p BalancePaid) (subject, htmlBody string, err error) {
 	name := p.ContactName
 	if name == "" {

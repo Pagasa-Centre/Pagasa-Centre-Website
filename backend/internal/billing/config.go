@@ -4,6 +4,7 @@ package billing
 type Config struct {
 	StripePriceChildUnder3 string
 	StripePriceDayPass     string
+	StripePriceCoach       string
 	InvoiceDueDays         int
 	WhiteTeamEmail         string
 }

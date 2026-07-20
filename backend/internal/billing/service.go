@@ -18,7 +18,7 @@ import (
 // stripeClient is the Stripe surface billing.Service needs. *StripeBilling satisfies it.
 type stripeClient interface {
 	EnsureCustomer(ctx context.Context, existingID, email, name, groupID string) (string, error)
-	CreateInvoice(ctx context.Context, customerID, groupID string, lines []InvoiceLine, daysUntilDue int64) (InvoiceResult, error)
+	CreateInvoice(ctx context.Context, customerID, groupID string, lines []InvoiceLine, daysUntilDue int64, invoiceType string) (InvoiceResult, error)
 	VoidInvoice(ctx context.Context, invoiceID string) error
 	VoidInvoiceIdempotent(ctx context.Context, invoiceID string) error
 	SendInvoiceEmail(ctx context.Context, invoiceID string) error
@@ -279,6 +279,18 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 			lines = append(lines, line)
 		}
 	}
+
+	// Fold the coach fee into this balance invoice for coach passengers. Only
+	// groups that have not yet been invoiced reach here, so a coach fee that is
+	// folded is always fresh (never double-charged).
+	coachCount := coachEligibleCount(campers)
+	if line, ok := coachLine(coachCount, s.cfg.StripePriceCoach); ok {
+		if line.PriceID == "" {
+			return commonerrors.BadRequest("STRIPE_PRICE_COACH is not configured", nil)
+		}
+		lines = append(lines, line)
+	}
+
 	if len(lines) == 0 {
 		return commonerrors.BadRequest("nothing to invoice", nil)
 	}
@@ -299,7 +311,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 	}
 
 	res, err := s.stripe.CreateInvoice(
-		ctx, customerID, g.ID, lines, int64(s.cfg.InvoiceDueDays))
+		ctx, customerID, g.ID, lines, int64(s.cfg.InvoiceDueDays), "balance")
 	if err != nil {
 		return commonerrors.Internal(err.Error())
 	}
@@ -308,7 +320,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 		Action:          "invoice_sent",
 		ExpectedVersion: expectedVersion,
 	}
-	if err := s.repo.SetInvoiceDetailsMeta(ctx, groupID, res.ID, res.DueAt, meta); err != nil {
+	if err := s.repo.SetInvoiceDetailsMeta(ctx, groupID, res.ID, res.DueAt, coachCount > 0, meta); err != nil {
 		return mapVersionErr(ctx, s.repo, groupID, err)
 	}
 	accNames := s.accommodationNames(ctx)
@@ -323,7 +335,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 			PayURL:      res.HostedURL,
 			DueDate:     res.DueAt.Format("2 Jan 2006"),
 			AmountLabel: formatAmountLabel(res.AmountDuePence, res.Currency),
-			Items:       balanceInvoiceItems(campers, accNames, s.unitNames(ctx)),
+			Items:       balanceInvoiceItems(campers, accNames, s.unitNames(ctx), coachCount),
 			Changes:     changes,
 		}); err != nil {
 			log.Printf("billing: fallback balance invoice email to %s: %v", g.ContactEmail, err)
@@ -349,6 +361,129 @@ func (s *Service) SendInvoicesBulk(ctx context.Context, actor string, groupIDs [
 		}
 	}
 	return errs
+}
+
+// coachAlreadyCharged reports whether the coach fee for this group has already
+// been billed — either folded into the balance invoice or via a separate coach
+// invoice.
+func coachAlreadyCharged(g *domain.Group) bool {
+	return g.CoachIncludedInBalance ||
+		(g.StripeCoachInvoiceID != nil && strings.TrimSpace(*g.StripeCoachInvoiceID) != "")
+}
+
+// SendCoachInvoice issues a separate coach-only Stripe invoice for a group whose
+// balance invoice was already sent or paid (so the coach fee could not be folded
+// in). New/uninvoiced groups fold the coach fee into their balance invoice
+// instead, and church-sponsored groups are never coach-charged.
+func (s *Service) SendCoachInvoice(ctx context.Context, groupID, actor string, expectedVersion int) error {
+	g, err := s.repo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		return commonerrors.Internal(err.Error())
+	}
+	if g == nil {
+		return commonerrors.NotFound("group not found")
+	}
+	if g.IsFree {
+		return commonerrors.BadRequest("church-sponsored registrations are not charged for the coach", nil)
+	}
+	if g.BillingStatus != domain.BillingInvoiced && g.BillingStatus != domain.BillingBalancePaid {
+		return commonerrors.BadRequest("coach fee is included in the balance invoice for this group", nil)
+	}
+	if coachAlreadyCharged(g) {
+		return commonerrors.BadRequest("coach fee already charged", nil)
+	}
+	campers, err := s.repo.CampersForGroup(ctx, groupID)
+	if err != nil {
+		return commonerrors.Internal(err.Error())
+	}
+	count := coachEligibleCount(campers)
+	if count == 0 {
+		return commonerrors.BadRequest("no coach passengers to charge", nil)
+	}
+	if s.cfg.StripePriceCoach == "" {
+		return commonerrors.BadRequest("STRIPE_PRICE_COACH is not configured", nil)
+	}
+
+	customerID := ""
+	if g.StripeCustomerID != nil {
+		customerID = *g.StripeCustomerID
+	}
+	name := strings.TrimSpace(g.ContactFirstName + " " + g.ContactLastName)
+	customerID, err = s.stripe.EnsureCustomer(ctx, customerID, g.ContactEmail, name, g.ID)
+	if err != nil {
+		return commonerrors.Internal(err.Error())
+	}
+	if customerID != "" && (g.StripeCustomerID == nil || *g.StripeCustomerID != customerID) {
+		if err := s.repo.SetStripeCustomerID(ctx, groupID, customerID); err != nil {
+			return commonerrors.Internal(err.Error())
+		}
+	}
+
+	res, err := s.stripe.CreateInvoice(
+		ctx, customerID, g.ID,
+		[]InvoiceLine{{PriceID: s.cfg.StripePriceCoach, Quantity: count}},
+		int64(s.cfg.InvoiceDueDays), "coach")
+	if err != nil {
+		return commonerrors.Internal(err.Error())
+	}
+	meta := domain.ActionMeta{
+		Actor:           actor,
+		Action:          "coach_invoice_sent",
+		ExpectedVersion: expectedVersion,
+	}
+	if err := s.repo.SetCoachInvoiceMeta(ctx, groupID, res.ID, res.DueAt, meta); err != nil {
+		return mapVersionErr(ctx, s.repo, groupID, err)
+	}
+
+	// Stripe is the primary sender; fall back to our own email only if Stripe
+	// could not email the invoice.
+	if !res.StripeEmailed {
+		if err := s.mailer.SendCoachInvoice(ctx, email.CoachInvoice{
+			ToEmail:        g.ContactEmail,
+			ToName:         g.ContactFirstName,
+			PayURL:         res.HostedURL,
+			DueDate:        res.DueAt.Format("2 Jan 2006"),
+			AmountLabel:    formatAmountLabel(res.AmountDuePence, res.Currency),
+			PassengerCount: int(count),
+		}); err != nil {
+			log.Printf("billing: fallback coach invoice email to %s: %v", g.ContactEmail, err)
+		}
+	}
+	return nil
+}
+
+// SendCoachInvoicesBulk sends coach invoices for many groups; collects per-group
+// errors (skips groups that don't qualify without erroring).
+func (s *Service) SendCoachInvoicesBulk(ctx context.Context, actor string, groupIDs []string) map[string]string {
+	errs := map[string]string{}
+	for _, id := range groupIDs {
+		if err := s.SendCoachInvoice(ctx, id, actor, domain.SkipVersionCheck); err != nil {
+			errs[id] = err.Error()
+		}
+	}
+	return errs
+}
+
+// HandleCoachInvoicePaid marks a group's coach fee paid (idempotent).
+func (s *Service) HandleCoachInvoicePaid(ctx context.Context, stripeInvoiceID, groupID string) error {
+	g, err := s.repo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	if g == nil {
+		g, err = s.repo.FindGroupByStripeCoachInvoiceID(ctx, stripeInvoiceID)
+		if err != nil || g == nil {
+			return fmt.Errorf("group not found for coach invoice %s", stripeInvoiceID)
+		}
+	}
+	if g.CoachFeePaidAt != nil {
+		return nil
+	}
+	return s.repo.MarkCoachFeePaidMeta(ctx, g.ID, domain.ActionMeta{
+		Actor:           "Stripe",
+		Action:          "coach_fee_paid",
+		ExpectedVersion: domain.SkipVersionCheck,
+	})
 }
 
 // ConfirmFree marks a church-sponsored group as fully confirmed (no Stripe invoice).
@@ -397,7 +532,7 @@ func (s *Service) sendSponsorshipConfirmedEmail(ctx context.Context, g *domain.G
 	if err := s.mailer.SendSponsorshipConfirmed(ctx, email.SponsorshipConfirmed{
 		ToEmail: g.ContactEmail,
 		ToName:  g.ContactFirstName,
-		Items:   balanceInvoiceItems(campers, accNames, s.unitNames(ctx)),
+		Items:   balanceInvoiceItems(campers, accNames, s.unitNames(ctx), 0),
 		Changes: offPreferenceChanges(campers, accNames),
 	}); err != nil {
 		log.Printf("billing: sponsorship confirmed email to %s: %v", g.ContactEmail, err)
@@ -519,6 +654,25 @@ func (s *Service) RemoveCamper(ctx context.Context, groupID, camperID, actor str
 			if c.AttendanceType == domain.AttendanceFullWeek {
 				newStatus = domain.BillingAllocated
 				break
+			}
+		}
+	}
+
+	// If removing this camper leaves no coach passengers, void any open (unpaid)
+	// separate coach invoice so a departed passenger's fee can't still be paid.
+	if g.StripeCoachInvoiceID != nil && strings.TrimSpace(*g.StripeCoachInvoiceID) != "" && g.CoachFeePaidAt == nil {
+		remainingCoach := int64(0)
+		for _, c := range campers {
+			if c.ID == camperID {
+				continue
+			}
+			if c.AttendanceType == domain.AttendanceFullWeek && c.NeedsCoach != nil && *c.NeedsCoach && c.Age >= registration.MinDepositAge {
+				remainingCoach++
+			}
+		}
+		if remainingCoach == 0 {
+			if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeCoachInvoiceID); err != nil {
+				log.Printf("billing: void coach invoice after camper remove %s: %v", groupID, err)
 			}
 		}
 	}
@@ -648,6 +802,15 @@ func (s *Service) DeleteRegistration(ctx context.Context, groupID, actor string,
 		summary.InvoiceVoided = true
 	}
 
+	// Void any open (unpaid) separate coach invoice so it can't be paid after
+	// the registration is gone. Paid coach fees are refunded manually in Stripe.
+	if g.StripeCoachInvoiceID != nil && *g.StripeCoachInvoiceID != "" && g.CoachFeePaidAt == nil {
+		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeCoachInvoiceID); err != nil {
+			return DeleteSummary{}, commonerrors.BadRequest(
+				fmt.Sprintf("coach invoice void failed; registration was not deleted: %v", err), nil)
+		}
+	}
+
 	summary.AmountPence = refundTotal
 
 	meta := domain.ActionMeta{
@@ -707,13 +870,17 @@ func (s *Service) ResendInvoice(ctx context.Context, groupID, actor string, expe
 		due = res.DueAt.Format("2 Jan 2006")
 	}
 	campers, _ := s.repo.CampersForGroup(ctx, groupID)
+	coachCount := int64(0)
+	if g.CoachIncludedInBalance {
+		coachCount = coachEligibleCount(campers)
+	}
 	if err := s.mailer.SendBalanceInvoice(ctx, email.BalanceInvoice{
 		ToEmail:     g.ContactEmail,
 		ToName:      g.ContactFirstName,
 		PayURL:      res.HostedURL,
 		DueDate:     due,
 		AmountLabel: formatAmountLabel(res.AmountDuePence, res.Currency),
-		Items:       balanceInvoiceItems(campers, s.accommodationNames(ctx), s.unitNames(ctx)),
+		Items:       balanceInvoiceItems(campers, s.accommodationNames(ctx), s.unitNames(ctx), coachCount),
 	}); err != nil {
 		return commonerrors.Internal(err.Error())
 	}
@@ -766,7 +933,11 @@ func (s *Service) HandleInvoicePaid(ctx context.Context, stripeInvoiceID, groupI
 	}
 	campers, _ := s.repo.CampersForGroup(ctx, g.ID)
 	accNames := s.accommodationNames(ctx)
-	items := balanceInvoiceItems(campers, accNames, s.unitNames(ctx))
+	coachCount := int64(0)
+	if g.CoachIncludedInBalance {
+		coachCount = coachEligibleCount(campers)
+	}
+	items := balanceInvoiceItems(campers, accNames, s.unitNames(ctx), coachCount)
 	changes := offPreferenceChanges(campers, accNames)
 	amountLabel := formatAmountLabel(amountPaidPence, currency)
 
@@ -872,7 +1043,31 @@ func dayPassLine(c domain.Camper, priceID string) (InvoiceLine, bool) {
 	return InvoiceLine{PriceID: priceID, Quantity: int64(len(c.DayPassDays))}, true
 }
 
-func balanceInvoiceItems(campers []domain.Camper, accNames, unitNames map[string]string) []string {
+// coachEligibleCount counts full-week campers who opted for the coach and are
+// old enough to be charged. Children under MinDepositAge (4) ride free.
+func coachEligibleCount(campers []domain.Camper) int64 {
+	var n int64
+	for _, c := range campers {
+		if c.AttendanceType != domain.AttendanceFullWeek {
+			continue
+		}
+		if c.NeedsCoach != nil && *c.NeedsCoach && c.Age >= registration.MinDepositAge {
+			n++
+		}
+	}
+	return n
+}
+
+// coachLine returns the single coach invoice line billing `count` passengers at
+// the coach price. ok is false when there are no eligible passengers.
+func coachLine(count int64, priceID string) (InvoiceLine, bool) {
+	if count <= 0 {
+		return InvoiceLine{}, false
+	}
+	return InvoiceLine{PriceID: priceID, Quantity: count}, true
+}
+
+func balanceInvoiceItems(campers []domain.Camper, accNames, unitNames map[string]string, coachCount int64) []string {
 	var items []string
 	for _, c := range campers {
 		if c.AttendanceType == domain.AttendanceDayPass {
@@ -913,6 +1108,9 @@ func balanceInvoiceItems(campers []domain.Camper, accNames, unitNames map[string
 			}
 		}
 		items = append(items, name)
+	}
+	if coachCount > 0 {
+		items = append(items, fmt.Sprintf("Coach transport (×%d)", coachCount))
 	}
 	return items
 }

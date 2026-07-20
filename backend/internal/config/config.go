@@ -48,6 +48,7 @@ type Config struct {
 	WhiteTeamEmail      string
 	StripePriceChildUnder3 string // Stripe Price for full-week under-3 balance (£0)
 	StripePriceDayPass  string // Stripe Price for a day pass (per day; quantity = days)
+	StripePriceCoach    string // Stripe Price for the coach fee (per head; quantity = passengers)
 	InvoiceDueDays      int    // defaults to 15
 
 	// Optional overrides for accommodation_types.stripe_price_id at boot.
@@ -89,6 +90,7 @@ func Load() (Config, error) {
 		WhiteTeamEmail:            os.Getenv("WHITE_TEAM_EMAIL"),
 		StripePriceChildUnder3:    os.Getenv("STRIPE_PRICE_CHILD_UNDER3"),
 		StripePriceDayPass:        os.Getenv("STRIPE_PRICE_DAY_PASS"),
+		StripePriceCoach:          os.Getenv("STRIPE_PRICE_COACH"),
 		InvoiceDueDays:            getEnvInt("INVOICE_DUE_DAYS", 15),
 		StripePriceLodge:          os.Getenv("STRIPE_PRICE_LODGE"),
 		StripePriceCabin:          os.Getenv("STRIPE_PRICE_CABIN"),

@@ -66,6 +66,14 @@ func (s *SMTPMailer) SendBalanceInvoice(ctx context.Context, p BalanceInvoice) e
 	return s.send(ctx, p.ToEmail, subject, body)
 }
 
+func (s *SMTPMailer) SendCoachInvoice(ctx context.Context, p CoachInvoice) error {
+	subject, body, err := renderCoachInvoice(p)
+	if err != nil {
+		return err
+	}
+	return s.send(ctx, p.ToEmail, subject, body)
+}
+
 func (s *SMTPMailer) SendBalancePaid(ctx context.Context, p BalancePaid) error {
 	subject, body, err := renderBalancePaid(p)
 	if err != nil {

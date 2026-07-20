@@ -85,6 +85,14 @@ func (h *Handler) Webhook() http.HandlerFunc {
 				return
 			}
 			groupID := inv.Metadata["group_id"]
+			if inv.Metadata["invoice_type"] == "coach" {
+				if err := h.billSvc.HandleCoachInvoicePaid(ctx, inv.ID, groupID); err != nil {
+					log.Printf("handle coach invoice.paid: %v", err)
+					http.Error(w, "internal", http.StatusInternalServerError)
+					return
+				}
+				break
+			}
 			if err := h.billSvc.HandleInvoicePaid(ctx, inv.ID, groupID, inv.AmountPaid, string(inv.Currency)); err != nil {
 				log.Printf("handle invoice.paid: %v", err)
 				http.Error(w, "internal", http.StatusInternalServerError)

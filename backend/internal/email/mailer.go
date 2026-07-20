@@ -20,6 +20,7 @@ type Mailer interface {
 	SendBalancePaidConfirmation(ctx context.Context, p BalancePaidConfirmation) error
 	SendSponsorshipConfirmed(ctx context.Context, p SponsorshipConfirmed) error
 	SendAccommodationChanged(ctx context.Context, p AccommodationChangedNotice) error
+	SendCoachInvoice(ctx context.Context, p CoachInvoice) error
 }
 
 // AccommodationChange describes one camper placed outside their 1st/2nd choice.
@@ -90,6 +91,18 @@ type BalanceInvoice struct {
 	Items []string
 	// Changes lists campers placed outside their preferences (inline callout).
 	Changes []AccommodationChange
+}
+
+// CoachInvoice emails the family a separate coach-fee payment link, used when
+// the coach fee could not be folded into the balance invoice (already invoiced
+// or paid).
+type CoachInvoice struct {
+	ToEmail        string
+	ToName         string
+	PayURL         string // Stripe hosted invoice URL
+	DueDate        string // pre-formatted, e.g. "19 Jun 2026"
+	AmountLabel    string // optional, e.g. "£50.00" (blank if unknown)
+	PassengerCount int    // number of coach passengers being charged
 }
 
 // AllocationReleased notifies a family their placement was released (unpaid).

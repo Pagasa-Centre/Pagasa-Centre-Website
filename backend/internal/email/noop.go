@@ -50,6 +50,16 @@ func (NoopMailer) SendBalanceInvoice(_ context.Context, p BalanceInvoice) error 
 	return nil
 }
 
+func (NoopMailer) SendCoachInvoice(_ context.Context, p CoachInvoice) error {
+	subject, _, err := renderCoachInvoice(p)
+	if err != nil {
+		return err
+	}
+	log.Printf("[email noop] to=%s subject=%q pay_url=%s (coach invoice)",
+		p.ToEmail, subject, p.PayURL)
+	return nil
+}
+
 func (NoopMailer) SendBalancePaid(_ context.Context, p BalancePaid) error {
 	subject, _, err := renderBalancePaid(p)
 	if err != nil {

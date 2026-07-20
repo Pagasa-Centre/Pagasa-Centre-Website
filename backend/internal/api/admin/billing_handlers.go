@@ -98,6 +98,50 @@ func postInvoiceBulk(svc *billing.Service, rec *adminlog.Recorder, regRepo *regs
 	}
 }
 
+func postCoachInvoice(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body billing.VersionedBody
+		_ = request.Decode(r, &body)
+		groupID := chi.URLParam(r, "groupID")
+		actor := admin.ActorFrom(r.Context())
+		if err := svc.SendCoachInvoice(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
+		gid := groupID
+		admin.Audit(rec, r, adminlog.ActionCoachInvoiceSent, &gid,
+			"Sent coach invoice to "+admin.GroupSummary(g), nil)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func postCoachInvoiceBulk(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body billing.BulkInvoiceRequest
+		if err := request.Decode(r, &body); err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		actor := admin.ActorFrom(r.Context())
+		errs := svc.SendCoachInvoicesBulk(r.Context(), actor, body.GroupIDs)
+		for _, id := range body.GroupIDs {
+			if _, failed := errs[id]; failed {
+				continue
+			}
+			g, _ := regRepo.FindGroupByID(r.Context(), id)
+			gid := id
+			admin.Audit(rec, r, adminlog.ActionCoachInvoiceSent, &gid,
+				"Sent coach invoice to "+admin.GroupSummary(g), nil)
+		}
+		if len(errs) > 0 {
+			render.Json(w, http.StatusMultiStatus, map[string]any{"errors": errs})
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 func postUnallocate(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody

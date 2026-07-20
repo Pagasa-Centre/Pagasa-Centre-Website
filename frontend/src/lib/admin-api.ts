@@ -99,6 +99,7 @@ export type AdminCamper = {
   last_name: string;
   attendance_type: string;
   age: number;
+  needs_coach?: boolean | null;
   accommodation_first_choice?: string | null;
   accommodation_second_choice?: string | null;
   day_pass_days?: string[] | null;
@@ -125,6 +126,10 @@ export type AdminGroup = {
   last_action_by?: string | null;
   last_action_at?: string | null;
   is_free: boolean;
+  coach_included_in_balance?: boolean;
+  stripe_coach_invoice_id?: string | null;
+  coach_invoice_due_at?: string | null;
+  coach_fee_paid_at?: string | null;
   campers: AdminCamper[];
 };
 
@@ -297,6 +302,21 @@ export const adminApi = {
   sendInvoiceBulk: (groupIds: string[]) =>
     adminFetch<void | { errors: Record<string, string> }>(
       "/admin/registrations/invoice-bulk",
+      {
+        method: "POST",
+        body: JSON.stringify({ group_ids: groupIds }),
+      },
+    ),
+
+  sendCoachInvoice: (groupId: string, expectedVersion: number) =>
+    adminFetch<void>(`/admin/registrations/${groupId}/coach-invoice`, {
+      method: "POST",
+      body: JSON.stringify({ expected_version: expectedVersion }),
+    }),
+
+  sendCoachInvoiceBulk: (groupIds: string[]) =>
+    adminFetch<void | { errors: Record<string, string> }>(
+      "/admin/registrations/coach-invoice-bulk",
       {
         method: "POST",
         body: JSON.stringify({ group_ids: groupIds }),

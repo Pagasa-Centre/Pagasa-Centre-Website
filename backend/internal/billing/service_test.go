@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
@@ -64,6 +65,7 @@ func TestBalanceInvoiceItemsIncludesUnit(t *testing.T) {
 		}},
 		map[string]string{"static_caravan": "Static Caravan"},
 		map[string]string{"caravan_5": "Caravan 5"},
+		0,
 	)
 	if len(items) != 1 {
 		t.Fatalf("items len = %d, want 1", len(items))
@@ -98,6 +100,7 @@ func TestBalanceInvoiceItemsIncludesDayPass(t *testing.T) {
 		},
 		map[string]string{"lodge": "Lodge"},
 		map[string]string{},
+		0,
 	)
 	if len(items) != 3 {
 		t.Fatalf("items = %v, want 3", items)
@@ -130,6 +133,67 @@ func TestDayPassLine(t *testing.T) {
 	}
 	if _, ok := dayPassLine(domain.Camper{AttendanceType: domain.AttendanceDayPass}, "price_day"); ok {
 		t.Error("day-pass camper with no days should not produce a line")
+	}
+}
+
+func TestCoachEligibleCount(t *testing.T) {
+	yes := true
+	no := false
+	campers := []domain.Camper{
+		{AttendanceType: domain.AttendanceFullWeek, Age: 30, NeedsCoach: &yes},  // counts
+		{AttendanceType: domain.AttendanceFullWeek, Age: 4, NeedsCoach: &yes},   // counts (>= 4)
+		{AttendanceType: domain.AttendanceFullWeek, Age: 3, NeedsCoach: &yes},   // free (under 4)
+		{AttendanceType: domain.AttendanceFullWeek, Age: 25, NeedsCoach: &no},   // opted out
+		{AttendanceType: domain.AttendanceFullWeek, Age: 25, NeedsCoach: nil},   // not set
+		{AttendanceType: domain.AttendanceDayPass, Age: 25, NeedsCoach: &yes},   // day-pass excluded
+	}
+	if n := coachEligibleCount(campers); n != 2 {
+		t.Fatalf("coachEligibleCount = %d, want 2", n)
+	}
+}
+
+func TestCoachLine(t *testing.T) {
+	line, ok := coachLine(3, "price_coach")
+	if !ok || line.PriceID != "price_coach" || line.Quantity != 3 {
+		t.Fatalf("got %+v ok=%v, want {price_coach 3} true", line, ok)
+	}
+	if _, ok := coachLine(0, "price_coach"); ok {
+		t.Error("zero passengers should not produce a coach line")
+	}
+}
+
+func TestBalanceInvoiceItemsIncludesCoach(t *testing.T) {
+	items := balanceInvoiceItems(
+		[]domain.Camper{{
+			FirstName:                  "Josh",
+			LastName:                   "Basco",
+			AttendanceType:             domain.AttendanceFullWeek,
+			AllocatedAccommodationCode: strPtr("lodge"),
+		}},
+		map[string]string{"lodge": "Lodge"},
+		map[string]string{},
+		2,
+	)
+	if len(items) != 2 {
+		t.Fatalf("items = %v, want 2", items)
+	}
+	if items[1] != "Coach transport (×2)" {
+		t.Fatalf("coach line = %q", items[1])
+	}
+	// No coach line when count is 0.
+	none := balanceInvoiceItems(
+		[]domain.Camper{{
+			FirstName:                  "Josh",
+			LastName:                   "Basco",
+			AttendanceType:             domain.AttendanceFullWeek,
+			AllocatedAccommodationCode: strPtr("lodge"),
+		}},
+		map[string]string{"lodge": "Lodge"},
+		map[string]string{},
+		0,
+	)
+	if len(none) != 1 {
+		t.Fatalf("items = %v, want 1 (no coach)", none)
 	}
 }
 
@@ -184,6 +248,10 @@ func TestAllocate_persistsUnit(t *testing.T) {
 	ctx := context.Background()
 	repo := storage.NewRepository(pool)
 	svc := NewService(repo, NewStripeBilling(), nil, nil, Config{StripePriceChildUnder3: "price_child"})
+	// Allocation auto-resolves the tier's Stripe price, so lodge must have one.
+	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+		t.Fatalf("seed lodge price: %v", err)
+	}
 
 	// Seed a paid group with one full-week camper via raw SQL.
 	var groupID, camperID string
@@ -237,6 +305,9 @@ func TestAllocate_versionConflict(t *testing.T) {
 	ctx := context.Background()
 	repo := storage.NewRepository(pool)
 	svc := NewService(repo, NewStripeBilling(), nil, nil, Config{StripePriceChildUnder3: "price_child"})
+	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+		t.Fatalf("seed lodge price: %v", err)
+	}
 
 	var groupID, camperID string
 	err := pool.QueryRow(ctx, `
@@ -520,16 +591,24 @@ func TestSendAccommodationChangedNotice(t *testing.T) {
 
 // stubStripe implements stripeClient for delete-registration tests.
 type stubStripe struct {
-	refundPI    func(ctx context.Context, id string) (int64, error)
-	refundInv   func(ctx context.Context, id string) (int64, error)
-	voidInv     func(ctx context.Context, id string) error
-	voidInvIdem func(ctx context.Context, id string) error
+	refundPI     func(ctx context.Context, id string) (int64, error)
+	refundInv    func(ctx context.Context, id string) (int64, error)
+	voidInv      func(ctx context.Context, id string) error
+	voidInvIdem  func(ctx context.Context, id string) error
+	ensureCust   func(ctx context.Context, existingID, email, name, groupID string) (string, error)
+	createInvoice func(ctx context.Context, customerID, groupID string, lines []InvoiceLine, daysUntilDue int64, invoiceType string) (InvoiceResult, error)
 }
 
-func (s *stubStripe) EnsureCustomer(context.Context, string, string, string, string) (string, error) {
+func (s *stubStripe) EnsureCustomer(ctx context.Context, existingID, email, name, groupID string) (string, error) {
+	if s.ensureCust != nil {
+		return s.ensureCust(ctx, existingID, email, name, groupID)
+	}
 	return "", errors.New("unexpected EnsureCustomer")
 }
-func (s *stubStripe) CreateInvoice(context.Context, string, string, []InvoiceLine, int64) (InvoiceResult, error) {
+func (s *stubStripe) CreateInvoice(ctx context.Context, customerID, groupID string, lines []InvoiceLine, daysUntilDue int64, invoiceType string) (InvoiceResult, error) {
+	if s.createInvoice != nil {
+		return s.createInvoice(ctx, customerID, groupID, lines, daysUntilDue, invoiceType)
+	}
 	return InvoiceResult{}, errors.New("unexpected CreateInvoice")
 }
 func (s *stubStripe) VoidInvoice(ctx context.Context, invoiceID string) error {
@@ -1146,5 +1225,198 @@ func TestRemoveCamper_sheetFailureNonFatal(t *testing.T) {
 	campers, _ := repo.CampersForGroup(ctx, groupID)
 	if len(campers) != 2 {
 		t.Fatalf("expected 2 campers, got %d", len(campers))
+	}
+}
+
+// insertCoachGroup seeds a paid group with one full-week camper (age 30) who
+// needs the coach, allocated to `tier`, with the given billing_status.
+func insertCoachGroup(ctx context.Context, t *testing.T, pool *pgxpool.Pool, billingStatus, tier string, isFree bool) string {
+	t.Helper()
+	var groupID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, stripe_customer_id, total_amount_pence, currency, billing_status, is_free, version
+		) VALUES ('Coach', 'Rider', 'coach@example.com', '07000000000', 'paid', 'cus_seed', 5000, 'GBP', $1, $2, 1)
+		RETURNING id`, billingStatus, isFree).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert coach group: %v", err)
+	}
+	_, err = pool.Exec(ctx, `
+		INSERT INTO registrations (
+			group_id, is_main_contact, first_name, last_name, gender, age,
+			cell_leader_name, is_cell_leader, attendance_type, needs_coach,
+			allocated_accommodation_code
+		) VALUES ($1, true, 'Coach', 'Rider', 'male', 30, 'Leader', false, 'full_week', true, $2)`,
+		groupID, tier)
+	if err != nil {
+		t.Fatalf("insert coach camper: %v", err)
+	}
+	return groupID
+}
+
+func TestSendInvoice_foldsCoachLine(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+		t.Fatalf("set lodge price: %v", err)
+	}
+
+	var captured []InvoiceLine
+	var capturedType string
+	stub := &stubStripe{
+		ensureCust: func(_ context.Context, existingID, _, _, _ string) (string, error) {
+			return "cus_seed", nil
+		},
+		createInvoice: func(_ context.Context, _, _ string, lines []InvoiceLine, _ int64, invoiceType string) (InvoiceResult, error) {
+			captured = lines
+			capturedType = invoiceType
+			return InvoiceResult{ID: "in_balance", StripeEmailed: true}, nil
+		},
+	}
+	svc := NewService(repo, stub, nil, nil, Config{StripePriceCoach: "price_coach"})
+
+	groupID := insertCoachGroup(ctx, t, pool, domain.BillingAllocated, "lodge", false)
+	if err := svc.SendInvoice(ctx, groupID, "Admin", domain.SkipVersionCheck); err != nil {
+		t.Fatalf("SendInvoice: %v", err)
+	}
+	if capturedType != "balance" {
+		t.Fatalf("invoice type = %q, want balance", capturedType)
+	}
+	var haveLodge, haveCoach bool
+	for _, l := range captured {
+		if l.PriceID == "price_lodge" && l.Quantity == 1 {
+			haveLodge = true
+		}
+		if l.PriceID == "price_coach" && l.Quantity == 1 {
+			haveCoach = true
+		}
+	}
+	if !haveLodge || !haveCoach {
+		t.Fatalf("lines = %+v, want lodge + coach", captured)
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g == nil || !g.CoachIncludedInBalance {
+		t.Fatalf("coach_included_in_balance not set: %+v", g)
+	}
+	if g.BillingStatus != domain.BillingInvoiced {
+		t.Fatalf("billing_status = %q, want invoiced", g.BillingStatus)
+	}
+}
+
+func TestSendCoachInvoice_paidGroup(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+
+	var captured []InvoiceLine
+	var capturedType string
+	stub := &stubStripe{
+		ensureCust: func(_ context.Context, existingID, _, _, _ string) (string, error) {
+			return "cus_seed", nil
+		},
+		createInvoice: func(_ context.Context, _, _ string, lines []InvoiceLine, _ int64, invoiceType string) (InvoiceResult, error) {
+			captured = lines
+			capturedType = invoiceType
+			return InvoiceResult{ID: "in_coach", StripeEmailed: true}, nil
+		},
+	}
+	svc := NewService(repo, stub, nil, nil, Config{StripePriceCoach: "price_coach"})
+
+	groupID := insertCoachGroup(ctx, t, pool, domain.BillingBalancePaid, "lodge", false)
+	if err := svc.SendCoachInvoice(ctx, groupID, "Admin", domain.SkipVersionCheck); err != nil {
+		t.Fatalf("SendCoachInvoice: %v", err)
+	}
+	if capturedType != "coach" {
+		t.Fatalf("invoice type = %q, want coach", capturedType)
+	}
+	if len(captured) != 1 || captured[0].PriceID != "price_coach" || captured[0].Quantity != 1 {
+		t.Fatalf("lines = %+v, want single coach line", captured)
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g == nil || g.StripeCoachInvoiceID == nil || *g.StripeCoachInvoiceID != "in_coach" {
+		t.Fatalf("coach invoice id not stored: %+v", g)
+	}
+	if g.BillingStatus != domain.BillingBalancePaid {
+		t.Fatalf("billing_status = %q, want unchanged balance_paid", g.BillingStatus)
+	}
+
+	// Second send rejects — already charged.
+	err := svc.SendCoachInvoice(ctx, groupID, "Admin", domain.SkipVersionCheck)
+	var apiErr commonerrors.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		t.Fatalf("expected bad_request on repeat, got %v", err)
+	}
+}
+
+func TestSendCoachInvoice_guards(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{StripePriceCoach: "price_coach"})
+
+	// Allocated (not yet invoiced) → coach folds into balance instead.
+	allocated := insertCoachGroup(ctx, t, pool, domain.BillingAllocated, "lodge", false)
+	if err := svc.SendCoachInvoice(ctx, allocated, "Admin", domain.SkipVersionCheck); err == nil {
+		t.Fatal("expected rejection for allocated group")
+	}
+
+	// Sponsored group → never coach-charged.
+	free := insertCoachGroup(ctx, t, pool, domain.BillingInvoiced, "lodge", true)
+	err := svc.SendCoachInvoice(ctx, free, "Admin", domain.SkipVersionCheck)
+	var apiErr commonerrors.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		t.Fatalf("expected bad_request for is_free, got %v", err)
+	}
+
+	// Invoiced group with no coach passengers → nothing to charge.
+	var noCoach string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, total_amount_pence, currency, billing_status
+		) VALUES ('No', 'Coach', 'nocoach@example.com', '07000000000', 'paid', 5000, 'GBP', 'invoiced')
+		RETURNING id`).Scan(&noCoach); err != nil {
+		t.Fatalf("insert no-coach group: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO registrations (
+			group_id, is_main_contact, first_name, last_name, gender, age,
+			cell_leader_name, is_cell_leader, attendance_type, needs_coach
+		) VALUES ($1, true, 'No', 'Coach', 'male', 30, 'Leader', false, 'full_week', false)`,
+		noCoach); err != nil {
+		t.Fatalf("insert no-coach camper: %v", err)
+	}
+	if err := svc.SendCoachInvoice(ctx, noCoach, "Admin", domain.SkipVersionCheck); err == nil {
+		t.Fatal("expected rejection when no coach passengers")
+	}
+}
+
+func TestHandleCoachInvoicePaid(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{})
+
+	groupID := insertCoachGroup(ctx, t, pool, domain.BillingBalancePaid, "lodge", false)
+	if err := repo.SetCoachInvoiceMeta(ctx, groupID, "in_coach_paid", time.Now().Add(15*24*time.Hour), domain.ActionMeta{
+		Actor:           "Admin",
+		Action:          "coach_invoice_sent",
+		ExpectedVersion: domain.SkipVersionCheck,
+	}); err != nil {
+		t.Fatalf("seed coach invoice: %v", err)
+	}
+
+	if err := svc.HandleCoachInvoicePaid(ctx, "in_coach_paid", groupID); err != nil {
+		t.Fatalf("HandleCoachInvoicePaid: %v", err)
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g == nil || g.CoachFeePaidAt == nil {
+		t.Fatalf("coach_fee_paid_at not set: %+v", g)
+	}
+	// Idempotent on repeat.
+	if err := svc.HandleCoachInvoicePaid(ctx, "in_coach_paid", groupID); err != nil {
+		t.Fatalf("HandleCoachInvoicePaid repeat: %v", err)
 	}
 }
