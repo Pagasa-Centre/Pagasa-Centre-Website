@@ -334,13 +334,17 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 	// Stripe is the primary sender. Only if Stripe couldn't email the invoice
 	// (e.g. restricted account) do we fall back to emailing the link ourselves.
 	if !res.StripeEmailed {
+		emailCoachCount := int64(0)
+		if coachIncluded {
+			emailCoachCount = coachCount
+		}
 		if err := s.mailer.SendBalanceInvoice(ctx, email.BalanceInvoice{
 			ToEmail:     g.ContactEmail,
 			ToName:      g.ContactFirstName,
 			PayURL:      res.HostedURL,
 			DueDate:     res.DueAt.Format("2 Jan 2006"),
 			AmountLabel: formatAmountLabel(res.AmountDuePence, res.Currency),
-			Items:       balanceInvoiceItems(campers, accNames, s.unitNames(ctx), coachCount),
+			Items:       balanceInvoiceItems(campers, accNames, s.unitNames(ctx), emailCoachCount),
 			Changes:     changes,
 		}); err != nil {
 			log.Printf("billing: fallback balance invoice email to %s: %v", g.ContactEmail, err)
