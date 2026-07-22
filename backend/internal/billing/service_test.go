@@ -1800,7 +1800,13 @@ func TestUpdateDayPassCamper_success(t *testing.T) {
 	ctx := context.Background()
 	repo := storage.NewRepository(pool)
 	rec := &recordingSheets{}
-	svc := NewService(repo, &stubStripe{}, nil, rec, Config{})
+	stripe := &stubStripe{
+		voidInvIdem: func(context.Context, string) error {
+			t.Fatal("unexpected VoidInvoiceIdempotent")
+			return nil
+		},
+	}
+	svc := NewService(repo, stripe, nil, rec, Config{})
 
 	groupID, camperID := insertDayPassGroup(ctx, t, pool, domain.BillingNone)
 
@@ -1850,6 +1856,9 @@ func TestUpdateDayPassCamper_success(t *testing.T) {
 	}
 	if rec.lastGroupID != groupID {
 		t.Fatalf("sheet group id = %q", rec.lastGroupID)
+	}
+	if len(stripe.creditCalls) != 0 {
+		t.Fatalf("credit calls = %d, want 0", len(stripe.creditCalls))
 	}
 }
 
