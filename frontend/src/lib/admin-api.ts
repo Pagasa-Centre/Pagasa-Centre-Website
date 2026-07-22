@@ -377,6 +377,28 @@ export const adminApi = {
       },
     ),
 
+  updateDayPassCamper: (
+    groupId: string,
+    camperId: string,
+    data: {
+      tshirt_option: string;
+      shirt_size: string;
+      needs_catering: boolean;
+      dietary_requirements: string;
+    },
+    expectedVersion: number,
+  ) =>
+    adminFetch<void>(
+      `/admin/registrations/${groupId}/campers/${camperId}/day-pass`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          expected_version: expectedVersion,
+          ...data,
+        }),
+      },
+    ),
+
   resendInvoice: (groupId: string, expectedVersion: number) =>
     adminFetch<void>(`/admin/registrations/${groupId}/invoice/resend`, {
       method: "POST",

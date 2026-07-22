@@ -878,6 +878,116 @@ func (s *Service) ConvertCamperToDayVisitor(
 	return summary, nil
 }
 
+// UpdateDayPassSummary captures the outcome of editing a day-pass camper's details.
+type UpdateDayPassSummary struct {
+	CamperName string
+}
+
+// UpdateDayPassCamper updates non-billing day-pass fields (shirt, catering, dietary).
+func (s *Service) UpdateDayPassCamper(
+	ctx context.Context,
+	groupID, camperID, actor string,
+	expectedVersion int,
+	req UpdateDayPassCamperRequest,
+) (UpdateDayPassSummary, error) {
+	g, err := s.repo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		return UpdateDayPassSummary{}, commonerrors.Internal(err.Error())
+	}
+	if g == nil {
+		return UpdateDayPassSummary{}, commonerrors.NotFound("group not found")
+	}
+
+	campers, err := s.repo.CampersForGroup(ctx, groupID)
+	if err != nil {
+		return UpdateDayPassSummary{}, commonerrors.Internal(err.Error())
+	}
+
+	var target *domain.Camper
+	for i := range campers {
+		if campers[i].ID == camperID {
+			target = &campers[i]
+			break
+		}
+	}
+	if target == nil {
+		return UpdateDayPassSummary{}, commonerrors.NotFound("camper not found")
+	}
+
+	summary := UpdateDayPassSummary{
+		CamperName: strings.TrimSpace(target.FirstName + " " + target.LastName),
+	}
+
+	if target.AttendanceType != domain.AttendanceDayPass {
+		return UpdateDayPassSummary{}, commonerrors.BadRequest("only day-pass campers can be edited here", nil)
+	}
+
+	fields := map[string]string{}
+	registration.ValidateDayPass("attendance", domain.AttendanceDTO{
+		Type:          domain.AttendanceDayPass,
+		Days:          target.DayPassDays,
+		TshirtOption:  req.TshirtOption,
+		ShirtSize:     req.ShirtSize,
+		NeedsCatering: req.NeedsCatering,
+	}, fields)
+	if len(fields) > 0 {
+		return UpdateDayPassSummary{}, commonerrors.ValidationFailed(fields)
+	}
+
+	var shirtSize *string
+	switch req.TshirtOption {
+	case domain.TshirtOptionNone:
+		na := domain.ShirtSizeNotApplicable
+		shirtSize = &na
+	default:
+		ss := strings.TrimSpace(req.ShirtSize)
+		shirtSize = &ss
+	}
+	needsCatering := false
+	if req.NeedsCatering != nil {
+		needsCatering = *req.NeedsCatering
+	}
+
+	var dietary *string
+	if req.Dietary != nil {
+		d := strings.TrimSpace(*req.Dietary)
+		dietary = &d
+	}
+
+	meta := domain.ActionMeta{
+		Actor:           actor,
+		Action:          "camper_updated",
+		ExpectedVersion: expectedVersion,
+	}
+	if err := s.repo.UpdateDayPassCamperMeta(
+		ctx, groupID, camperID, req.TshirtOption, needsCatering, shirtSize, dietary, meta,
+	); err != nil {
+		return UpdateDayPassSummary{}, mapVersionErr(ctx, s.repo, groupID, err)
+	}
+
+	if g.PaymentStatus == domain.PaymentPaid {
+		remaining, err := s.repo.CampersForGroup(ctx, groupID)
+		if err != nil {
+			log.Printf("billing: load campers after day-pass edit %s/%s: %v", groupID, camperID, err)
+		} else {
+			gAfter, err := s.repo.FindGroupByID(ctx, groupID)
+			if err != nil || gAfter == nil {
+				log.Printf("billing: reload group after day-pass edit %s: %v", groupID, err)
+			} else {
+				if err := s.sheets.RemoveByGroupID(ctx, groupID); err != nil {
+					log.Printf("billing: remove group %s from sheet after day-pass edit: %v", groupID, err)
+				}
+				rows := sheetRowsForGroup(gAfter, remaining)
+				if err := s.sheets.AppendPaidAndRemovePending(ctx, groupID, rows); err != nil {
+					log.Printf("billing: re-sync sheet for group %s after day-pass edit: %v", groupID, err)
+				}
+			}
+		}
+	}
+
+	return summary, nil
+}
+
 func sheetRowsForGroup(g *domain.Group, campers []domain.Camper) []sheets.Row {
 	rows := make([]sheets.Row, 0, len(campers))
 	for _, c := range campers {

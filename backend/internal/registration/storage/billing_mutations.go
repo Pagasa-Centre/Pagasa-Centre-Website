@@ -366,6 +366,52 @@ func (r *Repository) ConvertCamperToDayPassMeta(
 	return tx.Commit(ctx)
 }
 
+// UpdateDayPassCamperMeta updates day-pass shirt/catering/dietary fields without
+// touching attendance, allocation, or billing status.
+func (r *Repository) UpdateDayPassCamperMeta(
+	ctx context.Context,
+	groupID, camperID string,
+	tshirtOption string,
+	needsCatering bool,
+	shirtSize, dietary *string,
+	meta domain.ActionMeta,
+) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	if err != nil {
+		return err
+	}
+	if g == nil {
+		return fmt.Errorf("group %q not found", groupID)
+	}
+	if err := checkVersion(g, meta); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE registrations SET
+			day_pass_tshirt_option = $3,
+			day_pass_needs_catering = $4,
+			shirt_size = $5,
+			dietary_requirements = $6
+		WHERE id = $1 AND group_id = $2`,
+		camperID, groupID, tshirtOption, needsCatering, shirtSize, dietary)
+	if err != nil {
+		return fmt.Errorf("update day-pass camper: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("camper %q not in group %q", camperID, groupID)
+	}
+	if err := stampExec(ctx, tx, groupID, meta, ""); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // DeleteGroupMeta permanently removes a registration group. Campers cascade-delete
 // via FK. Version is checked before delete so stale dashboards cannot remove a
 // concurrently modified group.

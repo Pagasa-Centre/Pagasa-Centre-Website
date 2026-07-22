@@ -244,6 +244,7 @@ const LAST_ACTION_LABELS: Record<string, string> = {
   registration_deleted: "Registration deleted",
   camper_removed: "Camper removed",
   camper_converted: "Converted to day visitor",
+  camper_updated: "Day-pass details updated",
   coach_invoice_sent: "Coach invoice sent",
 };
 
@@ -736,6 +737,30 @@ export default function AdminDashboard() {
       await load();
     } catch (err) {
       await handleAdminError(err, "Convert to day visitor failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function editDayPassCamper(
+    g: AdminGroup,
+    c: AdminCamper,
+    data: {
+      tshirt_option: string;
+      shirt_size: string;
+      needs_catering: boolean;
+      dietary_requirements: string;
+    },
+  ) {
+    setBusy(`editdp-${c.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await adminApi.updateDayPassCamper(g.id, c.id, data, g.version);
+      setNotice(`Updated day-pass details for ${c.first_name} ${c.last_name}.`);
+      await load();
+    } catch (err) {
+      await handleAdminError(err, "Update day-pass details failed.");
     } finally {
       setBusy(null);
     }
@@ -1358,6 +1383,7 @@ export default function AdminDashboard() {
               onDelete={() => deleteRegistration(g)}
               onRemoveCamper={(c) => removeCamperFromGroup(g, c)}
               onConvertToDayVisitor={(c, data) => convertToDayVisitor(g, c, data)}
+              onEditDayPass={(c, data) => editDayPassCamper(g, c, data)}
               shirtSizes={shirtSizes}
               onSendCoachInvoice={() => sendCoachInvoice(g)}
             />
@@ -1651,6 +1677,10 @@ function depositCreditEligible(g: AdminGroup, c: AdminCamper): boolean {
   return g.payment_status === "paid" && c.age >= MIN_DEPOSIT_AGE && !g.is_free;
 }
 
+function canEditDayPass(c: AdminCamper): boolean {
+  return c.attendance_type === "day_pass";
+}
+
 type ConvertDayVisitorData = {
   days: string[];
   tshirt_option: string;
@@ -1868,6 +1898,190 @@ function ConvertDayVisitorPanel({
   );
 }
 
+type EditDayPassData = {
+  tshirt_option: string;
+  shirt_size: string;
+  needs_catering: boolean;
+  dietary_requirements: string;
+};
+
+function EditDayPassPanel({
+  camper,
+  shirtSizes,
+  busy,
+  onConfirm,
+  onCancel,
+}: {
+  camper: AdminCamper;
+  shirtSizes: ShirtSize[];
+  busy: boolean;
+  onConfirm: (data: EditDayPassData) => void;
+  onCancel: () => void;
+}) {
+  const initialShirtSize =
+    camper.shirt_size && camper.shirt_size !== SHIRT_SIZE_NOT_APPLICABLE
+      ? camper.shirt_size
+      : "";
+  const initialTshirt: "" | "team_activities" | "tshirt_only" | "none" =
+    camper.day_pass_tshirt_option === "team_activities" ||
+    camper.day_pass_tshirt_option === "tshirt_only" ||
+    camper.day_pass_tshirt_option === "none"
+      ? camper.day_pass_tshirt_option
+      : "none";
+  const initialCatering =
+    typeof camper.day_pass_needs_catering === "boolean"
+      ? camper.day_pass_needs_catering
+      : false;
+
+  const [tshirtOption, setTshirtOption] = useState<
+    "" | "team_activities" | "tshirt_only" | "none"
+  >(initialTshirt);
+  const [shirtSize, setShirtSize] = useState(
+    initialTshirt === "none" ? SHIRT_SIZE_NOT_APPLICABLE : initialShirtSize,
+  );
+  const [needsCatering, setNeedsCatering] = useState<boolean | null>(
+    initialCatering,
+  );
+  const [dietary, setDietary] = useState(camper.dietary_requirements ?? "");
+
+  const canSubmit =
+    tshirtOption !== "" &&
+    needsCatering !== null &&
+    (tshirtOption === "none" || shirtSize !== "");
+
+  return (
+    <div className="mt-2 w-full basis-full rounded-lg border border-sky-200 bg-sky-50 p-4 flex flex-col gap-4">
+      <p className="text-sm font-semibold text-sky-900">
+        Edit day-pass details for {camper.first_name}
+      </p>
+      <div className="flex flex-col gap-2">
+        <span className="text-xs font-bold uppercase tracking-widest text-neutral-700">
+          T-shirt <span className="text-primary">*</span>
+        </span>
+        <div className="flex flex-col gap-2">
+          {(
+            [
+              {
+                v: "team_activities" as const,
+                label:
+                  "Participating in team activities (T-shirt required)",
+              },
+              {
+                v: "tshirt_only" as const,
+                label: "Purchasing an official camp T-shirt",
+              },
+              { v: "none" as const, label: "Not purchasing a T-shirt" },
+            ] as const
+          ).map((opt) => (
+            <label
+              key={opt.v}
+              className="flex items-start gap-3 text-sm text-neutral-800"
+            >
+              <input
+                type="radio"
+                name={`edit-${camper.id}-tshirt`}
+                value={opt.v}
+                checked={tshirtOption === opt.v}
+                onChange={() => {
+                  setTshirtOption(opt.v);
+                  setShirtSize(
+                    opt.v === "none" ? SHIRT_SIZE_NOT_APPLICABLE : "",
+                  );
+                }}
+                className="text-primary focus:ring-primary mt-0.5"
+              />
+              <span>{opt.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      <ShirtSizeSelect
+        id={`edit-${camper.id}-shirt`}
+        name={`edit-${camper.id}-shirt`}
+        value={tshirtOption === "none" ? "" : shirtSize}
+        sizes={shirtSizes}
+        required={tshirtOption !== "none" && tshirtOption !== ""}
+        disabled={tshirtOption === "none"}
+        onChange={setShirtSize}
+      />
+      <div className="flex flex-col gap-2">
+        <span className="text-xs font-bold uppercase tracking-widest text-neutral-700">
+          Catering required? <span className="text-primary">*</span>
+        </span>
+        <div className="flex gap-4">
+          {(
+            [
+              { v: true, label: "Yes" },
+              { v: false, label: "No" },
+            ] as const
+          ).map((opt) => (
+            <label
+              key={String(opt.v)}
+              className="flex items-center gap-2 text-sm text-neutral-800"
+            >
+              <input
+                type="radio"
+                name={`edit-${camper.id}-catering`}
+                checked={needsCatering === opt.v}
+                onChange={() => setNeedsCatering(opt.v)}
+                className="text-primary focus:ring-primary"
+              />
+              {opt.label}
+            </label>
+          ))}
+        </div>
+      </div>
+      <div className="flex flex-col gap-2">
+        <label
+          htmlFor={`edit-${camper.id}-diet`}
+          className="text-xs font-bold uppercase tracking-widest text-neutral-700"
+        >
+          Allergies / dietary requirements
+        </label>
+        <textarea
+          id={`edit-${camper.id}-diet`}
+          rows={2}
+          value={dietary}
+          placeholder="Type N/A if none"
+          onChange={(e) => setDietary(e.target.value)}
+          className="px-4 py-3 bg-white border border-neutral-300 text-neutral-900 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary resize-y"
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={busy || !canSubmit}
+          onClick={() => {
+            if (!canSubmit || needsCatering === null) {
+              return;
+            }
+            onConfirm({
+              tshirt_option: tshirtOption,
+              shirt_size:
+                tshirtOption === "none"
+                  ? SHIRT_SIZE_NOT_APPLICABLE
+                  : shirtSize,
+              needs_catering: needsCatering,
+              dietary_requirements: dietary,
+            });
+          }}
+          className="px-5 py-2.5 text-sm font-bold text-white bg-neutral-800 rounded-lg hover:bg-neutral-700 disabled:opacity-40"
+        >
+          {busy ? "Saving…" : "Save changes"}
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onCancel}
+          className="px-4 py-2.5 text-sm font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function GroupCard({
   g,
   accommodations,
@@ -1895,6 +2109,7 @@ function GroupCard({
   onDelete,
   onRemoveCamper,
   onConvertToDayVisitor,
+  onEditDayPass,
   shirtSizes,
   onSendCoachInvoice,
 }: {
@@ -1930,6 +2145,7 @@ function GroupCard({
   onDelete: () => void;
   onRemoveCamper: (c: AdminCamper) => void;
   onConvertToDayVisitor: (c: AdminCamper, data: ConvertDayVisitorData) => Promise<void>;
+  onEditDayPass: (c: AdminCamper, data: EditDayPassData) => Promise<void>;
   shirtSizes: ShirtSize[];
   onSendCoachInvoice: () => void;
 }) {
@@ -1943,6 +2159,7 @@ function GroupCard({
 
   const [contactOpen, setContactOpen] = useState(false);
   const [convertCamperId, setConvertCamperId] = useState<string | null>(null);
+  const [editDayPassId, setEditDayPassId] = useState<string | null>(null);
   const [cFirst, setCFirst] = useState(g.contact_first_name);
   const [cLast, setCLast] = useState(g.contact_last_name);
   const [cEmail, setCEmail] = useState(g.contact_email);
@@ -2357,7 +2574,7 @@ function GroupCard({
                     return (
                       <div
                         key={c.id}
-                        className="flex items-center justify-between gap-3 p-3"
+                        className="flex flex-wrap items-center justify-between gap-3 p-3"
                       >
                         <span className="font-medium text-neutral-800">
                           {c.first_name} {c.last_name}{" "}
@@ -2365,10 +2582,24 @@ function GroupCard({
                             Age {c.age}
                           </span>
                         </span>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm text-neutral-700 font-semibold text-right">
                             Day pass ({days} {days === 1 ? "day" : "days"})
                           </span>
+                          {canEditDayPass(c) && (
+                            <button
+                              type="button"
+                              disabled={busy === `editdp-${c.id}`}
+                              onClick={() =>
+                                setEditDayPassId((id) =>
+                                  id === c.id ? null : c.id,
+                                )
+                              }
+                              className="px-3 py-1.5 text-xs font-semibold text-sky-800 bg-sky-50 border border-sky-200 rounded-lg hover:bg-sky-100 disabled:opacity-50 shrink-0"
+                            >
+                              {editDayPassId === c.id ? "Close" : "Edit details"}
+                            </button>
+                          )}
                           {canRemoveCamper(g, c) && (
                             <button
                               type="button"
@@ -2380,6 +2611,19 @@ function GroupCard({
                             </button>
                           )}
                         </div>
+                        {editDayPassId === c.id && (
+                          <EditDayPassPanel
+                            camper={c}
+                            shirtSizes={shirtSizes}
+                            busy={busy === `editdp-${c.id}`}
+                            onConfirm={(data) => {
+                              void onEditDayPass(c, data).then(() =>
+                                setEditDayPassId(null),
+                              );
+                            }}
+                            onCancel={() => setEditDayPassId(null)}
+                          />
+                        )}
                       </div>
                     );
                   })}

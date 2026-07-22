@@ -1739,3 +1739,204 @@ func TestConvertCamperToDayVisitor_under4NoCredit(t *testing.T) {
 		}
 	}
 }
+
+type recordingSheets struct {
+	sheets.NoopSync
+	appendCalls int
+	lastGroupID string
+	lastRows    []sheets.Row
+}
+
+func (r *recordingSheets) AppendPaidAndRemovePending(_ context.Context, groupID string, rows []sheets.Row) error {
+	r.appendCalls++
+	r.lastGroupID = groupID
+	r.lastRows = rows
+	return nil
+}
+
+func insertDayPassGroup(ctx context.Context, t *testing.T, pool *pgxpool.Pool, billingStatus string) (groupID, camperID string) {
+	t.Helper()
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, total_amount_pence, currency, billing_status, version
+		) VALUES ('Day', 'Pass', 'daypass@example.com', '07000000000', 'paid', 0, 'GBP', $1, 1)
+		RETURNING id`, billingStatus).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+	tshirt := domain.TshirtOptionTeamActivities
+	catering := true
+	shirt := "adult_m"
+	dietary := "None"
+	err = pool.QueryRow(ctx, `
+		INSERT INTO registrations (
+			group_id, is_main_contact, first_name, last_name, gender, age,
+			cell_leader_name, is_cell_leader, attendance_type,
+			day_pass_days, day_pass_tshirt_option, day_pass_needs_catering,
+			shirt_size, dietary_requirements
+		) VALUES ($1, true, 'Day', 'Passer', 'female', 30, 'Leader', false, 'day_pass',
+			'{mon,tue}', $2, $3, $4, $5)
+		RETURNING id`, groupID, tshirt, catering, shirt, dietary).Scan(&camperID)
+	if err != nil {
+		t.Fatalf("insert camper: %v", err)
+	}
+	return groupID, camperID
+}
+
+func validUpdateDayPassRequest() UpdateDayPassCamperRequest {
+	needs := false
+	diet := "Gluten free"
+	return UpdateDayPassCamperRequest{
+		TshirtOption:  domain.TshirtOptionTshirtOnly,
+		ShirtSize:     "adult_l",
+		NeedsCatering: &needs,
+		Dietary:       &diet,
+	}
+}
+
+func TestUpdateDayPassCamper_success(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	rec := &recordingSheets{}
+	svc := NewService(repo, &stubStripe{}, nil, rec, Config{})
+
+	groupID, camperID := insertDayPassGroup(ctx, t, pool, domain.BillingNone)
+
+	sum, err := svc.UpdateDayPassCamper(ctx, groupID, camperID, "Admin", 1, validUpdateDayPassRequest())
+	if err != nil {
+		t.Fatalf("UpdateDayPassCamper: %v", err)
+	}
+	if sum.CamperName != "Day Passer" {
+		t.Fatalf("camper name = %q", sum.CamperName)
+	}
+
+	campers, _ := repo.CampersForGroup(ctx, groupID)
+	var updated domain.Camper
+	for _, c := range campers {
+		if c.ID == camperID {
+			updated = c
+		}
+	}
+	if updated.AttendanceType != domain.AttendanceDayPass {
+		t.Fatalf("attendance = %q", updated.AttendanceType)
+	}
+	if len(updated.DayPassDays) != 2 {
+		t.Fatalf("day_pass_days changed: %v", updated.DayPassDays)
+	}
+	if updated.DayPassTshirtOption == nil || *updated.DayPassTshirtOption != domain.TshirtOptionTshirtOnly {
+		t.Fatalf("tshirt option = %v", updated.DayPassTshirtOption)
+	}
+	if updated.DayPassNeedsCatering == nil || *updated.DayPassNeedsCatering {
+		t.Fatal("expected needs_catering false")
+	}
+	if updated.ShirtSize == nil || *updated.ShirtSize != "adult_l" {
+		t.Fatalf("shirt_size = %v", updated.ShirtSize)
+	}
+	if updated.DietaryRequirements == nil || *updated.DietaryRequirements != "Gluten free" {
+		t.Fatalf("dietary = %v", updated.DietaryRequirements)
+	}
+
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g == nil || g.Version != 2 {
+		t.Fatalf("version = %v", g)
+	}
+	if g.LastAction == nil || *g.LastAction != "camper_updated" {
+		t.Fatalf("last_action = %v", g.LastAction)
+	}
+	if rec.appendCalls != 1 {
+		t.Fatalf("sheet append calls = %d, want 1", rec.appendCalls)
+	}
+	if rec.lastGroupID != groupID {
+		t.Fatalf("sheet group id = %q", rec.lastGroupID)
+	}
+}
+
+func TestUpdateDayPassCamper_allowedWhenBalancePaid(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{})
+
+	groupID, camperID := insertDayPassGroup(ctx, t, pool, domain.BillingBalancePaid)
+
+	_, err := svc.UpdateDayPassCamper(ctx, groupID, camperID, "Admin", domain.SkipVersionCheck, validUpdateDayPassRequest())
+	if err != nil {
+		t.Fatalf("UpdateDayPassCamper on balance_paid: %v", err)
+	}
+}
+
+func TestUpdateDayPassCamper_guards(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{})
+
+	t.Run("full_week", func(t *testing.T) {
+		groupID, _, camper2ID, _ := insertThreeCamperGroup(ctx, t, pool, domain.BillingAllocated, nil)
+		_, err := svc.UpdateDayPassCamper(ctx, groupID, camper2ID, "Admin", domain.SkipVersionCheck, validUpdateDayPassRequest())
+		var apiErr commonerrors.APIError
+		if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+			t.Fatalf("expected bad_request, got %v", err)
+		}
+	})
+
+	t.Run("validation_empty_shirt", func(t *testing.T) {
+		groupID, camperID := insertDayPassGroup(ctx, t, pool, domain.BillingNone)
+		req := validUpdateDayPassRequest()
+		req.TshirtOption = domain.TshirtOptionTeamActivities
+		req.ShirtSize = ""
+		_, err := svc.UpdateDayPassCamper(ctx, groupID, camperID, "Admin", domain.SkipVersionCheck, req)
+		var apiErr commonerrors.APIError
+		if !errors.As(err, &apiErr) || apiErr.Code != "validation_failed" {
+			t.Fatalf("expected validation_failed, got %v", err)
+		}
+	})
+
+	t.Run("none_normalizes_shirt", func(t *testing.T) {
+		groupID, camperID := insertDayPassGroup(ctx, t, pool, domain.BillingNone)
+		needs := false
+		req := UpdateDayPassCamperRequest{
+			TshirtOption:  domain.TshirtOptionNone,
+			ShirtSize:     domain.ShirtSizeNotApplicable,
+			NeedsCatering: &needs,
+		}
+		_, err := svc.UpdateDayPassCamper(ctx, groupID, camperID, "Admin", domain.SkipVersionCheck, req)
+		if err != nil {
+			t.Fatalf("UpdateDayPassCamper: %v", err)
+		}
+		campers, _ := repo.CampersForGroup(ctx, groupID)
+		for _, c := range campers {
+			if c.ID == camperID {
+				if c.ShirtSize == nil || *c.ShirtSize != domain.ShirtSizeNotApplicable {
+					t.Fatalf("shirt_size = %v", c.ShirtSize)
+				}
+			}
+		}
+	})
+
+	t.Run("dietary_clear", func(t *testing.T) {
+		groupID, camperID := insertDayPassGroup(ctx, t, pool, domain.BillingNone)
+		needs := true
+		empty := ""
+		req := UpdateDayPassCamperRequest{
+			TshirtOption:  domain.TshirtOptionTeamActivities,
+			ShirtSize:     "adult_m",
+			NeedsCatering: &needs,
+			Dietary:       &empty,
+		}
+		_, err := svc.UpdateDayPassCamper(ctx, groupID, camperID, "Admin", domain.SkipVersionCheck, req)
+		if err != nil {
+			t.Fatalf("UpdateDayPassCamper: %v", err)
+		}
+		campers, _ := repo.CampersForGroup(ctx, groupID)
+		for _, c := range campers {
+			if c.ID == camperID {
+				if c.DietaryRequirements == nil || *c.DietaryRequirements != "" {
+					t.Fatalf("dietary = %v", c.DietaryRequirements)
+				}
+			}
+		}
+	})
+}

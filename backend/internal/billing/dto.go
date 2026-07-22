@@ -40,3 +40,12 @@ type ConvertToDayVisitorRequest struct {
 	ShirtSize       string   `json:"shirt_size"`
 	NeedsCatering   *bool    `json:"needs_catering"`
 }
+
+// UpdateDayPassCamperRequest is PATCH .../campers/{camperID}/day-pass.
+type UpdateDayPassCamperRequest struct {
+	ExpectedVersion *int    `json:"expected_version,omitempty"`
+	TshirtOption    string  `json:"tshirt_option"`
+	ShirtSize       string  `json:"shirt_size"`
+	NeedsCatering   *bool   `json:"needs_catering"`
+	Dietary         *string `json:"dietary_requirements"`
+}

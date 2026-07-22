@@ -231,6 +231,29 @@ func postConvertDayVisitor(svc *billing.Service, rec *adminlog.Recorder, regRepo
 	}
 }
 
+func patchDayPassCamper(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body billing.UpdateDayPassCamperRequest
+		if err := request.Decode(r, &body); err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		groupID := chi.URLParam(r, "groupID")
+		camperID := chi.URLParam(r, "camperID")
+		actor := admin.ActorFrom(r.Context())
+		sum, err := svc.UpdateDayPassCamper(
+			r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion), body)
+		if err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		gid := groupID
+		summary := "Updated day-pass details for " + sum.CamperName
+		admin.Audit(rec, r, adminlog.ActionCamperUpdated, &gid, summary, sum)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 func deleteRegistration(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
