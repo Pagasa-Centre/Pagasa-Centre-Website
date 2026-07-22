@@ -418,6 +418,15 @@ export const adminApi = {
       body: JSON.stringify({ expected_version: expectedVersion }),
     }),
 
+  resyncAllSheets: () =>
+    adminFetch<{ synced: number; errors?: Record<string, string> }>(
+      "/admin/registrations/sheet-resync-all",
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    ),
+
   extendDue: (groupId: string, dueAt: string, expectedVersion: number) =>
     adminFetch<void>(`/admin/registrations/${groupId}/invoice-due`, {
       method: "PATCH",

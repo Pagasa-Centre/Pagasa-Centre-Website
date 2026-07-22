@@ -1105,6 +1105,79 @@ func sheetRowsForGroup(g *domain.Group, campers []domain.Camper) []sheets.Row {
 	return rows
 }
 
+// ResyncSheet rewrites this group's rows in the Google Sheet from current DB
+// state (remove then re-append). For paid groups this updates the Paid tab; for
+// pending deposit groups, the Pending tab.
+func (s *Service) ResyncSheet(ctx context.Context, groupID, actor string, expectedVersion int) error {
+	g, err := s.repo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		return commonerrors.Internal(err.Error())
+	}
+	if g == nil {
+		return commonerrors.NotFound("group not found")
+	}
+	switch g.PaymentStatus {
+	case domain.PaymentPaid, domain.PaymentPending:
+	default:
+		return commonerrors.BadRequest(
+			"only pending or paid registrations can be re-synced to the sheet", nil)
+	}
+
+	campers, err := s.repo.CampersForGroup(ctx, groupID)
+	if err != nil {
+		return commonerrors.Internal(err.Error())
+	}
+	if len(campers) == 0 {
+		return commonerrors.BadRequest("registration has no campers", nil)
+	}
+
+	rows := sheetRowsForGroup(g, campers)
+	if err := s.sheets.RemoveByGroupID(ctx, groupID); err != nil {
+		return commonerrors.Internal(err.Error())
+	}
+	switch g.PaymentStatus {
+	case domain.PaymentPaid:
+		err = s.sheets.AppendPaidAndRemovePending(ctx, groupID, rows)
+	case domain.PaymentPending:
+		err = s.sheets.AppendPending(ctx, rows)
+	}
+	if err != nil {
+		return commonerrors.Internal(err.Error())
+	}
+
+	meta := domain.ActionMeta{
+		Actor:           actor,
+		Action:          "sheet_resynced",
+		ExpectedVersion: expectedVersion,
+	}
+	if err := s.repo.StampOnly(ctx, groupID, meta); err != nil {
+		return mapVersionErr(ctx, s.repo, groupID, err)
+	}
+	return nil
+}
+
+// ResyncAllSheets re-syncs every paid and pending registration to the Google
+// Sheet from current DB state. Returns the success count and per-group errors.
+func (s *Service) ResyncAllSheets(ctx context.Context, actor string) (int, map[string]string) {
+	errs := map[string]string{}
+	synced := 0
+	for _, status := range []string{domain.PaymentPaid, domain.PaymentPending} {
+		groups, err := s.repo.ListWithBilling(ctx, domain.ListFilterBilling{PaymentStatus: status})
+		if err != nil {
+			errs["_list"] = err.Error()
+			return synced, errs
+		}
+		for _, g := range groups {
+			if err := s.ResyncSheet(ctx, g.ID, actor, domain.SkipVersionCheck); err != nil {
+				errs[g.ID] = err.Error()
+				continue
+			}
+			synced++
+		}
+	}
+	return synced, errs
+}
+
 // DeleteSummary captures Stripe cleanup performed when a registration is deleted.
 type DeleteSummary struct {
 	ContactName     string

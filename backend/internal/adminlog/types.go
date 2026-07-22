@@ -42,6 +42,7 @@ const (
 	ActionCoachInvoiceSent      = "coach_invoice_sent"
 	ActionCoachFeeWaived        = "coach_fee_waived"
 	ActionCoachFeeUnwaived      = "coach_fee_unwaived"
+	ActionSheetResynced         = "sheet_resynced"
 
 	ActionAccommodationAvailability = "accommodation_availability"
 )

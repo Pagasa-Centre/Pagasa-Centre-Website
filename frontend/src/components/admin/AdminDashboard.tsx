@@ -268,6 +268,7 @@ const LAST_ACTION_LABELS: Record<string, string> = {
   coach_invoice_sent: "Coach invoice sent",
   coach_fee_waived: "Coach fee waived",
   coach_fee_unwaived: "Coach fee restored",
+  sheet_resynced: "Google Sheet re-synced",
 };
 
 function formatLastAction(g: AdminGroup): string | null {
@@ -956,6 +957,38 @@ export default function AdminDashboard() {
     }
   }
 
+  async function resyncAllSheets() {
+    if (
+      !confirm(
+        "Re-sync every paid and pending registration to the Google Sheet from the database? Existing sheet rows for those groups will be replaced.",
+      )
+    ) {
+      return;
+    }
+    setBusy("sheet-resync-all");
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await adminApi.resyncAllSheets();
+      if (res.errors && Object.keys(res.errors).length > 0) {
+        setError(
+          `Re-synced ${res.synced} group(s), but ${Object.keys(res.errors).length} failed. Check the activity log and try again for those groups.`,
+        );
+      } else {
+        setNotice(`Re-synced ${res.synced} group(s) to the Google Sheet.`);
+      }
+      await load();
+    } catch (err) {
+      setError(
+        err instanceof AdminApiError
+          ? err.detail.message
+          : "Google Sheet re-sync failed.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function runSweep() {
     if (
       !confirm(
@@ -1465,19 +1498,38 @@ export default function AdminDashboard() {
         <summary className="cursor-pointer select-none hover:text-neutral-700">
           Advanced
         </summary>
-        <div className="mt-3 flex flex-col gap-2">
-          <p>
-            Overdue invoices are cancelled automatically every day. Use this
-            only if you want to do it right now.
-          </p>
-          <button
-            type="button"
-            onClick={runSweep}
-            disabled={busy === "sweep"}
-            className="self-start px-3 py-2 text-sm font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100 disabled:opacity-50"
-          >
-            Release all overdue now
-          </button>
+        <div className="mt-3 flex flex-col gap-4">
+          <div>
+            <p>
+              Overdue invoices are cancelled automatically every day. Use this
+              only if you want to do it right now.
+            </p>
+            <button
+              type="button"
+              onClick={runSweep}
+              disabled={busy === "sweep"}
+              className="mt-2 self-start px-3 py-2 text-sm font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100 disabled:opacity-50"
+            >
+              Release all overdue now
+            </button>
+          </div>
+          <div>
+            <p>
+              Rebuild the Google Sheet from the database for every paid and
+              pending registration. Use after fixing data issues (e.g. missing
+              shirt sizes on day-pass rows).
+            </p>
+            <button
+              type="button"
+              onClick={resyncAllSheets}
+              disabled={busy === "sheet-resync-all"}
+              className="mt-2 self-start px-3 py-2 text-sm font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100 disabled:opacity-50"
+            >
+              {busy === "sheet-resync-all"
+                ? "Re-syncing…"
+                : "Re-sync all Google Sheets"}
+            </button>
+          </div>
         </div>
       </details>
     </div>

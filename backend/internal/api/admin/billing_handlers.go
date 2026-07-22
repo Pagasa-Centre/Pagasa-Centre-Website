@@ -336,6 +336,26 @@ func postResendInvoice(svc *billing.Service, rec *adminlog.Recorder, regRepo *re
 	}
 }
 
+func postResyncAllSheets(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actor := admin.ActorFrom(r.Context())
+		synced, errs := svc.ResyncAllSheets(r.Context(), actor)
+		summary := strings.TrimSpace(actor) + " re-synced " + strconv.Itoa(synced) + " group(s) to Google Sheet"
+		admin.Audit(rec, r, adminlog.ActionSheetResynced, nil, summary, map[string]any{
+			"synced": synced,
+			"errors": len(errs),
+		})
+		if len(errs) > 0 {
+			render.Json(w, http.StatusMultiStatus, map[string]any{
+				"synced": synced,
+				"errors": errs,
+			})
+			return
+		}
+		render.Json(w, http.StatusOK, map[string]any{"synced": synced})
+	}
+}
+
 func patchInvoiceDue(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.ExtendDueRequest

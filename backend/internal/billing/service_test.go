@@ -1620,6 +1620,45 @@ func TestSendInvoice_skipsCoachWhenWaived(t *testing.T) {
 	}
 }
 
+func TestResyncSheet_paidGroup(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	rec := &recordingSheets{}
+	svc := NewService(repo, &stubStripe{}, nil, rec, Config{})
+
+	groupID, camperID := insertDayPassGroup(ctx, t, pool, domain.BillingNone)
+	_, err := pool.Exec(ctx, `
+		UPDATE registrations SET shirt_size = $2, day_pass_tshirt_option = 'tshirt_only'
+		WHERE id = $1`, camperID, "adult_m")
+	if err != nil {
+		t.Fatalf("update camper: %v", err)
+	}
+
+	if err := svc.ResyncSheet(ctx, groupID, "Admin", domain.SkipVersionCheck); err != nil {
+		t.Fatalf("ResyncSheet: %v", err)
+	}
+	if rec.removeCalls != 1 {
+		t.Fatalf("remove calls = %d, want 1", rec.removeCalls)
+	}
+	if rec.appendCalls != 1 {
+		t.Fatalf("append calls = %d, want 1", rec.appendCalls)
+	}
+	if rec.pendingCalls != 0 {
+		t.Fatalf("pending calls = %d, want 0", rec.pendingCalls)
+	}
+	if len(rec.lastRows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rec.lastRows))
+	}
+	if rec.lastRows[0].ShirtSize == nil || *rec.lastRows[0].ShirtSize != "adult_m" {
+		t.Fatalf("shirt_size = %v", rec.lastRows[0].ShirtSize)
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g == nil || g.LastAction == nil || *g.LastAction != "sheet_resynced" {
+		t.Fatalf("last_action = %v", g.LastAction)
+	}
+}
+
 func TestUnwaiveCoachFee(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
@@ -1954,14 +1993,31 @@ func TestConvertCamperToDayVisitor_under4NoCredit(t *testing.T) {
 
 type recordingSheets struct {
 	sheets.NoopSync
+	removeCalls int
 	appendCalls int
-	lastGroupID string
-	lastRows    []sheets.Row
+	pendingCalls int
+	lastGroupID  string
+	lastRows     []sheets.Row
+}
+
+func (r *recordingSheets) RemoveByGroupID(_ context.Context, groupID string) error {
+	r.removeCalls++
+	r.lastGroupID = groupID
+	return nil
 }
 
 func (r *recordingSheets) AppendPaidAndRemovePending(_ context.Context, groupID string, rows []sheets.Row) error {
 	r.appendCalls++
 	r.lastGroupID = groupID
+	r.lastRows = rows
+	return nil
+}
+
+func (r *recordingSheets) AppendPending(_ context.Context, rows []sheets.Row) error {
+	r.pendingCalls++
+	if len(rows) > 0 {
+		r.lastGroupID = rows[0].GroupID
+	}
 	r.lastRows = rows
 	return nil
 }

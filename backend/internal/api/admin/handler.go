@@ -77,6 +77,7 @@ func Mount(
 		r.Post("/registrations/{groupID}/campers/{camperID}/convert-day-visitor", postConvertDayVisitor(billSvc, rec, regRepo))
 		r.Patch("/registrations/{groupID}/campers/{camperID}/day-pass", patchDayPassCamper(billSvc, rec))
 		r.Post("/registrations/{groupID}/invoice/resend", postResendInvoice(billSvc, rec, regRepo))
+		r.Post("/registrations/sheet-resync-all", postResyncAllSheets(billSvc, rec))
 		r.Patch("/registrations/{groupID}/invoice-due", patchInvoiceDue(billSvc, rec, regRepo))
 		r.Post("/billing/sweep", postBillingSweep(billSvc, rec))
 
