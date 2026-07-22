@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -412,4 +413,52 @@ func TestRevokeFreeCode_rejectsUsedCode(t *testing.T) {
 
 	err = svc.RevokeFreeCode(ctx, id)
 	assertAPIErrorCode(t, err, "bad_request")
+}
+
+func TestRowsFromRequest_dayPassIncludesShirtSize(t *testing.T) {
+	req := domain.SubmitRequest{
+		Contact: domain.ContactDTO{
+			FirstName: "Day",
+			LastName:  "Passer",
+			Email:     "day@example.com",
+			Phone:     "07000000000",
+		},
+		Campers: []domain.CamperDTO{{
+			FirstName: "Day",
+			LastName:  "Passer",
+			Attendance: domain.AttendanceDTO{
+				Type:         domain.AttendanceDayPass,
+				Days:         []string{"mon", "tue"},
+				TshirtOption: domain.TshirtOptionTshirtOnly,
+				ShirtSize:    "adult_l",
+			},
+		}},
+	}
+	rows := rowsFromRequest("grp-1", req, domain.PaymentPaid, 0, "GBP", mustParseTime(t, "2026-07-01T12:00:00Z"), nil)
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	if rows[0].ShirtSize == nil || *rows[0].ShirtSize != "adult_l" {
+		t.Fatalf("shirt_size = %v, want adult_l", rows[0].ShirtSize)
+	}
+	if rows[0].DayPassTshirtOption == nil || *rows[0].DayPassTshirtOption != domain.TshirtOptionTshirtOnly {
+		t.Fatalf("day_pass_tshirt_option = %v", rows[0].DayPassTshirtOption)
+	}
+	vals := rows[0].Values()
+	// shirt_size is column index 18 (0-based) per sheets.Headers
+	if len(vals) < 19 {
+		t.Fatalf("values too short: %d", len(vals))
+	}
+	if vals[18] != "adult_l" {
+		t.Fatalf("sheet shirt_size column = %v, want adult_l", vals[18])
+	}
+}
+
+func mustParseTime(t *testing.T, s string) time.Time {
+	t.Helper()
+	ts, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		t.Fatalf("parse time: %v", err)
+	}
+	return ts
 }

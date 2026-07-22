@@ -233,6 +233,8 @@ func rowsFromRequest(groupID string, req domain.SubmitRequest, status string, to
 			row.AccommodationSecondChoice = ptrIfNotEmpty(c.Attendance.AccommodationSecondChoice)
 			row.RoommateRequests = ptrIfNotEmpty(c.Attendance.RoommateRequests)
 		case domain.AttendanceDayPass:
+			row.ShirtSize = ptrIfNotEmpty(c.Attendance.ShirtSize)
+			row.DietaryRequirements = ptrIfNotEmpty(c.Attendance.DietaryRequirements)
 			row.DayPassDays = c.Attendance.Days
 			row.DayPassTshirtOption = ptrIfNotEmpty(c.Attendance.TshirtOption)
 			row.DayPassNeedsCatering = c.Attendance.NeedsCatering
