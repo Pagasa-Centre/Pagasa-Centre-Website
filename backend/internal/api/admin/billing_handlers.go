@@ -142,6 +142,42 @@ func postCoachInvoiceBulk(svc *billing.Service, rec *adminlog.Recorder, regRepo 
 	}
 }
 
+func postWaiveCoachFee(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body billing.VersionedBody
+		_ = request.Decode(r, &body)
+		groupID := chi.URLParam(r, "groupID")
+		actor := admin.ActorFrom(r.Context())
+		if err := svc.WaiveCoachFee(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
+		gid := groupID
+		admin.Audit(rec, r, adminlog.ActionCoachFeeWaived, &gid,
+			"Waived coach fee for "+admin.GroupSummary(g), nil)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func postUnwaiveCoachFee(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body billing.VersionedBody
+		_ = request.Decode(r, &body)
+		groupID := chi.URLParam(r, "groupID")
+		actor := admin.ActorFrom(r.Context())
+		if err := svc.UnwaiveCoachFee(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
+		gid := groupID
+		admin.Audit(rec, r, adminlog.ActionCoachFeeUnwaived, &gid,
+			"Restored coach fee for "+admin.GroupSummary(g), nil)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 func postUnallocate(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody

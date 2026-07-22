@@ -135,6 +135,7 @@ export type AdminGroup = {
   stripe_coach_invoice_id?: string | null;
   coach_invoice_due_at?: string | null;
   coach_fee_paid_at?: string | null;
+  coach_fee_waived_at?: string | null;
   campers: AdminCamper[];
 };
 
@@ -327,6 +328,18 @@ export const adminApi = {
         body: JSON.stringify({ group_ids: groupIds }),
       },
     ),
+
+  waiveCoachFee: (groupId: string, expectedVersion: number) =>
+    adminFetch<void>(`/admin/registrations/${groupId}/coach-invoice/waive`, {
+      method: "POST",
+      body: JSON.stringify({ expected_version: expectedVersion }),
+    }),
+
+  unwaiveCoachFee: (groupId: string, expectedVersion: number) =>
+    adminFetch<void>(`/admin/registrations/${groupId}/coach-invoice/unwaive`, {
+      method: "POST",
+      body: JSON.stringify({ expected_version: expectedVersion }),
+    }),
 
   release: (groupId: string, expectedVersion: number) =>
     adminFetch<void>(`/admin/registrations/${groupId}/release`, {

@@ -283,13 +283,17 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 
 	// Fold the coach fee into this balance invoice for coach passengers. Only
 	// groups that have not yet been invoiced reach here, so a coach fee that is
-	// folded is always fresh (never double-charged).
+	// folded is always fresh (never double-charged). Skip when admin has waived.
 	coachCount := coachEligibleCount(campers)
-	if line, ok := coachLine(coachCount, s.cfg.StripePriceCoach); ok {
-		if line.PriceID == "" {
-			return commonerrors.BadRequest("STRIPE_PRICE_COACH is not configured", nil)
+	coachIncluded := false
+	if g.CoachFeeWaivedAt == nil {
+		if line, ok := coachLine(coachCount, s.cfg.StripePriceCoach); ok {
+			if line.PriceID == "" {
+				return commonerrors.BadRequest("STRIPE_PRICE_COACH is not configured", nil)
+			}
+			lines = append(lines, line)
+			coachIncluded = coachCount > 0
 		}
-		lines = append(lines, line)
 	}
 
 	if len(lines) == 0 {
@@ -321,7 +325,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 		Action:          "invoice_sent",
 		ExpectedVersion: expectedVersion,
 	}
-	if err := s.repo.SetInvoiceDetailsMeta(ctx, groupID, res.ID, res.DueAt, coachCount > 0, meta); err != nil {
+	if err := s.repo.SetInvoiceDetailsMeta(ctx, groupID, res.ID, res.DueAt, coachIncluded, meta); err != nil {
 		return mapVersionErr(ctx, s.repo, groupID, err)
 	}
 	accNames := s.accommodationNames(ctx)
@@ -386,6 +390,9 @@ func (s *Service) SendCoachInvoice(ctx context.Context, groupID, actor string, e
 	}
 	if g.IsFree {
 		return commonerrors.BadRequest("church-sponsored registrations are not charged for the coach", nil)
+	}
+	if g.CoachFeeWaivedAt != nil {
+		return commonerrors.BadRequest("coach fee has been waived for this group", nil)
 	}
 	if g.BillingStatus != domain.BillingInvoiced && g.BillingStatus != domain.BillingBalancePaid {
 		return commonerrors.BadRequest("coach fee is included in the balance invoice for this group", nil)
@@ -463,6 +470,76 @@ func (s *Service) SendCoachInvoicesBulk(ctx context.Context, actor string, group
 		}
 	}
 	return errs
+}
+
+// WaiveCoachFee marks a group's coach fee as waived (paid separately). Voids an
+// open unpaid coach invoice if one exists. Allowed before or after balance invoicing
+// as long as the coach fee was not folded into a sent balance invoice.
+func (s *Service) WaiveCoachFee(ctx context.Context, groupID, actor string, expectedVersion int) error {
+	g, err := s.repo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		return commonerrors.Internal(err.Error())
+	}
+	if g == nil {
+		return commonerrors.NotFound("group not found")
+	}
+	if g.IsFree {
+		return commonerrors.BadRequest("church-sponsored registrations are not charged for the coach", nil)
+	}
+	if g.CoachFeeWaivedAt != nil {
+		return commonerrors.BadRequest("coach fee already waived", nil)
+	}
+	if g.CoachIncludedInBalance {
+		return commonerrors.BadRequest("coach fee is included in the balance invoice for this group", nil)
+	}
+	if g.CoachFeePaidAt != nil {
+		return commonerrors.BadRequest("coach fee already paid", nil)
+	}
+	campers, err := s.repo.CampersForGroup(ctx, groupID)
+	if err != nil {
+		return commonerrors.Internal(err.Error())
+	}
+	if coachEligibleCount(campers) == 0 {
+		return commonerrors.BadRequest("no coach passengers to waive", nil)
+	}
+	if g.StripeCoachInvoiceID != nil && strings.TrimSpace(*g.StripeCoachInvoiceID) != "" {
+		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeCoachInvoiceID); err != nil {
+			return commonerrors.BadRequest(
+				fmt.Sprintf("coach invoice void failed; coach fee was not waived: %v", err), nil)
+		}
+	}
+	meta := domain.ActionMeta{
+		Actor:           actor,
+		Action:          "coach_fee_waived",
+		ExpectedVersion: expectedVersion,
+	}
+	if err := s.repo.WaiveCoachFeeMeta(ctx, groupID, meta); err != nil {
+		return mapVersionErr(ctx, s.repo, groupID, err)
+	}
+	return nil
+}
+
+// UnwaiveCoachFee clears a prior coach-fee waiver so the group can be charged again.
+func (s *Service) UnwaiveCoachFee(ctx context.Context, groupID, actor string, expectedVersion int) error {
+	g, err := s.repo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		return commonerrors.Internal(err.Error())
+	}
+	if g == nil {
+		return commonerrors.NotFound("group not found")
+	}
+	if g.CoachFeeWaivedAt == nil {
+		return commonerrors.BadRequest("coach fee is not waived for this group", nil)
+	}
+	meta := domain.ActionMeta{
+		Actor:           actor,
+		Action:          "coach_fee_unwaived",
+		ExpectedVersion: expectedVersion,
+	}
+	if err := s.repo.UnwaiveCoachFeeMeta(ctx, groupID, meta); err != nil {
+		return mapVersionErr(ctx, s.repo, groupID, err)
+	}
+	return nil
 }
 
 // HandleCoachInvoicePaid marks a group's coach fee paid (idempotent).

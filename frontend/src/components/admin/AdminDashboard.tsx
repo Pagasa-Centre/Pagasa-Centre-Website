@@ -90,6 +90,10 @@ function coachChargedAlready(g: AdminGroup): boolean {
   return !!g.coach_included_in_balance || !!g.stripe_coach_invoice_id;
 }
 
+function coachWaived(g: AdminGroup): boolean {
+  return !!g.coach_fee_waived_at;
+}
+
 function coachPaid(g: AdminGroup): boolean {
   return (
     (!!g.coach_included_in_balance && g.billing_status === "balance_paid") ||
@@ -104,14 +108,30 @@ function canSendCoachInvoice(g: AdminGroup): boolean {
   return (
     coachEligibleCount(g) > 0 &&
     !g.is_free &&
+    !coachWaived(g) &&
     !coachChargedAlready(g) &&
     (g.billing_status === "invoiced" || g.billing_status === "balance_paid")
   );
 }
 
+function canWaiveCoachFee(g: AdminGroup): boolean {
+  return (
+    coachEligibleCount(g) > 0 &&
+    !g.is_free &&
+    !coachWaived(g) &&
+    !coachPaid(g) &&
+    !g.coach_included_in_balance
+  );
+}
+
+function canUnwaiveCoachFee(g: AdminGroup): boolean {
+  return coachWaived(g);
+}
+
 // coachStatusLabel is a short human summary for the group card.
 function coachStatusLabel(g: AdminGroup): string | null {
   if (coachEligibleCount(g) === 0) return null;
+  if (coachWaived(g)) return "Coach fee waived";
   if (coachPaid(g)) return "Coach paid";
   if (g.coach_included_in_balance) return "Coach on balance invoice";
   if (g.stripe_coach_invoice_id) return "Coach invoiced";
@@ -246,6 +266,8 @@ const LAST_ACTION_LABELS: Record<string, string> = {
   camper_converted: "Converted to day visitor",
   camper_updated: "Day-pass details updated",
   coach_invoice_sent: "Coach invoice sent",
+  coach_fee_waived: "Coach fee waived",
+  coach_fee_unwaived: "Coach fee restored",
 };
 
 function formatLastAction(g: AdminGroup): string | null {
@@ -579,6 +601,51 @@ export default function AdminDashboard() {
       await load();
     } catch (err) {
       await handleAdminError(err, "Coach invoice failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function waiveCoachFee(g: AdminGroup) {
+    const n = coachEligibleCount(g);
+    if (
+      !confirm(
+        `Waive the coach fee (${n} passenger${n === 1 ? "" : "s"}) for ${g.contact_first_name} ${g.contact_last_name}? They will not be sent a coach invoice.${g.stripe_coach_invoice_id ? " Any open coach invoice will be voided." : ""}`,
+      )
+    ) {
+      return;
+    }
+    setBusy(`waive-coach-${g.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await adminApi.waiveCoachFee(g.id, g.version);
+      setNotice(`Coach fee waived for ${g.contact_first_name} ${g.contact_last_name}.`);
+      await load();
+    } catch (err) {
+      await handleAdminError(err, "Waive coach fee failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function unwaiveCoachFee(g: AdminGroup) {
+    if (
+      !confirm(
+        `Restore the coach fee for ${g.contact_first_name} ${g.contact_last_name}? They can be sent a coach invoice again.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(`unwaive-coach-${g.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await adminApi.unwaiveCoachFee(g.id, g.version);
+      setNotice(`Coach fee restored for ${g.contact_first_name} ${g.contact_last_name}.`);
+      await load();
+    } catch (err) {
+      await handleAdminError(err, "Restore coach fee failed.");
     } finally {
       setBusy(null);
     }
@@ -1386,6 +1453,8 @@ export default function AdminDashboard() {
               onEditDayPass={(c, data) => editDayPassCamper(g, c, data)}
               shirtSizes={shirtSizes}
               onSendCoachInvoice={() => sendCoachInvoice(g)}
+              onWaiveCoachFee={() => waiveCoachFee(g)}
+              onUnwaiveCoachFee={() => unwaiveCoachFee(g)}
             />
           ))}
         </div>
@@ -2112,6 +2181,8 @@ function GroupCard({
   onEditDayPass,
   shirtSizes,
   onSendCoachInvoice,
+  onWaiveCoachFee,
+  onUnwaiveCoachFee,
 }: {
   g: AdminGroup;
   accommodations: AdminAccommodation[];
@@ -2148,6 +2219,8 @@ function GroupCard({
   onEditDayPass: (c: AdminCamper, data: EditDayPassData) => Promise<void>;
   shirtSizes: ShirtSize[];
   onSendCoachInvoice: () => void;
+  onWaiveCoachFee: () => void;
+  onUnwaiveCoachFee: () => void;
 }) {
   const fw = fullWeekCampers(g);
   const cat = categorize(g);
@@ -2636,16 +2709,38 @@ function GroupCard({
                   {coachStatusLabel(g)} · {coachEligibleCount(g)} passenger
                   {coachEligibleCount(g) === 1 ? "" : "s"}
                 </span>
-                {canSendCoachInvoice(g) && (
-                  <button
-                    type="button"
-                    disabled={busy === `coach-${g.id}`}
-                    onClick={onSendCoachInvoice}
-                    className="px-3 py-1.5 text-xs font-bold text-white bg-sky-600 rounded-lg hover:bg-sky-700 disabled:opacity-50"
-                  >
-                    {busy === `coach-${g.id}` ? "Sending…" : "Send coach invoice"}
-                  </button>
-                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  {canSendCoachInvoice(g) && (
+                    <button
+                      type="button"
+                      disabled={busy === `coach-${g.id}`}
+                      onClick={onSendCoachInvoice}
+                      className="px-3 py-1.5 text-xs font-bold text-white bg-sky-600 rounded-lg hover:bg-sky-700 disabled:opacity-50"
+                    >
+                      {busy === `coach-${g.id}` ? "Sending…" : "Send coach invoice"}
+                    </button>
+                  )}
+                  {canWaiveCoachFee(g) && (
+                    <button
+                      type="button"
+                      disabled={busy === `waive-coach-${g.id}`}
+                      onClick={onWaiveCoachFee}
+                      className="px-3 py-1.5 text-xs font-bold text-sky-800 bg-white border border-sky-300 rounded-lg hover:bg-sky-100 disabled:opacity-50"
+                    >
+                      {busy === `waive-coach-${g.id}` ? "Waiving…" : "Waive coach fee"}
+                    </button>
+                  )}
+                  {canUnwaiveCoachFee(g) && (
+                    <button
+                      type="button"
+                      disabled={busy === `unwaive-coach-${g.id}`}
+                      onClick={onUnwaiveCoachFee}
+                      className="px-3 py-1.5 text-xs font-bold text-sky-800 bg-white border border-sky-300 rounded-lg hover:bg-sky-100 disabled:opacity-50"
+                    >
+                      {busy === `unwaive-coach-${g.id}` ? "Restoring…" : "Restore coach fee"}
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 

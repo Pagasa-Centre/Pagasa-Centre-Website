@@ -220,6 +220,38 @@ func (r *Repository) MarkCoachFeePaidMeta(ctx context.Context, groupID string, m
 	return r.stampGroupPool(ctx, groupID, meta, extra, time.Now().UTC())
 }
 
+// WaiveCoachFeeMeta marks the coach fee waived and clears any separate coach invoice fields.
+func (r *Repository) WaiveCoachFeeMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	if err != nil {
+		return err
+	}
+	if g == nil {
+		return fmt.Errorf("group %q not found", groupID)
+	}
+	if err := checkVersion(g, meta); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	extra := `, coach_fee_waived_at = $3, stripe_coach_invoice_id = NULL, coach_invoice_due_at = NULL`
+	if err := stampExec(ctx, tx, groupID, meta, extra, now); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// UnwaiveCoachFeeMeta clears coach_fee_waived_at so the group can be coach-charged again.
+func (r *Repository) UnwaiveCoachFeeMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error {
+	extra := `, coach_fee_waived_at = NULL`
+	return r.stampGroupPool(ctx, groupID, meta, extra)
+}
+
 // ClearInvoiceAndReleaseMeta voids invoice state, releases allocation, stamps attribution.
 func (r *Repository) ClearInvoiceAndReleaseMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error {
 	tx, err := r.pool.Begin(ctx)

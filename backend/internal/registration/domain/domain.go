@@ -69,6 +69,7 @@ type Group struct {
 	StripeCoachInvoiceID   *string    `json:"stripe_coach_invoice_id,omitempty"`
 	CoachInvoiceDueAt      *time.Time `json:"coach_invoice_due_at,omitempty"`
 	CoachFeePaidAt         *time.Time `json:"coach_fee_paid_at,omitempty"`
+	CoachFeeWaivedAt       *time.Time `json:"coach_fee_waived_at,omitempty"`
 }
 
 // FreeCode is a row from free_codes for admin listing.

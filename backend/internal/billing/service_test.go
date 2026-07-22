@@ -1445,6 +1445,218 @@ func TestHandleCoachInvoicePaid(t *testing.T) {
 	}
 }
 
+func TestWaiveCoachFee_notYetSent(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	stripe := &stubStripe{
+		voidInvIdem: func(context.Context, string) error {
+			t.Fatal("unexpected VoidInvoiceIdempotent")
+			return nil
+		},
+	}
+	svc := NewService(repo, stripe, nil, nil, Config{StripePriceCoach: "price_coach"})
+
+	groupID := insertCoachGroup(ctx, t, pool, domain.BillingAllocated, "lodge", false)
+	if err := svc.WaiveCoachFee(ctx, groupID, "Admin", domain.SkipVersionCheck); err != nil {
+		t.Fatalf("WaiveCoachFee: %v", err)
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g == nil || g.CoachFeeWaivedAt == nil {
+		t.Fatalf("coach_fee_waived_at not set: %+v", g)
+	}
+	if g.Version != 2 {
+		t.Fatalf("version = %d, want 2", g.Version)
+	}
+	if g.LastAction == nil || *g.LastAction != "coach_fee_waived" {
+		t.Fatalf("last_action = %v", g.LastAction)
+	}
+}
+
+func TestWaiveCoachFee_voidOpenInvoice(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	var voidedID string
+	stripe := &stubStripe{
+		ensureCust: func(_ context.Context, _, _, _, _ string) (string, error) {
+			return "cus_seed", nil
+		},
+		createInvoice: func(_ context.Context, _, _ string, _ []InvoiceLine, _ int64, invoiceType string) (InvoiceResult, error) {
+			if invoiceType != "coach" {
+				t.Fatalf("invoice type = %q, want coach", invoiceType)
+			}
+			return InvoiceResult{ID: "in_coach_open", StripeEmailed: true}, nil
+		},
+		voidInvIdem: func(_ context.Context, id string) error {
+			voidedID = id
+			return nil
+		},
+	}
+	svc := NewService(repo, stripe, nil, nil, Config{StripePriceCoach: "price_coach"})
+
+	groupID := insertCoachGroup(ctx, t, pool, domain.BillingBalancePaid, "lodge", false)
+	if err := svc.SendCoachInvoice(ctx, groupID, "Admin", domain.SkipVersionCheck); err != nil {
+		t.Fatalf("SendCoachInvoice: %v", err)
+	}
+	if err := svc.WaiveCoachFee(ctx, groupID, "Admin", domain.SkipVersionCheck); err != nil {
+		t.Fatalf("WaiveCoachFee: %v", err)
+	}
+	if voidedID != "in_coach_open" {
+		t.Fatalf("voided invoice = %q, want in_coach_open", voidedID)
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g == nil || g.CoachFeeWaivedAt == nil {
+		t.Fatalf("coach_fee_waived_at not set: %+v", g)
+	}
+	if g.StripeCoachInvoiceID != nil {
+		t.Fatalf("stripe_coach_invoice_id should be cleared: %+v", g.StripeCoachInvoiceID)
+	}
+}
+
+func TestWaiveCoachFee_guards(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{StripePriceCoach: "price_coach"})
+
+	t.Run("folded_in_balance", func(t *testing.T) {
+		if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+			t.Fatalf("set lodge price: %v", err)
+		}
+		stub := &stubStripe{
+			ensureCust: func(_ context.Context, _, _, _, _ string) (string, error) {
+				return "cus_seed", nil
+			},
+			createInvoice: func(_ context.Context, _, _ string, _ []InvoiceLine, _ int64, _ string) (InvoiceResult, error) {
+				return InvoiceResult{ID: "in_balance", StripeEmailed: true}, nil
+			},
+		}
+		svcInv := NewService(repo, stub, nil, nil, Config{StripePriceCoach: "price_coach"})
+		groupID := insertCoachGroup(ctx, t, pool, domain.BillingAllocated, "lodge", false)
+		if err := svcInv.SendInvoice(ctx, groupID, "Admin", domain.SkipVersionCheck); err != nil {
+			t.Fatalf("SendInvoice: %v", err)
+		}
+		err := svc.WaiveCoachFee(ctx, groupID, "Admin", domain.SkipVersionCheck)
+		var apiErr commonerrors.APIError
+		if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+			t.Fatalf("expected bad_request, got %v", err)
+		}
+	})
+
+	t.Run("already_paid", func(t *testing.T) {
+		groupID := insertCoachGroup(ctx, t, pool, domain.BillingBalancePaid, "lodge", false)
+		if err := repo.SetCoachInvoiceMeta(ctx, groupID, "in_paid", time.Now().Add(15*24*time.Hour), domain.ActionMeta{
+			Actor: "Admin", Action: "coach_invoice_sent", ExpectedVersion: domain.SkipVersionCheck,
+		}); err != nil {
+			t.Fatalf("seed coach invoice: %v", err)
+		}
+		if err := svc.HandleCoachInvoicePaid(ctx, "in_paid", groupID); err != nil {
+			t.Fatalf("HandleCoachInvoicePaid: %v", err)
+		}
+		err := svc.WaiveCoachFee(ctx, groupID, "Admin", domain.SkipVersionCheck)
+		var apiErr commonerrors.APIError
+		if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+			t.Fatalf("expected bad_request, got %v", err)
+		}
+	})
+}
+
+func TestSendCoachInvoice_waivedGroup(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{StripePriceCoach: "price_coach"})
+
+	groupID := insertCoachGroup(ctx, t, pool, domain.BillingBalancePaid, "lodge", false)
+	if err := svc.WaiveCoachFee(ctx, groupID, "Admin", domain.SkipVersionCheck); err != nil {
+		t.Fatalf("WaiveCoachFee: %v", err)
+	}
+	err := svc.SendCoachInvoice(ctx, groupID, "Admin", domain.SkipVersionCheck)
+	var apiErr commonerrors.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		t.Fatalf("expected bad_request, got %v", err)
+	}
+}
+
+func TestSendInvoice_skipsCoachWhenWaived(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+		t.Fatalf("set lodge price: %v", err)
+	}
+
+	var captured []InvoiceLine
+	stub := &stubStripe{
+		ensureCust: func(_ context.Context, _, _, _, _ string) (string, error) {
+			return "cus_seed", nil
+		},
+		createInvoice: func(_ context.Context, _, _ string, lines []InvoiceLine, _ int64, invoiceType string) (InvoiceResult, error) {
+			captured = lines
+			if invoiceType != "balance" {
+				t.Fatalf("invoice type = %q, want balance", invoiceType)
+			}
+			return InvoiceResult{ID: "in_balance", StripeEmailed: true}, nil
+		},
+	}
+	svc := NewService(repo, stub, nil, nil, Config{StripePriceCoach: "price_coach"})
+
+	groupID := insertCoachGroup(ctx, t, pool, domain.BillingAllocated, "lodge", false)
+	if err := svc.WaiveCoachFee(ctx, groupID, "Admin", domain.SkipVersionCheck); err != nil {
+		t.Fatalf("WaiveCoachFee: %v", err)
+	}
+	if err := svc.SendInvoice(ctx, groupID, "Admin", domain.SkipVersionCheck); err != nil {
+		t.Fatalf("SendInvoice: %v", err)
+	}
+	for _, l := range captured {
+		if l.PriceID == "price_coach" {
+			t.Fatalf("coach line should be omitted when waived: %+v", captured)
+		}
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g == nil || g.CoachIncludedInBalance {
+		t.Fatalf("coach_included_in_balance should be false: %+v", g)
+	}
+}
+
+func TestUnwaiveCoachFee(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	stub := &stubStripe{
+		ensureCust: func(_ context.Context, _, _, _, _ string) (string, error) {
+			return "cus_seed", nil
+		},
+		createInvoice: func(_ context.Context, _, _ string, _ []InvoiceLine, _ int64, invoiceType string) (InvoiceResult, error) {
+			if invoiceType != "coach" {
+				t.Fatalf("invoice type = %q, want coach", invoiceType)
+			}
+			return InvoiceResult{ID: "in_coach_after", StripeEmailed: true}, nil
+		},
+	}
+	svc := NewService(repo, stub, nil, nil, Config{StripePriceCoach: "price_coach"})
+
+	groupID := insertCoachGroup(ctx, t, pool, domain.BillingBalancePaid, "lodge", false)
+	if err := svc.WaiveCoachFee(ctx, groupID, "Admin", domain.SkipVersionCheck); err != nil {
+		t.Fatalf("WaiveCoachFee: %v", err)
+	}
+	if err := svc.UnwaiveCoachFee(ctx, groupID, "Admin", domain.SkipVersionCheck); err != nil {
+		t.Fatalf("UnwaiveCoachFee: %v", err)
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g == nil || g.CoachFeeWaivedAt != nil {
+		t.Fatalf("coach_fee_waived_at should be cleared: %+v", g)
+	}
+	if err := svc.SendCoachInvoice(ctx, groupID, "Admin", domain.SkipVersionCheck); err != nil {
+		t.Fatalf("SendCoachInvoice after unwaive: %v", err)
+	}
+	g, _ = repo.FindGroupByID(ctx, groupID)
+	if g == nil || g.StripeCoachInvoiceID == nil || *g.StripeCoachInvoiceID != "in_coach_after" {
+		t.Fatalf("coach invoice not sent after unwaive: %+v", g)
+	}
+}
+
 func validConvertRequest() ConvertToDayVisitorRequest {
 	needs := true
 	return ConvertToDayVisitorRequest{

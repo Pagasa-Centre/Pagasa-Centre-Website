@@ -68,6 +68,8 @@ func Mount(
 		r.Post("/registrations/invoice-bulk", postInvoiceBulk(billSvc, rec, regRepo))
 		r.Post("/registrations/{groupID}/coach-invoice", postCoachInvoice(billSvc, rec, regRepo))
 		r.Post("/registrations/coach-invoice-bulk", postCoachInvoiceBulk(billSvc, rec, regRepo))
+		r.Post("/registrations/{groupID}/coach-invoice/waive", postWaiveCoachFee(billSvc, rec, regRepo))
+		r.Post("/registrations/{groupID}/coach-invoice/unwaive", postUnwaiveCoachFee(billSvc, rec, regRepo))
 		r.Post("/registrations/{groupID}/release", postRelease(billSvc, rec, regRepo, false))
 		r.Post("/registrations/{groupID}/cancel", postRelease(billSvc, rec, regRepo, true))
 		r.Post("/registrations/{groupID}/delete", deleteRegistration(billSvc, rec))
