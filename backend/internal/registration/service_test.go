@@ -3,6 +3,8 @@ package registration
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -104,12 +106,21 @@ func TestComputeTotal_AllUnderThreesIsZero(t *testing.T) {
 	}
 }
 
-type fakeCampOpen struct{}
+type fakeCampOpen struct {
+	mode string
+}
 
-func (fakeCampOpen) RegistrationsOpen(context.Context) (bool, error) { return true, nil }
+func (f fakeCampOpen) RegistrationsOpen(context.Context) (bool, error) { return true, nil }
+
+func (f fakeCampOpen) RegistrationPaymentMode(context.Context) (string, error) {
+	if f.mode == "" {
+		return domain.PaymentModeDeposit, nil
+	}
+	return f.mode, nil
+}
 
 func newIntegrationService(pool *pgxpool.Pool) *Service {
-	return NewService(storage.NewRepository(pool), fakePriceLookup{amount: 5000}, nil, fakeCampOpen{}, nil, nil, "")
+	return NewService(storage.NewRepository(pool), fakePriceLookup{amount: 5000}, nil, nil, fakeCampOpen{}, nil, nil, "", Config{})
 }
 
 func seedUnusedFreeCode(t *testing.T, ctx context.Context, pool *pgxpool.Pool, code string) {
@@ -158,11 +169,12 @@ func sponsoredRequest(code, email string) domain.SubmitRequest {
 	return req
 }
 
-func countGroups(t *testing.T, ctx context.Context, pool *pgxpool.Pool) int {
+func countGroupsForEmail(t *testing.T, ctx context.Context, pool *pgxpool.Pool, email string) int {
 	t.Helper()
 	var n int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM registration_groups`).Scan(&n); err != nil {
-		t.Fatalf("count groups: %v", err)
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM registration_groups WHERE contact_email = $1`, email).Scan(&n); err != nil {
+		t.Fatalf("count groups for %s: %v", email, err)
 	}
 	return n
 }
@@ -196,8 +208,8 @@ func TestSubmit_invalidFreeCode(t *testing.T) {
 
 	_, err := svc.Submit(ctx, sponsoredRequest("SPON-NOSUCH01", "bad@example.com"))
 	assertAPIErrorCode(t, err, "invalid_free_code")
-	if countGroups(t, ctx, pool) != 0 {
-		t.Fatalf("expected no group row after invalid code")
+	if countGroupsForEmail(t, ctx, pool, "bad@example.com") != 0 {
+		t.Fatalf("expected no group row for submitter after invalid code")
 	}
 }
 
@@ -209,8 +221,11 @@ func TestSubmit_usedFreeCodeRejected(t *testing.T) {
 
 	_, err := svc.Submit(ctx, sponsoredRequest("SPON-USED0001", "used@example.com"))
 	assertAPIErrorCode(t, err, "invalid_free_code")
-	if countGroups(t, ctx, pool) != 1 {
-		t.Fatalf("expected only the pre-seeded group, got %d", countGroups(t, ctx, pool))
+	if countGroupsForEmail(t, ctx, pool, "used@example.com") != 0 {
+		t.Fatalf("expected no group for rejected submitter")
+	}
+	if countGroupsForEmail(t, ctx, pool, "prior@example.com") != 1 {
+		t.Fatalf("expected only the pre-seeded group")
 	}
 }
 
@@ -222,8 +237,8 @@ func TestSubmit_revokedFreeCodeRejected(t *testing.T) {
 
 	_, err := svc.Submit(ctx, sponsoredRequest("SPON-REVOK001", "revoked@example.com"))
 	assertAPIErrorCode(t, err, "invalid_free_code")
-	if countGroups(t, ctx, pool) != 0 {
-		t.Fatalf("expected no group row after revoked code")
+	if countGroupsForEmail(t, ctx, pool, "revoked@example.com") != 0 {
+		t.Fatalf("expected no group row for submitter after revoked code")
 	}
 }
 
@@ -281,8 +296,11 @@ func TestSubmit_doubleRedeemFreeCode(t *testing.T) {
 	}
 	_, err := svc.Submit(ctx, sponsoredRequest("SPON-DOUBLE01", "second@example.com"))
 	assertAPIErrorCode(t, err, "invalid_free_code")
-	if countGroups(t, ctx, pool) != 1 {
-		t.Fatalf("expected exactly one group after double-redeem attempt, got %d", countGroups(t, ctx, pool))
+	if countGroupsForEmail(t, ctx, pool, "second@example.com") != 0 {
+		t.Fatalf("expected no group for second redeem attempt")
+	}
+	if countGroupsForEmail(t, ctx, pool, "first@example.com") != 1 {
+		t.Fatalf("expected exactly one group for first redeem")
 	}
 }
 
@@ -347,7 +365,7 @@ func TestSubmit_disabledAccommodationRejected(t *testing.T) {
 
 	_, err := svc.Submit(ctx, validRequest())
 	assertAPIErrorCode(t, err, "accommodation_unavailable")
-	if countGroups(t, ctx, pool) != 0 {
+	if countGroupsForEmail(t, ctx, pool, "jane@example.com") != 0 {
 		t.Fatalf("expected no group row after disabled-accommodation submit")
 	}
 }
@@ -461,4 +479,274 @@ func mustParseTime(t *testing.T, s string) time.Time {
 		t.Fatalf("parse time: %v", err)
 	}
 	return ts
+}
+
+type fakeStripeAmounts struct {
+	amounts map[string]struct {
+		pence    int64
+		currency string
+	}
+}
+
+func (f fakeStripeAmounts) Amount(_ context.Context, priceID string) (int64, string, error) {
+	if a, ok := f.amounts[priceID]; ok {
+		return a.pence, a.currency, nil
+	}
+	return 0, "GBP", fmt.Errorf("unknown price %q", priceID)
+}
+
+func TestComputeCharge_depositModeSingleLine(t *testing.T) {
+	svc := &Service{prices: fakePriceLookup{amount: 5000}}
+	req := domain.SubmitRequest{Campers: []domain.CamperDTO{
+		{Age: 30, Attendance: domain.AttendanceDTO{Type: domain.AttendanceFullWeek}},
+		{Age: 30, Attendance: domain.AttendanceDTO{Type: domain.AttendanceFullWeek}},
+	}}
+	ch, err := svc.computeCharge(context.Background(), req, domain.PaymentModeDeposit)
+	if err != nil {
+		t.Fatalf("computeCharge: %v", err)
+	}
+	if ch.totalPence != 10000 {
+		t.Errorf("total = %d, want 10000", ch.totalPence)
+	}
+	if len(ch.lines) != 1 {
+		t.Fatalf("lines = %d, want 1 deposit line", len(ch.lines))
+	}
+	if ch.lines[0].Quantity != 1 {
+		t.Errorf("deposit line quantity = %d, want 1 (aggregated)", ch.lines[0].Quantity)
+	}
+}
+
+func TestComputeCharge_fullModeMixedGroup(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+		t.Fatalf("seed lodge price: %v", err)
+	}
+	if err := repo.UpdateAccommodationStripePrice(ctx, "child", "price_child"); err != nil {
+		t.Fatalf("seed child price: %v", err)
+	}
+
+	amounts := fakeStripeAmounts{amounts: map[string]struct {
+		pence    int64
+		currency string
+	}{
+		"price_lodge":       {25000, "GBP"},
+		"price_child_under3": {0, "GBP"},
+		"price_daypass":     {1500, "GBP"},
+		"price_coach":       {2000, "GBP"},
+	}}
+	svc := &Service{
+		repo:          repo,
+		prices:        fakePriceLookup{amount: 5000},
+		stripeAmounts: amounts,
+		cfg: Config{
+			StripePriceChildUnder3: "price_child_under3",
+			StripePriceDayPass:     "price_daypass",
+			StripePriceCoach:       "price_coach",
+		},
+	}
+
+	yes := true
+	req := domain.SubmitRequest{Campers: []domain.CamperDTO{
+		{Age: 30, Attendance: domain.AttendanceDTO{
+			Type: domain.AttendanceFullWeek, AccommodationFirstChoice: "lodge",
+		}},
+		{Age: 2, Attendance: domain.AttendanceDTO{
+			Type: domain.AttendanceFullWeek, AccommodationFirstChoice: "child",
+		}},
+		{Age: 25, Attendance: domain.AttendanceDTO{
+			Type: domain.AttendanceDayPass, Days: []string{"mon", "tue", "wed"},
+		}},
+		{Age: 30, Attendance: domain.AttendanceDTO{
+			Type: domain.AttendanceFullWeek, AccommodationFirstChoice: "lodge",
+			NeedsCoach: &yes,
+		}},
+	}}
+	ch, err := svc.computeCharge(ctx, req, domain.PaymentModeFull)
+	if err != nil {
+		t.Fatalf("computeCharge: %v", err)
+	}
+	// deposit: 2 paying full-week adults (under-4 free) = 2 × £50 = 10000
+	// lodge ×2 = 50000, day pass 3 days = 4500, coach ×1 = 2000
+	want := 10000 + 50000 + 4500 + 2000
+	if ch.totalPence != want {
+		t.Errorf("total = %d, want %d", ch.totalPence, want)
+	}
+}
+
+func TestComputeCharge_tierCollapse(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+		t.Fatalf("seed lodge price: %v", err)
+	}
+	amounts := fakeStripeAmounts{amounts: map[string]struct {
+		pence    int64
+		currency string
+	}{"price_lodge": {25000, "GBP"}}}
+	svc := &Service{
+		repo:          repo,
+		prices:        fakePriceLookup{amount: 5000},
+		stripeAmounts: amounts,
+		cfg:           Config{},
+	}
+	req := domain.SubmitRequest{Campers: []domain.CamperDTO{
+		{Age: 30, Attendance: domain.AttendanceDTO{Type: domain.AttendanceFullWeek, AccommodationFirstChoice: "lodge"}},
+		{Age: 28, Attendance: domain.AttendanceDTO{Type: domain.AttendanceFullWeek, AccommodationFirstChoice: "lodge"}},
+	}}
+	ch, err := svc.computeCharge(ctx, req, domain.PaymentModeFull)
+	if err != nil {
+		t.Fatalf("computeCharge: %v", err)
+	}
+	var lodgeLines int
+	for _, ln := range ch.lines {
+		if ln.Quantity == 2 && ln.AmountPence == 25000 {
+			lodgeLines++
+		}
+	}
+	if lodgeLines != 1 {
+		t.Fatalf("expected one lodge line with qty 2, got lines %+v", ch.lines)
+	}
+}
+
+func TestComputeCharge_zeroUnitOmitted(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	if err := repo.UpdateAccommodationStripePrice(ctx, "child", "price_child"); err != nil {
+		t.Fatalf("seed child price: %v", err)
+	}
+	amounts := fakeStripeAmounts{amounts: map[string]struct {
+		pence    int64
+		currency string
+	}{
+		"price_child":        {10000, "GBP"},
+		"price_child_under3": {0, "GBP"},
+	}}
+	svc := &Service{
+		repo:          repo,
+		prices:        fakePriceLookup{amount: 5000},
+		stripeAmounts: amounts,
+		cfg:           Config{StripePriceChildUnder3: "price_child_under3"},
+	}
+	req := domain.SubmitRequest{Campers: []domain.CamperDTO{
+		{Age: 2, Attendance: domain.AttendanceDTO{Type: domain.AttendanceFullWeek, AccommodationFirstChoice: "child"}},
+	}}
+	ch, err := svc.computeCharge(ctx, req, domain.PaymentModeFull)
+	if err != nil {
+		t.Fatalf("computeCharge: %v", err)
+	}
+	for _, ln := range ch.lines {
+		if ln.AmountPence == 0 {
+			t.Fatalf("£0 line should be omitted, got %+v", ln)
+		}
+	}
+}
+
+func TestComputeCharge_dayPassOnlyNonZeroInFullMode(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	amounts := fakeStripeAmounts{amounts: map[string]struct {
+		pence    int64
+		currency string
+	}{"price_daypass": {1500, "GBP"}}}
+	svc := &Service{
+		repo:          repo,
+		prices:        fakePriceLookup{amount: 5000},
+		stripeAmounts: amounts,
+		cfg:           Config{StripePriceDayPass: "price_daypass"},
+	}
+	req := domain.SubmitRequest{Campers: []domain.CamperDTO{
+		{Age: 25, Attendance: domain.AttendanceDTO{Type: domain.AttendanceDayPass, Days: []string{"mon", "tue"}}},
+	}}
+	ch, err := svc.computeCharge(ctx, req, domain.PaymentModeFull)
+	if err != nil {
+		t.Fatalf("computeCharge: %v", err)
+	}
+	if ch.totalPence != 3000 {
+		t.Errorf("total = %d, want 3000", ch.totalPence)
+	}
+}
+
+func TestComputeCharge_missingDayPassPrice(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := &Service{
+		repo:          repo,
+		prices:        fakePriceLookup{amount: 5000},
+		stripeAmounts: fakeStripeAmounts{amounts: map[string]struct {
+			pence    int64
+			currency string
+		}{}},
+		cfg: Config{},
+	}
+	req := domain.SubmitRequest{Campers: []domain.CamperDTO{
+		{Age: 25, Attendance: domain.AttendanceDTO{Type: domain.AttendanceDayPass, Days: []string{"mon"}}},
+	}}
+	_, err := svc.computeCharge(ctx, req, domain.PaymentModeFull)
+	if err == nil || !strings.Contains(err.Error(), "STRIPE_PRICE_DAY_PASS") {
+		t.Fatalf("expected day pass config error, got %v", err)
+	}
+}
+
+func TestValidateFullPaymentPricing_missingCoach(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+		t.Fatalf("seed lodge price: %v", err)
+	}
+	amounts := fakeStripeAmounts{amounts: map[string]struct {
+		pence    int64
+		currency string
+	}{
+		"price_lodge":         {25000, "GBP"},
+		"price_child_under3":  {5000, "GBP"},
+		"price_daypass":       {1500, "GBP"},
+	}}
+	svc := NewService(repo, fakePriceLookup{amount: 5000}, nil, amounts, fakeCampOpen{}, nil, nil, "", Config{
+		StripePriceChildUnder3: "price_child_under3",
+		StripePriceDayPass:     "price_daypass",
+	})
+	err := svc.ValidateFullPaymentPricing(ctx)
+	if err == nil {
+		t.Fatal("expected preflight failure for missing coach price")
+	}
+	if !strings.Contains(err.Error(), "Coach") {
+		t.Fatalf("expected coach named in error, got %v", err)
+	}
+}
+
+func TestValidateFullPaymentPricing_currencyMismatch(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+		t.Fatalf("seed lodge price: %v", err)
+	}
+	amounts := fakeStripeAmounts{amounts: map[string]struct {
+		pence    int64
+		currency string
+	}{
+		"price_lodge":        {25000, "USD"},
+		"price_child_under3": {5000, "GBP"},
+		"price_daypass":      {1500, "GBP"},
+		"price_coach":        {2000, "GBP"},
+	}}
+	svc := NewService(repo, fakePriceLookup{amount: 5000}, nil, amounts, fakeCampOpen{}, nil, nil, "", Config{
+		StripePriceChildUnder3: "price_child_under3",
+		StripePriceDayPass:     "price_daypass",
+		StripePriceCoach:       "price_coach",
+	})
+	err := svc.ValidateFullPaymentPricing(ctx)
+	if err == nil {
+		t.Fatal("expected currency mismatch failure")
+	}
+	if !strings.Contains(err.Error(), "currency") {
+		t.Fatalf("expected currency in error, got %v", err)
+	}
 }

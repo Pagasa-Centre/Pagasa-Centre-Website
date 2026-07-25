@@ -22,8 +22,9 @@ type templateData struct {
 	CamperCount          int
 	HasMinor             bool
 	ConsentFormURL       string
-	IsDepositConfirm     bool // true when AmountPence > 0
+	IsDepositConfirm     bool // true when AmountPence > 0 and not PaidInFull
 	IsFree               bool // church-sponsored registration
+	IsPaidInFull         bool // paid entire camp cost at registration
 	KeyDatesRegistration string
 	KeyDatesAllocation   string
 	KeyDatesFinalPayment string
@@ -38,14 +39,18 @@ func renderDepositConfirmation(p DepositConfirmation) (subject, htmlBody string,
 		CamperCount:          p.CamperCount,
 		HasMinor:             p.HasMinor,
 		ConsentFormURL:       p.ConsentFormURL,
-		IsDepositConfirm:     p.AmountPence > 0,
+		IsDepositConfirm:     p.AmountPence > 0 && !p.PaidInFull,
 		IsFree:               p.IsFree,
+		IsPaidInFull:         p.PaidInFull,
 		KeyDatesRegistration: KeyDatesRegistration,
 		KeyDatesAllocation:   KeyDatesAllocation,
 		KeyDatesFinalPayment: KeyDatesFinalPayment,
 		BroAsh:               AllocationContactName,
 	}
-	if td.IsDepositConfirm {
+	if p.PaidInFull {
+		td.AmountFormatted = formatPence(p.AmountPence, p.Currency)
+		subject = "Your PC Summer Camp 2026 payment has been received"
+	} else if td.IsDepositConfirm {
 		td.AmountFormatted = formatPence(p.AmountPence, p.Currency)
 		subject = "Your PC Summer Camp 2026 deposit has been received"
 	} else {
@@ -414,11 +419,13 @@ const depositConfirmationHTML = `<!DOCTYPE html>
   <title>PC Summer Camp 2026</title>
 </head>
 <body style="font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; color: #1a1a1a; line-height: 1.55; max-width: 600px; margin: 0 auto; padding: 24px;">
-  <h1 style="font-size: 22px; margin: 0 0 16px;">{{if .IsDepositConfirm}}Your deposit has been received{{else}}Your registration is confirmed{{end}}</h1>
+  <h1 style="font-size: 22px; margin: 0 0 16px;">{{if .IsPaidInFull}}Your payment has been received{{else if .IsDepositConfirm}}Your deposit has been received{{else}}Your registration is confirmed{{end}}</h1>
 
   <p>Hi {{if .ToName}}{{.ToName}}{{else}}there{{end}},</p>
 
-  {{if .IsDepositConfirm}}
+  {{if .IsPaidInFull}}
+  <p>Thank you for registering for <strong>PC Summer Camp 2026</strong>. We've received your payment of <strong>{{.AmountFormatted}}</strong> covering the full cost of camp for {{.CamperCount}} camper{{if ne .CamperCount 1}}s{{end}}. A separate payment receipt has been emailed to you by Stripe.</p>
+  {{else if .IsDepositConfirm}}
   <p>Thank you for registering for <strong>PC Summer Camp 2026</strong>. We've received your non-refundable deposit of <strong>{{.AmountFormatted}}</strong> covering {{.CamperCount}} camper{{if ne .CamperCount 1}}s{{end}}. A separate payment receipt has been emailed to you by Stripe.</p>
   {{else if .IsFree}}
   <p>Thank you for registering {{.CamperCount}} camper{{if ne .CamperCount 1}}s{{end}} for <strong>PC Summer Camp 2026</strong>. Your registration is fully sponsored by the church — there is nothing to pay.</p>
@@ -430,7 +437,11 @@ const depositConfirmationHTML = `<!DOCTYPE html>
   <ol style="padding-left: 20px;">
     <li><strong>{{.KeyDatesRegistration}}</strong> — Registration is open.</li>
     <li><strong>{{.KeyDatesAllocation}}</strong> — The committee allocates rooms. You'll hear from your cell leader, by email, in person, or at arrival on the day.</li>
+    {{if .IsPaidInFull}}
+    <li><strong>Nothing further to pay</strong> — The White Team will confirm your accommodation after allocation.</li>
+    {{else}}
     <li><strong>{{.KeyDatesFinalPayment}}</strong> — Final payment window. Once the balance is settled, your accommodation is fully confirmed.</li>
+    {{end}}
   </ol>
 
   {{if .HasMinor}}

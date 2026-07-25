@@ -29,23 +29,34 @@ func NewStripeClient(secretKey, webhookSecret, successURL, cancelURL string) *St
 }
 
 func (c *StripeClient) CreateCheckoutSession(ctx context.Context, p registration.CheckoutParams) (registration.CheckoutSession, error) {
+	lineItems := make([]*stripe.CheckoutSessionLineItemParams, 0, len(p.Lines))
+	for _, line := range p.Lines {
+		if line.AmountPence <= 0 || line.Quantity < 1 {
+			continue
+		}
+		lineItems = append(lineItems, &stripe.CheckoutSessionLineItemParams{
+			Quantity: stripe.Int64(line.Quantity),
+			PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+				Currency:   stripe.String(p.Currency),
+				UnitAmount: stripe.Int64(line.AmountPence),
+				ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+					Name: stripe.String(line.Description),
+				},
+			},
+		})
+	}
+	if len(lineItems) == 0 {
+		return registration.CheckoutSession{}, fmt.Errorf("checkout session requires at least one line item")
+	}
+
 	params := &stripe.CheckoutSessionParams{
 		Mode:              stripe.String(string(stripe.CheckoutSessionModePayment)),
 		SuccessURL:        stripe.String(c.successURL),
 		CancelURL:         stripe.String(c.cancelURL),
 		ClientReferenceID: stripe.String(p.GroupID),
 		CustomerEmail:     stripe.String(p.Email),
-		LineItems: []*stripe.CheckoutSessionLineItemParams{{
-			Quantity: stripe.Int64(1),
-			PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
-				Currency:   stripe.String(p.Currency),
-				UnitAmount: stripe.Int64(p.AmountPence),
-				ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
-					Name: stripe.String(p.Description),
-				},
-			},
-		}},
-		Metadata: map[string]string{"group_id": p.GroupID},
+		LineItems:         lineItems,
+		Metadata:          map[string]string{"group_id": p.GroupID},
 	}
 	params.Context = ctx
 

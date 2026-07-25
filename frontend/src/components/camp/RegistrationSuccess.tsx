@@ -57,6 +57,25 @@ function SuccessBody({ apiBase }: Props) {
       return null;
     }
   }, [stashJson]);
+  const [configMode, setConfigMode] = useState<"deposit" | "full" | null>(
+    null,
+  );
+  useEffect(() => {
+    if (stash?.paid_in_full) return;
+    camp
+      .config()
+      .then((c) =>
+        setConfigMode(c.registration_payment_mode === "full" ? "full" : "deposit"),
+      )
+      .catch(() => {});
+  }, [stash?.paid_in_full]);
+
+  const paidInFull =
+    stash?.paid_in_full === true ||
+    (!isFreeRegistration &&
+      !isSponsored &&
+      configMode === "full" &&
+      Boolean(sessionId));
 
   // Camper list: prefer the client-side stash (fresh from the just-submitted
   // form) because it doesn't need a backend round-trip. If the stash is
@@ -120,19 +139,27 @@ function SuccessBody({ apiBase }: Props) {
       <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="w-14 h-1 bg-primary mb-7 mx-auto" />
         <p className="text-primary uppercase tracking-widest text-sm font-semibold mb-3 text-center">
-          {isFreeRegistration ? "Registration confirmed" : "Deposit received"}
+          {isFreeRegistration
+            ? "Registration confirmed"
+            : paidInFull
+              ? "Payment received"
+              : "Deposit received"}
         </p>
         <h1 className="text-3xl sm:text-4xl font-extrabold text-neutral-900 leading-tight mb-5 text-center">
           {isFreeRegistration
             ? "You're registered for camp"
-            : "Thanks, your deposit is in"}
+            : paidInFull
+              ? "Thanks, your payment is in"
+              : "Thanks, your deposit is in"}
         </h1>
         <p className="text-neutral-700 mb-3 text-center">
           {isSponsored
             ? "Thank you for registering for PC Summer Camp 2026. Your registration is fully sponsored by the church — there is nothing to pay."
             : isFreeRegistration
               ? "Thank you for registering for PC Summer Camp 2026. Day-pass attendance doesn't require a deposit — we'll see you on the day."
-              : "Thank you for signing up to PC Summer Camp 2026. Your non-refundable deposit has been received. A separate payment receipt will arrive from Stripe shortly."}
+              : paidInFull
+                ? "Thank you for signing up to PC Summer Camp 2026. Your full camp payment has been received. A separate payment receipt will arrive from Stripe shortly."
+                : "Thank you for signing up to PC Summer Camp 2026. Your non-refundable deposit has been received. A separate payment receipt will arrive from Stripe shortly."}
         </p>
         <p className="text-neutral-700 mb-3 text-center">
           A confirmation email has been sent to{" "}
@@ -151,7 +178,8 @@ function SuccessBody({ apiBase }: Props) {
               {contactEmail ?? "the email you entered"}
             </span>{" "}
             is spelled correctly. This is the address we&apos;ll use to send
-            your room allocation and balance invoice. If it&apos;s wrong,
+            your room allocation
+            {paidInFull ? "" : " and balance invoice"}. If it&apos;s wrong,
             please contact <span className="font-semibold">Aliyah</span> or any
             member of the White Team as soon as possible to get it corrected —
             it&apos;s much harder to fix once allocation and invoicing have
@@ -217,10 +245,14 @@ function SuccessBody({ apiBase }: Props) {
                 </p>
                 <p className="text-sm text-neutral-600">
                   The White Team allocates rooms and posts the temporary
-                  allocation so you know the balance for final payment.
+                  allocation
+                  {paidInFull
+                    ? ". Nothing further to pay — your place is confirmed."
+                    : " so you know the balance for final payment."}
                 </p>
               </div>
             </li>
+            {!paidInFull && (
             <li className="flex gap-4">
               <span className="flex-shrink-0 w-8 h-8 bg-primary/10 text-primary flex items-center justify-center font-bold text-sm">
                 3
@@ -236,6 +268,7 @@ function SuccessBody({ apiBase }: Props) {
                 </p>
               </div>
             </li>
+            )}
           </ol>
         </div>
 

@@ -20,10 +20,10 @@ func NewRepository(pool *pgxpool.Pool) *Repository { return &Repository{pool: po
 func (r *Repository) GetConfig(ctx context.Context) (domain.Config, error) {
 	var c domain.Config
 	err := r.pool.QueryRow(ctx,
-		`SELECT name, location_name, location_addr, website_url, start_date, end_date, registrations_open
+		`SELECT name, location_name, location_addr, website_url, start_date, end_date, registrations_open, registration_payment_mode
 		   FROM camp_config WHERE id = 1`).
 		Scan(&c.Name, &c.LocationName, &c.LocationAddr, &c.WebsiteURL,
-			&c.StartDate, &c.EndDate, &c.RegistrationsOpen)
+			&c.StartDate, &c.EndDate, &c.RegistrationsOpen, &c.RegistrationPaymentMode)
 	if err != nil {
 		return domain.Config{}, fmt.Errorf("get camp config: %w", err)
 	}
@@ -44,6 +44,27 @@ func (r *Repository) SetRegistrationsOpen(ctx context.Context, open bool) error 
 		`UPDATE camp_config SET registrations_open = $1 WHERE id = 1`, open)
 	if err != nil {
 		return fmt.Errorf("set registrations_open: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("camp_config row not found")
+	}
+	return nil
+}
+
+func (r *Repository) RegistrationPaymentMode(ctx context.Context) (string, error) {
+	var mode string
+	err := r.pool.QueryRow(ctx, `SELECT registration_payment_mode FROM camp_config WHERE id = 1`).Scan(&mode)
+	if err != nil {
+		return "", fmt.Errorf("read registration_payment_mode: %w", err)
+	}
+	return mode, nil
+}
+
+func (r *Repository) SetRegistrationPaymentMode(ctx context.Context, mode string) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE camp_config SET registration_payment_mode = $1 WHERE id = 1`, mode)
+	if err != nil {
+		return fmt.Errorf("set registration_payment_mode: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("camp_config row not found")

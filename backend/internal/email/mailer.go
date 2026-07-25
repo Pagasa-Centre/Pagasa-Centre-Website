@@ -134,4 +134,5 @@ type DepositConfirmation struct {
 	HasMinor       bool
 	ConsentFormURL string // empty if HasMinor is false
 	IsFree         bool   // church-sponsored registration (not day-pass £0)
+	PaidInFull     bool   // paid entire camp cost at registration
 }

@@ -32,11 +32,10 @@ type CheckoutCreator interface {
 }
 
 type CheckoutParams struct {
-	GroupID     string
-	Email       string
-	AmountPence int64
-	Currency    string
-	Description string
+	GroupID  string
+	Email    string
+	Currency string
+	Lines    []CheckoutLine
 }
 
 type CheckoutSession struct {
@@ -46,26 +45,31 @@ type CheckoutSession struct {
 
 type CampConfigReader interface {
 	RegistrationsOpen(ctx context.Context) (bool, error)
+	RegistrationPaymentMode(ctx context.Context) (string, error)
 }
 
 type Service struct {
 	repo          *storage.Repository
 	prices        PriceLookup
 	stripe        CheckoutCreator
+	stripeAmounts StripePriceAmounts
 	camp          CampConfigReader
 	mailer        email.Mailer
 	sheets        sheets.Sync
 	publicBaseURL string
+	cfg           Config
 }
 
 func NewService(
 	repo *storage.Repository,
 	prices PriceLookup,
 	stripe CheckoutCreator,
+	stripeAmounts StripePriceAmounts,
 	campCfg CampConfigReader,
 	mailer email.Mailer,
 	sheetSync sheets.Sync,
 	publicBaseURL string,
+	cfg Config,
 ) *Service {
 	if sheetSync == nil {
 		sheetSync = sheets.NewNoopSync()
@@ -74,10 +78,12 @@ func NewService(
 		repo:          repo,
 		prices:        prices,
 		stripe:        stripe,
+		stripeAmounts: stripeAmounts,
 		camp:          campCfg,
 		mailer:        mailer,
 		sheets:        sheetSync,
 		publicBaseURL: publicBaseURL,
+		cfg:           cfg,
 	}
 }
 
@@ -101,10 +107,21 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 		return nil, err
 	}
 
-	total, currency, err := s.computeTotal(ctx, req)
+	mode, err := s.camp.RegistrationPaymentMode(ctx)
 	if err != nil {
 		return nil, commonerrors.Internal(err.Error())
 	}
+	if mode != domain.PaymentModeDeposit && mode != domain.PaymentModeFull {
+		mode = domain.PaymentModeDeposit
+	}
+
+	charge, err := s.computeCharge(ctx, req, mode)
+	if err != nil {
+		return nil, commonerrors.Internal(err.Error())
+	}
+	total := charge.totalPence
+	currency := charge.currency
+	paidInFull := mode == domain.PaymentModeFull
 
 	isFree := false
 	var reservedCodeID string
@@ -130,9 +147,11 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 		reservedCodeID = codeID
 		isFree = true
 		total = 0
+		paidInFull = false
+		charge.lines = nil
 	}
 
-	groupID, err := s.repo.InsertGroup(ctx, tx, req, total, currency, isFree)
+	groupID, err := s.repo.InsertGroup(ctx, tx, req, total, currency, isFree, paidInFull)
 	if err != nil {
 		return nil, commonerrors.Internal(err.Error())
 	}
@@ -158,13 +177,18 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 	}
 
 	if total == 0 {
-		if err := s.repo.MarkPaid(ctx, tx, groupID, ""); err != nil {
+		if paidInFull {
+			coachIncluded := coachEligibleCountFromRequest(req) > 0
+			if err := s.repo.MarkPaidInFull(ctx, tx, groupID, "", coachIncluded); err != nil {
+				return nil, commonerrors.Internal(err.Error())
+			}
+		} else if err := s.repo.MarkPaid(ctx, tx, groupID, ""); err != nil {
 			return nil, commonerrors.Internal(err.Error())
 		}
 		if err := tx.Commit(ctx); err != nil {
 			return nil, commonerrors.Internal(err.Error())
 		}
-		s.sendConfirmationEmail(ctx, req, total, currency, hasMinor, isFree)
+		s.sendConfirmationEmail(ctx, req, total, currency, hasMinor, isFree, paidInFull)
 		now := time.Now().UTC()
 		rows := rowsFromRequest(groupID, req, domain.PaymentPaid, total, currency, now, &now)
 		if err := s.sheets.AppendPaidAndRemovePending(ctx, groupID, rows); err != nil {
@@ -173,13 +197,11 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 		return resp, nil
 	}
 
-	paying := depositPayingCount(req)
 	session, err := s.stripe.CreateCheckoutSession(ctx, CheckoutParams{
-		GroupID:     groupID,
-		Email:       req.Contact.Email,
-		AmountPence: int64(total),
-		Currency:    currency,
-		Description: fmt.Sprintf("PC Summer Camp 2026 non-refundable deposit (%d camper%s)", paying, pluralS(paying)),
+		GroupID:  groupID,
+		Email:    req.Contact.Email,
+		Currency: currency,
+		Lines:    charge.lines,
 	})
 	if err != nil {
 		return nil, commonerrors.Internal(fmt.Sprintf("stripe checkout: %s", err.Error()))
@@ -293,7 +315,7 @@ func (s *Service) computeTotal(ctx context.Context, req domain.SubmitRequest) (t
 	return totalPence, currency, nil
 }
 
-func (s *Service) sendConfirmationEmail(ctx context.Context, req domain.SubmitRequest, totalPence int, currency string, hasMinor, isFree bool) {
+func (s *Service) sendConfirmationEmail(ctx context.Context, req domain.SubmitRequest, totalPence int, currency string, hasMinor, isFree, paidInFull bool) {
 	if s.mailer == nil {
 		return
 	}
@@ -310,6 +332,7 @@ func (s *Service) sendConfirmationEmail(ctx context.Context, req domain.SubmitRe
 		HasMinor:       hasMinor,
 		ConsentFormURL: consentURL,
 		IsFree:         isFree,
+		PaidInFull:     paidInFull,
 	})
 	if err != nil {
 		log.Printf("send confirmation email to %s failed: %v", req.Contact.Email, err)

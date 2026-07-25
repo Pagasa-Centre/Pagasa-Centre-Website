@@ -102,10 +102,16 @@ func main() {
 		regRepo,
 		campPriceAdapter{repo: campRepo},
 		stripeCli,
+		payment.NewPriceCatalog(),
 		campRepo,
 		mailer,
 		sheetSync,
 		cfg.PublicBaseURL,
+		registration.Config{
+			StripePriceChildUnder3: cfg.StripePriceChildUnder3,
+			StripePriceDayPass:     cfg.StripePriceDayPass,
+			StripePriceCoach:       cfg.StripePriceCoach,
+		},
 	)
 
 	paySvc := payment.NewService(pool, regRepo, mailer, sheetSync, cfg.PublicBaseURL)

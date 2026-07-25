@@ -77,6 +77,21 @@ export type CampConfig = {
   start_date: string;
   end_date: string;
   registrations_open: boolean;
+  registration_payment_mode?: "deposit" | "full";
+};
+
+export type RegistrationPricing = {
+  mode: "deposit" | "full";
+  currency: string;
+  deposit_amount_pence: number;
+  accommodation_tiers: {
+    code: string;
+    display_name: string;
+    amount_pence: number;
+  }[];
+  child_under3_amount_pence: number;
+  day_pass_amount_pence: number;
+  coach_amount_pence: number;
 };
 
 // v2 collapsed the price catalogue to a single per-full-week-camper deposit.
@@ -173,6 +188,8 @@ export type SummaryResponse = {
 export const camp = {
   config: () => apiFetch<CampConfig>("/api/camp"),
   prices: () => apiFetch<{ prices: Price[] }>("/api/prices"),
+  registrationPricing: () =>
+    apiFetch<RegistrationPricing>("/api/registration-pricing"),
   accommodations: () =>
     apiFetch<{ accommodations: Accommodation[] }>("/api/accommodations"),
   shirtSizes: () =>

@@ -60,6 +60,7 @@ func New(cfg Config) http.Handler {
 		r.Post("/registrations", cfg.RegistrationHandler.Submit())
 		r.Get("/shirt-sizes", cfg.RegistrationHandler.ListShirtSizes())
 		r.Get("/registrations/summary", cfg.RegistrationHandler.Summary())
+		r.Get("/registration-pricing", cfg.RegistrationHandler.Pricing())
 		r.Post("/payments/webhook", cfg.PaymentHandler.Webhook())
 		r.Get("/consent-form", cfg.ConsentHandler.GetConsentForm())
 	})

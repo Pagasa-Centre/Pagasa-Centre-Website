@@ -74,7 +74,15 @@ func (s *Service) HandleCheckoutCompleted(ctx context.Context, evt CheckoutCompl
 		return nil // already processed — webhook replays are expected
 	}
 
-	if err := s.regRepo.MarkPaid(ctx, tx, group.ID, evt.PaymentIntentID); err != nil {
+	if group.PaidInFullAtRegistration {
+		coachIncluded, err := s.groupHasCoachEligible(ctx, group.ID)
+		if err != nil {
+			return err
+		}
+		if err := s.regRepo.MarkPaidInFull(ctx, tx, group.ID, evt.PaymentIntentID, coachIncluded); err != nil {
+			return err
+		}
+	} else if err := s.regRepo.MarkPaid(ctx, tx, group.ID, evt.PaymentIntentID); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -215,7 +223,24 @@ func (s *Service) sendDepositConfirmation(ctx context.Context, g *domain.Group) 
 		CamperCount:    len(campers),
 		HasMinor:       hasMinor,
 		ConsentFormURL: consentURL,
+		PaidInFull:     g.PaidInFullAtRegistration,
 	})
+}
+
+func (s *Service) groupHasCoachEligible(ctx context.Context, groupID string) (bool, error) {
+	campers, err := s.regRepo.CampersForGroup(ctx, groupID)
+	if err != nil {
+		return false, err
+	}
+	for _, c := range campers {
+		if c.AttendanceType != domain.AttendanceFullWeek {
+			continue
+		}
+		if c.NeedsCoach != nil && *c.NeedsCoach && c.Age >= 4 {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // UpdateGroupContact corrects a group's contact details (e.g. a mistyped email

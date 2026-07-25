@@ -44,5 +44,6 @@ const (
 	ActionCoachFeeUnwaived      = "coach_fee_unwaived"
 	ActionSheetResynced         = "sheet_resynced"
 
+	ActionPaymentModeToggle         = "payment_mode_toggle"
 	ActionAccommodationAvailability = "accommodation_availability"
 )

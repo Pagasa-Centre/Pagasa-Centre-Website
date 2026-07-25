@@ -3,6 +3,7 @@ package billing
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -2216,4 +2217,168 @@ func TestUpdateDayPassCamper_guards(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestResolvePriceID_childUnder4UsesUnder3Price(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{StripePriceChildUnder3: "price_child_u3"})
+	id, err := svc.resolvePriceID(ctx, registration.AccommodationChild, 3)
+	if err != nil {
+		t.Fatalf("resolve child under 4: %v", err)
+	}
+	if id != "price_child_u3" {
+		t.Fatalf("got %q, want price_child_u3", id)
+	}
+}
+
+func TestResolvePriceID_childAge8UsesTierPrice(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	if err := repo.UpdateAccommodationStripePrice(ctx, "child", "price_child_tier"); err != nil {
+		t.Fatalf("seed child price: %v", err)
+	}
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{StripePriceChildUnder3: "price_child_u3"})
+	id, err := svc.resolvePriceID(ctx, registration.AccommodationChild, 8)
+	if err != nil {
+		t.Fatalf("resolve child age 8: %v", err)
+	}
+	if id != "price_child_tier" {
+		t.Fatalf("got %q, want price_child_tier", id)
+	}
+}
+
+func TestResolvePriceID_tentUsesTierPrice(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	if err := repo.UpdateAccommodationStripePrice(ctx, "tent", "price_tent"); err != nil {
+		t.Fatalf("seed tent price: %v", err)
+	}
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{})
+	id, err := svc.resolvePriceID(ctx, "tent", 25)
+	if err != nil {
+		t.Fatalf("resolve tent: %v", err)
+	}
+	if id != "price_tent" {
+		t.Fatalf("got %q, want price_tent", id)
+	}
+}
+
+func TestResolvePriceID_emptyStripePriceErrors(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	if _, err := pool.Exec(ctx, `UPDATE accommodation_types SET stripe_price_id = NULL WHERE code = 'cabin'`); err != nil {
+		t.Fatalf("clear cabin price: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = repo.UpdateAccommodationStripePrice(context.Background(), "cabin", "price_cabin_restore")
+	})
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{})
+	_, err := svc.resolvePriceID(ctx, "cabin", 25)
+	if err == nil {
+		t.Fatal("expected error for tier without stripe_price_id")
+	}
+}
+
+func TestAllocate_prepaidGroupKeepsBalancePaid(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+		t.Fatalf("seed lodge price: %v", err)
+	}
+	svc := NewService(repo, NewStripeBilling(), nil, nil, Config{})
+
+	var groupID, camperID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, total_amount_pence, currency, billing_status, paid_in_full_at_registration
+		) VALUES ('Pre', 'Paid', 'prepaid@example.com', '07000000000', 'paid', 70000, 'GBP', 'balance_paid', true)
+		RETURNING id`).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+	err = pool.QueryRow(ctx, `
+		INSERT INTO registrations (
+			group_id, is_main_contact, first_name, last_name, gender, age,
+			cell_leader_name, is_cell_leader, attendance_type,
+			accommodation_first_choice
+		) VALUES ($1, true, 'Alex', 'Test', 'male', 25, 'Leader', false, 'full_week', 'lodge')
+		RETURNING id`, groupID).Scan(&camperID)
+	if err != nil {
+		t.Fatalf("insert camper: %v", err)
+	}
+
+	if err := svc.Allocate(ctx, groupID, "Admin", domain.SkipVersionCheck, AllocateRequest{
+		Campers: []AllocateCamper{{
+			CamperID:                   camperID,
+			AllocatedAccommodationCode: "lodge",
+			BilledStripePriceID:        "price_lodge",
+		}},
+	}); err != nil {
+		t.Fatalf("Allocate prepaid: %v", err)
+	}
+
+	g, err := repo.FindGroupByID(ctx, groupID)
+	if err != nil || g == nil {
+		t.Fatalf("find group: %v", err)
+	}
+	if g.BillingStatus != domain.BillingBalancePaid {
+		t.Fatalf("billing_status = %q, want balance_paid", g.BillingStatus)
+	}
+}
+
+func TestSendInvoice_rejectsPrepaidGroup(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{})
+
+	var groupID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, total_amount_pence, currency, billing_status, paid_in_full_at_registration
+		) VALUES ('Pre', 'Paid', 'prepaid2@example.com', '07000000000', 'paid', 70000, 'GBP', 'balance_paid', true)
+		RETURNING id`).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+
+	err = svc.SendInvoice(ctx, groupID, "Admin", domain.SkipVersionCheck)
+	var apiErr commonerrors.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		t.Fatalf("expected bad_request, got %v", err)
+	}
+	if !strings.Contains(apiErr.Message, "paid in full at registration") {
+		t.Fatalf("unexpected message: %q", apiErr.Message)
+	}
+}
+
+func TestSendInvoicesBulk_skipsPrepaidGroup(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{})
+
+	var groupID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, total_amount_pence, currency, billing_status, paid_in_full_at_registration
+		) VALUES ('Pre', 'Paid', 'prepaid3@example.com', '07000000000', 'paid', 70000, 'GBP', 'balance_paid', true)
+		RETURNING id`).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+
+	errs := svc.SendInvoicesBulk(ctx, "Admin", []string{groupID})
+	if len(errs) != 0 {
+		t.Fatalf("expected prepaid group skipped silently, got errs=%v", errs)
+	}
 }

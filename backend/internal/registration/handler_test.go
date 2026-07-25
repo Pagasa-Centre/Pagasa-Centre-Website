@@ -32,20 +32,30 @@ func (fakePrices) GetPrice(_ context.Context, code string) (registration.PriceRo
 }
 
 type fakeCheckout struct {
-	id, url     string
-	calls       int
-	lastDescrip string
+	id, url string
+	calls   int
+	lastLines int
 }
 
 func (f *fakeCheckout) CreateCheckoutSession(_ context.Context, p registration.CheckoutParams) (registration.CheckoutSession, error) {
 	f.calls++
-	f.lastDescrip = p.Description
+	f.lastLines = len(p.Lines)
 	return registration.CheckoutSession{ID: f.id, URL: f.url}, nil
 }
 
-type fakeCamp struct{ open bool }
+type fakeCamp struct {
+	open bool
+	mode string
+}
 
 func (f fakeCamp) RegistrationsOpen(_ context.Context) (bool, error) { return f.open, nil }
+
+func (f fakeCamp) RegistrationPaymentMode(_ context.Context) (string, error) {
+	if f.mode == "" {
+		return domain.PaymentModeDeposit, nil
+	}
+	return f.mode, nil
+}
 
 type recordingMailer struct {
 	mu    sync.Mutex
@@ -102,7 +112,7 @@ func newHarness(t *testing.T) *harness {
 	repo := regstorage.NewRepository(pool)
 	stripe := &fakeCheckout{id: "sess_test", url: "https://checkout.stripe.com/test"}
 	mailer := &recordingMailer{}
-	svc := registration.NewService(repo, fakePrices{}, stripe, fakeCamp{open: true}, mailer, nil, "http://localhost:8080")
+	svc := registration.NewService(repo, fakePrices{}, stripe, nil, fakeCamp{open: true}, mailer, nil, "http://localhost:8080", registration.Config{})
 	r := chi.NewRouter()
 	h := regapi.NewHandler(svc)
 	r.Post("/registrations", h.Submit())

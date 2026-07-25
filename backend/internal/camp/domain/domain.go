@@ -9,7 +9,8 @@ type Config struct {
 	WebsiteURL        string    `json:"website_url"`
 	StartDate         time.Time `json:"start_date"`
 	EndDate           time.Time `json:"end_date"`
-	RegistrationsOpen bool      `json:"registrations_open"`
+	RegistrationsOpen       bool      `json:"registrations_open"`
+	RegistrationPaymentMode string    `json:"registration_payment_mode"`
 }
 
 type Price struct {

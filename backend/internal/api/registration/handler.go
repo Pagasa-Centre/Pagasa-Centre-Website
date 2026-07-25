@@ -70,3 +70,14 @@ func (h *Handler) Summary() http.HandlerFunc {
 		render.Json(w, http.StatusOK, mapper.SummaryToResponse(summary))
 	}
 }
+
+func (h *Handler) Pricing() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		snap, err := h.service.PricingSnapshot(r.Context())
+		if err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		render.Json(w, http.StatusOK, mapper.PricingToResponse(snap))
+	}
+}

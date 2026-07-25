@@ -25,7 +25,7 @@ const groupSelectCols = `
 	stripe_customer_id, stripe_invoice_id, billing_status, invoice_due_at, balance_paid_at,
 	version, last_action, last_action_by, last_action_at, is_free,
 	coach_included_in_balance, stripe_coach_invoice_id, coach_invoice_due_at, coach_fee_paid_at,
-	coach_fee_waived_at`
+	coach_fee_waived_at, paid_in_full_at_registration`
 
 func scanGroup(row pgx.Row) (domain.Group, error) {
 	var g domain.Group
@@ -36,7 +36,7 @@ func scanGroup(row pgx.Row) (domain.Group, error) {
 		&g.StripeCustomerID, &g.StripeInvoiceID, &g.BillingStatus, &g.InvoiceDueAt, &g.BalancePaidAt,
 		&g.Version, &g.LastAction, &g.LastActionBy, &g.LastActionAt, &g.IsFree,
 		&g.CoachIncludedInBalance, &g.StripeCoachInvoiceID, &g.CoachInvoiceDueAt, &g.CoachFeePaidAt,
-		&g.CoachFeeWaivedAt,
+		&g.CoachFeeWaivedAt, &g.PaidInFullAtRegistration,
 	)
 	return g, err
 }
@@ -69,16 +69,16 @@ func scanCamper(row pgx.Row) (domain.Camper, error) {
 func (r *Repository) Pool() *pgxpool.Pool { return r.pool }
 
 // InsertGroup inserts a registration_groups row inside tx and returns its UUID.
-func (r *Repository) InsertGroup(ctx context.Context, tx pgx.Tx, req domain.SubmitRequest, totalPence int, currency string, isFree bool) (string, error) {
+func (r *Repository) InsertGroup(ctx context.Context, tx pgx.Tx, req domain.SubmitRequest, totalPence int, currency string, isFree, paidInFull bool) (string, error) {
 	const q = `
 		INSERT INTO registration_groups (
 			contact_first_name, contact_last_name, contact_email, contact_phone,
-			total_amount_pence, currency, is_free
-		) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`
+			total_amount_pence, currency, is_free, paid_in_full_at_registration
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`
 	var id string
 	err := tx.QueryRow(ctx, q,
 		req.Contact.FirstName, req.Contact.LastName, req.Contact.Email, req.Contact.Phone,
-		totalPence, currency, isFree,
+		totalPence, currency, isFree, paidInFull,
 	).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("insert group: %w", err)
@@ -214,6 +214,25 @@ func (r *Repository) MarkPaid(ctx context.Context, tx pgx.Tx, groupID, paymentIn
 		nullableString(paymentIntentID), time.Now().UTC(), groupID)
 	if err != nil {
 		return fmt.Errorf("mark paid: %w", err)
+	}
+	return nil
+}
+
+// MarkPaidInFull transitions a prepaid registration group to fully settled:
+// payment paid plus billing balance_paid.
+func (r *Repository) MarkPaidInFull(ctx context.Context, tx pgx.Tx, groupID, paymentIntentID string, coachIncluded bool) error {
+	_, err := tx.Exec(ctx,
+		`UPDATE registration_groups
+		    SET payment_status = 'paid',
+		        stripe_payment_intent_id = COALESCE($1, stripe_payment_intent_id),
+		        paid_at = $2,
+		        billing_status = 'balance_paid',
+		        balance_paid_at = $2,
+		        coach_included_in_balance = coach_included_in_balance OR $3
+		  WHERE id = $4`,
+		nullableString(paymentIntentID), time.Now().UTC(), coachIncluded, groupID)
+	if err != nil {
+		return fmt.Errorf("mark paid in full: %w", err)
 	}
 	return nil
 }

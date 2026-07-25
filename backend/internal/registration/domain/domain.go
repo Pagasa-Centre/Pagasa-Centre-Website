@@ -38,6 +38,9 @@ var ValidDayPassDays = map[string]struct{}{
 // deposit; day-pass campers contribute 0.
 const (
 	PriceDeposit = "deposit"
+
+	PaymentModeDeposit = "deposit"
+	PaymentModeFull    = "full"
 )
 
 // Group is the persisted form of a registration_groups row.
@@ -63,7 +66,8 @@ type Group struct {
 	LastAction            *string    `json:"last_action,omitempty"`
 	LastActionBy          *string    `json:"last_action_by,omitempty"`
 	LastActionAt          *time.Time `json:"last_action_at,omitempty"`
-	IsFree                bool       `json:"is_free"`
+	IsFree                   bool       `json:"is_free"`
+	PaidInFullAtRegistration bool       `json:"paid_in_full_at_registration"`
 
 	CoachIncludedInBalance bool       `json:"coach_included_in_balance"`
 	StripeCoachInvoiceID   *string    `json:"stripe_coach_invoice_id,omitempty"`

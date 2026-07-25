@@ -57,6 +57,7 @@ func Mount(
 
 		r.Get("/camp-config", getCampConfig(campRepo))
 		r.Put("/registrations-open", putRegistrationsOpen(campRepo, rec))
+		r.Put("/registration-payment-mode", putRegistrationPaymentMode(campRepo, regSvc, rec))
 
 		r.Get("/accommodations", listAccommodationTypes(regRepo))
 		r.Put("/accommodations/{code}/availability", putAccommodationAvailability(regRepo, rec))
@@ -282,6 +283,46 @@ func putRegistrationsOpen(repo *campstorage.Repository, rec *adminlog.Recorder) 
 		admin.Audit(rec, r, adminlog.ActionRegistrationsToggle, nil,
 			admin.ActorFrom(r.Context())+" "+state+" public registration", map[string]bool{"open": *b.Open})
 		render.Json(w, http.StatusOK, map[string]bool{"registrations_open": *b.Open})
+	}
+}
+
+func putRegistrationPaymentMode(campRepo *campstorage.Repository, regSvc *registration.Service, rec *adminlog.Recorder) http.HandlerFunc {
+	type body struct {
+		Mode *string `json:"mode"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		var b body
+		if err := request.Decode(r, &b); err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		if b.Mode == nil {
+			commonerrors.WriteError(w, commonerrors.BadRequest("missing 'mode' string", nil))
+			return
+		}
+		mode := strings.TrimSpace(*b.Mode)
+		if mode != domain.PaymentModeDeposit && mode != domain.PaymentModeFull {
+			commonerrors.WriteError(w, commonerrors.BadRequest("mode must be 'deposit' or 'full'", nil))
+			return
+		}
+		if mode == domain.PaymentModeFull {
+			if err := regSvc.ValidateFullPaymentPricing(r.Context()); err != nil {
+				commonerrors.WriteError(w, err)
+				return
+			}
+		}
+		if err := campRepo.SetRegistrationPaymentMode(r.Context(), mode); err != nil {
+			commonerrors.WriteError(w, commonerrors.Internal(err.Error()))
+			return
+		}
+		label := "deposit mode"
+		if mode == domain.PaymentModeFull {
+			label = "full payment mode"
+		}
+		admin.Audit(rec, r, adminlog.ActionPaymentModeToggle, nil,
+			admin.ActorFrom(r.Context())+" switched registration to "+label,
+			map[string]string{"mode": mode})
+		render.Json(w, http.StatusOK, map[string]string{"registration_payment_mode": mode})
 	}
 }
 

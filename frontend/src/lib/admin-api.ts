@@ -136,6 +136,7 @@ export type AdminGroup = {
   coach_invoice_due_at?: string | null;
   coach_fee_paid_at?: string | null;
   coach_fee_waived_at?: string | null;
+  paid_in_full_at_registration?: boolean;
   campers: AdminCamper[];
 };
 
@@ -175,6 +176,7 @@ export type AdminCampConfig = {
   start_date: string;
   end_date: string;
   registrations_open: boolean;
+  registration_payment_mode: "deposit" | "full";
 };
 
 /** Opens the admin SSE stream. Caller must close on unmount. */
@@ -449,6 +451,15 @@ export const adminApi = {
       method: "PUT",
       body: JSON.stringify({ open }),
     }),
+
+  setRegistrationPaymentMode: (mode: "deposit" | "full") =>
+    adminFetch<{ registration_payment_mode: string }>(
+      "/admin/registration-payment-mode",
+      {
+        method: "PUT",
+        body: JSON.stringify({ mode }),
+      },
+    ),
 
   confirmFree: (groupId: string, expectedVersion: number) =>
     adminFetch<void>(`/admin/registrations/${groupId}/confirm-free`, {

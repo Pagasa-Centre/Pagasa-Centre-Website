@@ -132,7 +132,11 @@ function canUnwaiveCoachFee(g: AdminGroup): boolean {
 function coachStatusLabel(g: AdminGroup): string | null {
   if (coachEligibleCount(g) === 0) return null;
   if (coachWaived(g)) return "Coach fee waived";
-  if (coachPaid(g)) return "Coach paid";
+  if (coachPaid(g)) {
+    return g.paid_in_full_at_registration
+      ? "Coach paid at registration"
+      : "Coach paid";
+  }
   if (g.coach_included_in_balance) return "Coach on balance invoice";
   if (g.stripe_coach_invoice_id) return "Coach invoiced";
   if (g.billing_status === "invoiced" || g.billing_status === "balance_paid") {
@@ -160,6 +164,12 @@ function isOverdue(g: AdminGroup): boolean {
 
 function categorize(g: AdminGroup): Category {
   if (g.payment_status !== "paid") return "unpaid";
+  if (g.paid_in_full_at_registration) {
+    const needsAlloc = fullWeekCampers(g).some(
+      (c) => !c.allocated_accommodation_code,
+    );
+    return needsAlloc ? "to_allocate" : "paid";
+  }
   switch (g.billing_status) {
     case "invoiced":
       return "awaiting";
@@ -205,6 +215,12 @@ function statusBadge(g: AdminGroup): { label: string; className: string } {
         className: "bg-violet-100 text-violet-800 border-violet-200",
       };
     case "paid":
+      if (g.paid_in_full_at_registration) {
+        return {
+          label: "Paid in full at registration",
+          className: "bg-green-100 text-green-800 border-green-200",
+        };
+      }
       return g.is_free
         ? {
             label: "Sponsorship confirmed",
@@ -288,6 +304,9 @@ export default function AdminDashboard() {
   const [registrationsOpen, setRegistrationsOpen] = useState<boolean | null>(
     null,
   );
+  const [paymentMode, setPaymentMode] = useState<"deposit" | "full" | null>(
+    null,
+  );
   const [alloc, setAlloc] = useState<Record<string, AllocState>>({});
   const [unitAlloc, setUnitAlloc] = useState<Record<string, UnitAllocState>>({});
   const [loading, setLoading] = useState(true);
@@ -333,6 +352,7 @@ export default function AdminDashboard() {
       setAccommodations(acc.accommodations);
       setUnits(unitRes.units);
       setRegistrationsOpen(cfg.registrations_open);
+      setPaymentMode(cfg.registration_payment_mode ?? "deposit");
       setShirtSizes(sizesRes.sizes);
       const next: Record<string, AllocState> = {};
       const nextUnits: Record<string, UnitAllocState> = {};
@@ -1048,6 +1068,47 @@ export default function AdminDashboard() {
     }
   }
 
+  async function togglePaymentMode() {
+    if (paymentMode === null) return;
+    const next = paymentMode === "deposit" ? "full" : "deposit";
+    if (next === "full") {
+      if (
+        !window.confirm(
+          "Switch to FULL PAYMENT mode?\n\nNew registrations will be charged the full camp cost — deposit, accommodation, coach and day passes — in one payment.\n\nFirst disable any accommodation tier you cannot honour, because a camper's 1st choice is effectively sold in this mode.",
+        )
+      ) {
+        return;
+      }
+    } else if (
+      !window.confirm(
+        "Switch back to DEPOSIT mode?\n\nNew registrations will only pay the £50 deposit at sign-up. The balance will be invoiced after allocation, as before.",
+      )
+    ) {
+      return;
+    }
+    setBusy("mode-toggle");
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await adminApi.setRegistrationPaymentMode(next);
+      const mode = res.registration_payment_mode as "deposit" | "full";
+      setPaymentMode(mode);
+      setNotice(
+        mode === "full"
+          ? "Registration is now in FULL PAYMENT mode — families pay everything at sign-up."
+          : "Registration is back in DEPOSIT mode — families pay the £50 deposit only.",
+      );
+    } catch (err) {
+      setError(
+        err instanceof AdminApiError
+          ? err.detail.message
+          : "Could not change payment mode.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function toggleAccommodation(code: string, next: boolean) {
     if (
       !next &&
@@ -1280,6 +1341,53 @@ export default function AdminDashboard() {
               : registrationsOpen
                 ? "Close registration"
                 : "Open registration"}
+          </button>
+        </div>
+      )}
+
+      {/* Payment mode control */}
+      {paymentMode !== null && (
+        <div
+          className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4 sm:p-5 ${
+            paymentMode === "full"
+              ? "bg-violet-50 border-violet-200"
+              : "bg-neutral-50 border-neutral-200"
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <span
+              className={`flex-none w-2.5 h-2.5 rounded-full ${
+                paymentMode === "full" ? "bg-violet-500" : "bg-neutral-400"
+              }`}
+              aria-hidden
+            />
+            <div>
+              <p className="text-sm font-bold text-neutral-800">
+                Payment mode:{" "}
+                {paymentMode === "full" ? "FULL PAYMENT" : "DEPOSIT ONLY"}
+              </p>
+              <p className="text-xs text-neutral-600 mt-0.5">
+                {paymentMode === "full"
+                  ? "New sign-ups pay deposit + accommodation + coach + day passes in one Stripe checkout."
+                  : "New sign-ups pay the £50 deposit only. Balance is invoiced after allocation."}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={togglePaymentMode}
+            disabled={busy === "mode-toggle"}
+            className={`px-4 py-2 text-sm font-semibold rounded-lg text-white disabled:opacity-60 ${
+              paymentMode === "full"
+                ? "bg-neutral-700 hover:bg-neutral-800"
+                : "bg-violet-600 hover:bg-violet-700"
+            }`}
+          >
+            {busy === "mode-toggle"
+              ? "Saving…"
+              : paymentMode === "full"
+                ? "Switch to deposit mode"
+                : "Switch to full payment"}
           </button>
         </div>
       )}
@@ -2643,6 +2751,17 @@ function GroupCard({
                             {unitName(c.allocated_unit_code)}
                           </span>
                         )}
+                        {g.paid_in_full_at_registration &&
+                          c.allocated_accommodation_code &&
+                          c.accommodation_first_choice &&
+                          c.allocated_accommodation_code !==
+                            c.accommodation_first_choice && (
+                            <span className="block text-xs font-semibold text-amber-700 mt-1 max-w-xs">
+                              Paid for {accName(c.accommodation_first_choice)},
+                              allocated {accName(c.allocated_accommodation_code)}
+                              — settle the difference in Stripe
+                            </span>
+                          )}
                       </span>
                       {canRemoveCamper(g, c) && (
                         <button

@@ -6,6 +6,7 @@ import {
   type CampConfig,
   type CamperSubmission,
   type Price,
+  type RegistrationPricing,
   type ShirtSize,
   type SubmitRequest,
   ApiClientError,
@@ -16,6 +17,8 @@ import {
   ACCOMMODATION_TENT_CODE,
   type CamperState,
   computeTotalPence,
+  computeFullTotalPence,
+  fullPaymentBreakdown,
   emptyCamper,
   formatPence,
   isMinor,
@@ -37,6 +40,7 @@ export type SuccessStash = {
   // a backend round-trip; the Stripe path falls back to the backend
   // `/api/registrations/summary` endpoint if sessionStorage is missing.
   campers: { first_name: string; last_name: string }[];
+  paid_in_full?: boolean;
 };
 
 const STASH_KEY = "pc-camp-last-registration";
@@ -44,6 +48,7 @@ const STASH_KEY = "pc-camp-last-registration";
 type Props = {
   config: CampConfig;
   prices: Price[];
+  pricing: RegistrationPricing | null;
   accommodations: Accommodation[];
   shirtSizes: ShirtSize[];
 };
@@ -254,10 +259,14 @@ function toSubmission(
 }
 
 export default function CampRegisterForm({
+  config,
   prices,
+  pricing,
   accommodations,
   shirtSizes,
 }: Props) {
+  const isFullMode =
+    pricing?.mode === "full" || config.registration_payment_mode === "full";
   const [state, setState] = useState<FormState>(initialState);
   const [submitting, setSubmitting] = useState(false);
   const [topError, setTopError] = useState<string | null>(null);
@@ -336,11 +345,13 @@ export default function CampRegisterForm({
     });
   }, [state.campers]);
 
-  const totalPence = useMemo(
-    () => computeTotalPence(previewCampers, prices),
-    [previewCampers, prices],
-  );
-  const currency = pricesCurrency(prices);
+  const totalPence = useMemo(() => {
+    if (isFullMode && pricing) {
+      return computeFullTotalPence(previewCampers, pricing);
+    }
+    return computeTotalPence(previewCampers, prices);
+  }, [previewCampers, prices, pricing, isFullMode]);
+  const currency = isFullMode && pricing ? pricing.currency : pricesCurrency(prices);
   const payingCamperCount = previewCampers.filter(payingForDeposit).length;
   const freeFullWeekCount = previewCampers.filter(
     (c) =>
@@ -350,6 +361,14 @@ export default function CampRegisterForm({
     (c) => c.attendance.type === "day_pass",
   ).length;
   const depositPence = prices.find((p) => p.code === "deposit")?.amount_pence ?? 0;
+
+  const accDisplayName = (code: string) =>
+    accommodations.find((a) => a.code === code)?.display_name ?? code;
+
+  const breakdown = useMemo(() => {
+    if (!isFullMode || !pricing) return null;
+    return fullPaymentBreakdown(previewCampers, pricing, accDisplayName);
+  }, [previewCampers, pricing, isFullMode, accommodations]);
 
   const anyMinor = state.campers.some((c) => {
     const age = parseInt(c.age, 10);
@@ -381,6 +400,7 @@ export default function CampRegisterForm({
           first_name: c.first_name,
           last_name: c.last_name,
         })),
+        paid_in_full: isFullMode && totalPence > 0,
       };
       try {
         sessionStorage.setItem(STASH_KEY, JSON.stringify(stash));
@@ -423,16 +443,31 @@ export default function CampRegisterForm({
             Sign up for camp
           </h2>
           <p className="mt-4 text-neutral-600 max-w-xl mx-auto text-sm">
-            Full-week campers pay a flat{" "}
-            <strong>£50 non-refundable deposit per person</strong> at
-            registration. Campers under 4 years old and day visitors are not
-            required to pay a deposit at this stage.
+            {isFullMode ? (
+              <>
+                You&apos;ll pay the <strong>full camp cost today</strong> —
+                deposit, accommodation (based on your 1st choice), coach travel
+                and any day passes — in one secure payment.
+              </>
+            ) : (
+              <>
+                Full-week campers pay a flat{" "}
+                <strong>
+                  {formatPence(depositPence, currency)} non-refundable deposit
+                  per person
+                </strong>{" "}
+                at registration. Campers under 4 years old and day visitors are
+                not required to pay a deposit at this stage.
+              </>
+            )}
           </p>
           <p className="mt-3 text-neutral-600 max-w-xl mx-auto text-sm">
             Pick a 1st and 2nd accommodation preference for each full-week
             camper. The White Team will allocate rooms after registration
-            closes. Your accommodation choice will be secured once the full
-            payment has been made.
+            closes.
+            {isFullMode
+              ? " Your accommodation is charged at your 1st choice price."
+              : " Your accommodation choice will be secured once the full payment has been made."}
           </p>
         </div>
 
@@ -586,7 +621,7 @@ export default function CampRegisterForm({
             <div className="flex flex-col sm:flex-row gap-4 sm:items-end sm:justify-between">
               <div>
                 <p className="text-xs font-bold uppercase tracking-widest text-neutral-500">
-                  Non-refundable deposit
+                  {isFullMode ? "Total due today" : "Non-refundable deposit"}
                 </p>
                 <p className="text-3xl font-extrabold text-neutral-900">
                   {formatPence(totalPence, currency)}
@@ -605,33 +640,58 @@ export default function CampRegisterForm({
               </button>
             </div>
             {/* Breakdown */}
-            {(payingCamperCount > 0 ||
-              freeFullWeekCount > 0 ||
-              dayPassCamperCount > 0) && (
+            {isFullMode && breakdown ? (
               <ul className="text-xs text-neutral-600 border-t border-neutral-200 pt-3 flex flex-col gap-1">
-                {payingCamperCount > 0 && (
+                {breakdown.depositTotal > 0 && (
                   <li>
-                    {payingCamperCount} × full-week deposit (
-                    {formatPence(depositPence, currency)} each) ={" "}
-                    {formatPence(
-                      depositPence * payingCamperCount,
-                      currency,
-                    )}
+                    Full-week deposit = {formatPence(breakdown.depositTotal, currency)}
                   </li>
                 )}
-                {freeFullWeekCount > 0 && (
+                {breakdown.accommodationLines.map((line) => (
+                  <li key={line.label}>
+                    {line.label} = {formatPence(line.amount, currency)}
+                  </li>
+                ))}
+                {breakdown.dayPassTotal > 0 && (
                   <li>
-                    {freeFullWeekCount} × full-week camper under{" "}
-                    {MIN_DEPOSIT_AGE} — no deposit required
+                    Day passes = {formatPence(breakdown.dayPassTotal, currency)}
                   </li>
                 )}
-                {dayPassCamperCount > 0 && (
+                {breakdown.coachTotal > 0 && (
                   <li>
-                    {dayPassCamperCount} × day-pass camper — no deposit
-                    required
+                    Coach travel = {formatPence(breakdown.coachTotal, currency)}
                   </li>
                 )}
               </ul>
+            ) : (
+              (payingCamperCount > 0 ||
+                freeFullWeekCount > 0 ||
+                dayPassCamperCount > 0) && (
+                <ul className="text-xs text-neutral-600 border-t border-neutral-200 pt-3 flex flex-col gap-1">
+                  {payingCamperCount > 0 && (
+                    <li>
+                      {payingCamperCount} × full-week deposit (
+                      {formatPence(depositPence, currency)} each) ={" "}
+                      {formatPence(
+                        depositPence * payingCamperCount,
+                        currency,
+                      )}
+                    </li>
+                  )}
+                  {freeFullWeekCount > 0 && (
+                    <li>
+                      {freeFullWeekCount} × full-week camper under{" "}
+                      {MIN_DEPOSIT_AGE} — no deposit required
+                    </li>
+                  )}
+                  {dayPassCamperCount > 0 && (
+                    <li>
+                      {dayPassCamperCount} × day-pass camper — no deposit
+                      required
+                    </li>
+                  )}
+                </ul>
+              )
             )}
             {totalPence === 0 &&
               payingCamperCount === 0 &&

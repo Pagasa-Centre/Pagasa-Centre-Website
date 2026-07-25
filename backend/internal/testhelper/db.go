@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -13,11 +14,29 @@ import (
 	commondb "pagasacentre/backend/pkg/commonlibrary/db"
 )
 
+func acquireTestDBLock(t *testing.T) {
+	t.Helper()
+	lockPath := filepath.Join(os.TempDir(), "pagasacentre-integration-db.lock")
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatalf("open test db lock: %v", err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatalf("flock test db: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	})
+}
+
 // MaybePool opens a connection pool against $TEST_DATABASE_URL, or calls
 // t.Skip() if the env var is not set. The schema is migrated before returning
 // and tables are truncated to give each test a clean slate.
 func MaybePool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
+	acquireTestDBLock(t)
+
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
 		t.Skip("TEST_DATABASE_URL not set; skipping integration test")
@@ -35,7 +54,7 @@ func MaybePool(t *testing.T) *pgxpool.Pool {
 	t.Cleanup(pool.Close)
 
 	if _, err := pool.Exec(context.Background(),
-		`TRUNCATE TABLE registrations, registration_groups RESTART IDENTITY CASCADE`); err != nil {
+		`TRUNCATE TABLE registrations, registration_groups, free_codes RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	return pool

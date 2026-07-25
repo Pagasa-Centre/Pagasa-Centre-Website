@@ -36,6 +36,15 @@ func putAllocation(svc *billing.Service, rec *adminlog.Recorder, regRepo *regsto
 		// placement vs. who later changed it.
 		prior, _ := regRepo.FindGroupByID(r.Context(), groupID)
 		isEdit := prior != nil && prior.BillingStatus == domain.BillingAllocated
+		if !isEdit && prior != nil && prior.PaidInFullAtRegistration {
+			campers, _ := regRepo.CampersForGroup(r.Context(), groupID)
+			for _, c := range campers {
+				if c.AttendanceType == domain.AttendanceFullWeek && c.AllocatedAccommodationCode != nil && strings.TrimSpace(*c.AllocatedAccommodationCode) != "" {
+					isEdit = true
+					break
+				}
+			}
+		}
 
 		if err := svc.Allocate(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion), body); err != nil {
 			commonerrors.WriteError(w, err)

@@ -62,7 +62,7 @@ func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedV
 	if g.BillingStatus == domain.BillingInvoiced {
 		return commonerrors.BadRequest("cannot change allocation while invoice is open; release first", nil)
 	}
-	if g.BillingStatus == domain.BillingBalancePaid {
+	if g.BillingStatus == domain.BillingBalancePaid && !g.PaidInFullAtRegistration {
 		return commonerrors.BadRequest("balance already paid", nil)
 	}
 
@@ -156,7 +156,9 @@ func (s *Service) Unallocate(ctx context.Context, groupID, actor string, expecte
 	case domain.BillingInvoiced:
 		return commonerrors.BadRequest("invoice is open; use release instead", nil)
 	case domain.BillingBalancePaid:
-		return commonerrors.BadRequest("balance already paid", nil)
+		if !g.PaidInFullAtRegistration {
+			return commonerrors.BadRequest("balance already paid", nil)
+		}
 	}
 	meta := domain.ActionMeta{
 		Actor:           actor,
@@ -192,23 +194,11 @@ func (s *Service) validateAllocatedUnit(ctx context.Context, tierCode, unitCode 
 }
 
 func (s *Service) resolvePriceID(ctx context.Context, accommodationCode string, age int) (string, error) {
-	if accommodationCode == registration.AccommodationChild && age < registration.MinDepositAge {
-		if s.cfg.StripePriceChildUnder3 == "" {
-			return "", fmt.Errorf("STRIPE_PRICE_CHILD_UNDER3 is not configured")
-		}
-		return s.cfg.StripePriceChildUnder3, nil
-	}
 	t, err := s.repo.GetAccommodationType(ctx, accommodationCode)
 	if err != nil {
 		return "", err
 	}
-	if t == nil {
-		return "", fmt.Errorf("unknown accommodation %q", accommodationCode)
-	}
-	if t.StripePriceID == nil || strings.TrimSpace(*t.StripePriceID) == "" {
-		return "", fmt.Errorf("accommodation %q has no stripe_price_id configured", accommodationCode)
-	}
-	return strings.TrimSpace(*t.StripePriceID), nil
+	return registration.AccommodationPriceID(accommodationCode, age, t, s.cfg.StripePriceChildUnder3)
 }
 
 // SendInvoice creates and emails a Stripe Invoice for an allocated group.
@@ -222,6 +212,9 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 	}
 	if g.IsFree {
 		return commonerrors.BadRequest("this is a church-sponsored registration; confirm the sponsorship instead of invoicing", nil)
+	}
+	if g.PaidInFullAtRegistration {
+		return commonerrors.BadRequest("this family paid in full at registration; there is nothing to invoice", nil)
 	}
 	if g.PaymentStatus != domain.PaymentPaid {
 		return commonerrors.BadRequest("deposit must be paid first", nil)
@@ -363,6 +356,9 @@ func (s *Service) SendInvoicesBulk(ctx context.Context, actor string, groupIDs [
 			continue
 		}
 		if g != nil && g.IsFree {
+			continue
+		}
+		if g != nil && g.PaidInFullAtRegistration {
 			continue
 		}
 		if err := s.SendInvoice(ctx, id, actor, domain.SkipVersionCheck); err != nil {

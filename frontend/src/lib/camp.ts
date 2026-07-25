@@ -2,7 +2,7 @@
 // logic in backend/internal/registration/service.go::computeTotal so the UI
 // running-total stays consistent with what Stripe gets charged.
 
-import type { CamperSubmission, DayCode, Price } from "@/lib/api";
+import type { CamperSubmission, DayCode, Price, RegistrationPricing } from "@/lib/api";
 
 export const SHIRT_SIZE_NOT_APPLICABLE = "n/a";
 
@@ -139,4 +139,107 @@ export function isUnderDepositAge(age: number): boolean {
 
 export function pricesCurrency(prices: Price[]): string {
   return prices[0]?.currency ?? "GBP";
+}
+
+function tierAmount(
+  pricing: RegistrationPricing,
+  code: string,
+  age: number,
+): number {
+  if (code === ACCOMMODATION_CHILD_CODE && age < MIN_DEPOSIT_AGE) {
+    return pricing.child_under3_amount_pence;
+  }
+  return (
+    pricing.accommodation_tiers.find((t) => t.code === code)?.amount_pence ?? 0
+  );
+}
+
+/**
+ * computeFullTotalPence mirrors backend full-payment mode pricing.
+ */
+export function computeFullTotalPence(
+  campers: CamperSubmission[],
+  pricing: RegistrationPricing,
+): number {
+  let total = 0;
+  for (const c of campers) {
+    if (c.attendance.type === "full_week" && c.age >= MIN_DEPOSIT_AGE) {
+      total += pricing.deposit_amount_pence;
+    }
+    if (c.attendance.type === "full_week") {
+      const code = c.attendance.accommodation_first_choice;
+      if (code) {
+        total += tierAmount(pricing, code, c.age);
+      }
+    }
+    if (c.attendance.type === "day_pass") {
+      total += pricing.day_pass_amount_pence * c.attendance.days.length;
+    }
+    if (
+      c.attendance.type === "full_week" &&
+      c.attendance.needs_coach &&
+      c.age >= MIN_DEPOSIT_AGE
+    ) {
+      total += pricing.coach_amount_pence;
+    }
+  }
+  return total;
+}
+
+export type FullPaymentBreakdown = {
+  depositTotal: number;
+  accommodationLines: { label: string; amount: number }[];
+  dayPassTotal: number;
+  coachTotal: number;
+};
+
+export function fullPaymentBreakdown(
+  campers: CamperSubmission[],
+  pricing: RegistrationPricing,
+  accName: (code: string) => string,
+): FullPaymentBreakdown {
+  let depositTotal = 0;
+  const accMap = new Map<string, { label: string; amount: number; count: number }>();
+  let dayPassTotal = 0;
+  let coachTotal = 0;
+
+  for (const c of campers) {
+    if (c.attendance.type === "full_week" && c.age >= MIN_DEPOSIT_AGE) {
+      depositTotal += pricing.deposit_amount_pence;
+    }
+    if (c.attendance.type === "full_week") {
+      const code = c.attendance.accommodation_first_choice;
+      if (code) {
+        const amt = tierAmount(pricing, code, c.age);
+        if (amt > 0) {
+          const label = `${accName(code)} — full week`;
+          const existing = accMap.get(label);
+          if (existing) {
+            existing.count++;
+            existing.amount += amt;
+          } else {
+            accMap.set(label, { label, amount: amt, count: 1 });
+          }
+        }
+      }
+    }
+    if (c.attendance.type === "day_pass") {
+      dayPassTotal +=
+        pricing.day_pass_amount_pence * c.attendance.days.length;
+    }
+    if (
+      c.attendance.type === "full_week" &&
+      c.attendance.needs_coach &&
+      c.age >= MIN_DEPOSIT_AGE
+    ) {
+      coachTotal += pricing.coach_amount_pence;
+    }
+  }
+
+  const accommodationLines = [...accMap.values()].map((v) => ({
+    label: v.count > 1 ? `${v.label} × ${v.count}` : v.label,
+    amount: v.amount,
+  }));
+
+  return { depositTotal, accommodationLines, dayPassTotal, coachTotal };
 }

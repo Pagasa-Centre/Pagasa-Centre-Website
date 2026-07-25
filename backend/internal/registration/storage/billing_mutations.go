@@ -92,7 +92,7 @@ func (r *Repository) AllocateGroup(ctx context.Context, groupID string, allocs [
 	if err := setCamperAllocationsTx(ctx, tx, groupID, allocs); err != nil {
 		return err
 	}
-	if err := stampExec(ctx, tx, groupID, meta, `, billing_status = 'allocated'`); err != nil {
+	if err := stampExec(ctx, tx, groupID, meta, `, billing_status = CASE WHEN paid_in_full_at_registration THEN billing_status ELSE 'allocated' END`); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -125,7 +125,7 @@ func (r *Repository) UnallocateGroup(ctx context.Context, groupID string, meta d
 	if err != nil {
 		return fmt.Errorf("clear allocations: %w", err)
 	}
-	if err := stampExec(ctx, tx, groupID, meta, `, billing_status = 'none'`); err != nil {
+	if err := stampExec(ctx, tx, groupID, meta, `, billing_status = CASE WHEN paid_in_full_at_registration THEN billing_status ELSE 'none' END`); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
