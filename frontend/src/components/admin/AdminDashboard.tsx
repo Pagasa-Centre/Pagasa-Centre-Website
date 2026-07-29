@@ -1208,7 +1208,11 @@ export default function AdminDashboard() {
   }, [groups]);
 
   const visibleGroups = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const tokens = search
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean);
     return groups
       .filter((g) => {
         const cat = categorize(g);
@@ -1218,10 +1222,13 @@ export default function AdminDashboard() {
         } else if (cat !== tab) {
           return false;
         }
-        if (!q) return true;
+        if (tokens.length === 0) return true;
+        const camperNames = g.campers
+          .map((c) => `${c.first_name} ${c.last_name}`)
+          .join(" ");
         const hay =
-          `${g.contact_first_name} ${g.contact_last_name} ${g.contact_email}`.toLowerCase();
-        return hay.includes(q);
+          `${g.contact_first_name} ${g.contact_last_name} ${g.contact_email} ${camperNames}`.toLowerCase();
+        return tokens.every((t) => hay.includes(t));
       })
       .sort((a, b) => {
         switch (sort) {
