@@ -136,6 +136,10 @@ function canEditCamperCoach(g: AdminGroup, c: AdminCamper): boolean {
   return true;
 }
 
+function groupHasEditableCoach(g: AdminGroup): boolean {
+  return g.campers.some((c) => canEditCamperCoach(g, c));
+}
+
 // coachStatusLabel is a short human summary for the group card.
 function coachStatusLabel(g: AdminGroup): string | null {
   if (coachEligibleCount(g) === 0) return null;
@@ -867,8 +871,8 @@ export default function AdminDashboard() {
     const next = !c.needs_coach;
     const name = `${c.first_name} ${c.last_name}`;
     const action = next
-      ? `Add ${name} to the coach passenger list?`
-      : `Remove ${name} from the coach passenger list?`;
+      ? `Add ${name} to the coach?`
+      : `Remove ${name} from the coach?`;
     const voidNote = g.stripe_coach_invoice_id
       ? "\n\nAny open coach invoice will be voided so you can re-send at the corrected count."
       : "";
@@ -2786,34 +2790,10 @@ function GroupCard({
                       <span className="ml-1 text-xs font-semibold text-neutral-600 bg-neutral-100 px-2 py-0.5 rounded-full">
                         Age {c.age}
                       </span>
-                      {canEditCamperCoach(g, c) ? (
-                        <button
-                          type="button"
-                          disabled={busy === `coach-toggle-${c.id}`}
-                          onClick={() => onToggleCamperCoach(c)}
-                          className={`ml-1 text-xs font-semibold px-2 py-0.5 rounded-full border disabled:opacity-50 ${
-                            c.needs_coach
-                              ? "text-sky-800 bg-sky-100 border-sky-200 hover:bg-sky-200"
-                              : "text-neutral-600 bg-neutral-100 border-neutral-200 hover:bg-neutral-200"
-                          }`}
-                          title={
-                            c.needs_coach
-                              ? "On coach — click to remove"
-                              : "Not on coach — click to add"
-                          }
-                        >
-                          {busy === `coach-toggle-${c.id}`
-                            ? "Saving…"
-                            : c.needs_coach
-                              ? "Coach"
-                              : "No coach"}
-                        </button>
-                      ) : (
-                        !!c.needs_coach && (
-                          <span className="ml-1 text-xs font-semibold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full">
-                            Coach
-                          </span>
-                        )
+                      {!!c.needs_coach && (
+                        <span className="ml-1 text-xs font-semibold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full">
+                          On coach
+                        </span>
                       )}
                     </span>
                     <div className="flex flex-wrap items-center gap-2">
@@ -2836,6 +2816,29 @@ function GroupCard({
                             </span>
                           )}
                       </span>
+                      {canEditCamperCoach(g, c) && (
+                        <button
+                          type="button"
+                          disabled={busy === `coach-toggle-${c.id}`}
+                          onClick={() => onToggleCamperCoach(c)}
+                          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border disabled:opacity-50 shrink-0 ${
+                            c.needs_coach
+                              ? "text-sky-800 bg-white border-sky-300 hover:bg-sky-50"
+                              : "text-sky-800 bg-sky-50 border-sky-200 hover:bg-sky-100"
+                          }`}
+                        >
+                          {busy === `coach-toggle-${c.id}`
+                            ? "Saving…"
+                            : c.needs_coach
+                              ? "Remove from coach"
+                              : "Add to coach"}
+                        </button>
+                      )}
+                      {!canEditCamperCoach(g, c) && !!c.needs_coach && (
+                        <span className="text-xs font-semibold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full shrink-0">
+                          Coach
+                        </span>
+                      )}
                       {canRemoveCamper(g, c) && (
                         <button
                           type="button"
@@ -2948,43 +2951,52 @@ function GroupCard({
             )}
 
             {coachStatusLabel(g) && (
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2">
-                <span className="text-xs font-semibold text-sky-800">
-                  {coachStatusLabel(g)} · {coachEligibleCount(g)} passenger
-                  {coachEligibleCount(g) === 1 ? "" : "s"}
-                </span>
-                <div className="flex flex-wrap items-center gap-2">
-                  {canSendCoachInvoice(g) && (
-                    <button
-                      type="button"
-                      disabled={busy === `coach-${g.id}`}
-                      onClick={onSendCoachInvoice}
-                      className="px-3 py-1.5 text-xs font-bold text-white bg-sky-600 rounded-lg hover:bg-sky-700 disabled:opacity-50"
-                    >
-                      {busy === `coach-${g.id}` ? "Sending…" : "Send coach invoice"}
-                    </button>
-                  )}
-                  {canWaiveCoachFee(g) && (
-                    <button
-                      type="button"
-                      disabled={busy === `waive-coach-${g.id}`}
-                      onClick={onWaiveCoachFee}
-                      className="px-3 py-1.5 text-xs font-bold text-sky-800 bg-white border border-sky-300 rounded-lg hover:bg-sky-100 disabled:opacity-50"
-                    >
-                      {busy === `waive-coach-${g.id}` ? "Waiving…" : "Waive coach fee"}
-                    </button>
-                  )}
-                  {canUnwaiveCoachFee(g) && (
-                    <button
-                      type="button"
-                      disabled={busy === `unwaive-coach-${g.id}`}
-                      onClick={onUnwaiveCoachFee}
-                      className="px-3 py-1.5 text-xs font-bold text-sky-800 bg-white border border-sky-300 rounded-lg hover:bg-sky-100 disabled:opacity-50"
-                    >
-                      {busy === `unwaive-coach-${g.id}` ? "Restoring…" : "Restore coach fee"}
-                    </button>
-                  )}
+              <div className="flex flex-col gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-sky-800">
+                    {coachStatusLabel(g)} · {coachEligibleCount(g)} passenger
+                    {coachEligibleCount(g) === 1 ? "" : "s"}
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {canSendCoachInvoice(g) && (
+                      <button
+                        type="button"
+                        disabled={busy === `coach-${g.id}`}
+                        onClick={onSendCoachInvoice}
+                        className="px-3 py-1.5 text-xs font-bold text-white bg-sky-600 rounded-lg hover:bg-sky-700 disabled:opacity-50"
+                      >
+                        {busy === `coach-${g.id}` ? "Sending…" : "Send coach invoice"}
+                      </button>
+                    )}
+                    {canWaiveCoachFee(g) && (
+                      <button
+                        type="button"
+                        disabled={busy === `waive-coach-${g.id}`}
+                        onClick={onWaiveCoachFee}
+                        className="px-3 py-1.5 text-xs font-bold text-sky-800 bg-white border border-sky-300 rounded-lg hover:bg-sky-100 disabled:opacity-50"
+                      >
+                        {busy === `waive-coach-${g.id}` ? "Waiving…" : "Waive coach fee"}
+                      </button>
+                    )}
+                    {canUnwaiveCoachFee(g) && (
+                      <button
+                        type="button"
+                        disabled={busy === `unwaive-coach-${g.id}`}
+                        onClick={onUnwaiveCoachFee}
+                        className="px-3 py-1.5 text-xs font-bold text-sky-800 bg-white border border-sky-300 rounded-lg hover:bg-sky-100 disabled:opacity-50"
+                      >
+                        {busy === `unwaive-coach-${g.id}` ? "Restoring…" : "Restore coach fee"}
+                      </button>
+                    )}
+                  </div>
                 </div>
+                {groupHasEditableCoach(g) && canSendCoachInvoice(g) && (
+                  <p className="text-xs text-sky-700">
+                    If someone isn&apos;t taking the coach, click{" "}
+                    <span className="font-semibold">Remove from coach</span> on
+                    their row first — then send the invoice.
+                  </p>
+                )}
               </div>
             )}
 
