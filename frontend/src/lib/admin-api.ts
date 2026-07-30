@@ -414,6 +414,23 @@ export const adminApi = {
       },
     ),
 
+  updateCamperCoach: (
+    groupId: string,
+    camperId: string,
+    needsCoach: boolean,
+    expectedVersion: number,
+  ) =>
+    adminFetch<void>(
+      `/admin/registrations/${groupId}/campers/${camperId}/coach`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          expected_version: expectedVersion,
+          needs_coach: needsCoach,
+        }),
+      },
+    ),
+
   resendInvoice: (groupId: string, expectedVersion: number) =>
     adminFetch<void>(`/admin/registrations/${groupId}/invoice/resend`, {
       method: "POST",

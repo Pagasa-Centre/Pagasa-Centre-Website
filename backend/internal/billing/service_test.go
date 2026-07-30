@@ -1697,6 +1697,260 @@ func TestUnwaiveCoachFee(t *testing.T) {
 	}
 }
 
+func insertTwoCoachGroup(ctx context.Context, t *testing.T, pool *pgxpool.Pool, billingStatus string) (groupID, camper1ID, camper2ID string) {
+	t.Helper()
+	err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, stripe_customer_id, total_amount_pence, currency, billing_status, version
+		) VALUES ('Aliyah', 'Oliveros', 'aliyah@example.com', '07000000001', 'paid', 'cus_two', 10000, 'GBP', $1, 1)
+		RETURNING id`, billingStatus).Scan(&groupID)
+	if err != nil {
+		t.Fatalf("insert two-coach group: %v", err)
+	}
+	err = pool.QueryRow(ctx, `
+		INSERT INTO registrations (
+			group_id, is_main_contact, first_name, last_name, gender, age,
+			cell_leader_name, is_cell_leader, attendance_type, needs_coach,
+			allocated_accommodation_code
+		) VALUES ($1, true, 'Aliyah', 'Oliveros', 'female', 25, 'Leader', false, 'full_week', true, 'lodge')
+		RETURNING id`, groupID).Scan(&camper1ID)
+	if err != nil {
+		t.Fatalf("insert camper 1: %v", err)
+	}
+	err = pool.QueryRow(ctx, `
+		INSERT INTO registrations (
+			group_id, is_main_contact, first_name, last_name, gender, age,
+			cell_leader_name, is_cell_leader, attendance_type, needs_coach,
+			allocated_accommodation_code
+		) VALUES ($1, false, 'Stephanie', 'Alves', 'female', 19, 'Leader', false, 'full_week', true, 'lodge')
+		RETURNING id`, groupID).Scan(&camper2ID)
+	if err != nil {
+		t.Fatalf("insert camper 2: %v", err)
+	}
+	return groupID, camper1ID, camper2ID
+}
+
+func TestUpdateCamperCoach_turnOffOneThenInvoice(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+
+	var captured []InvoiceLine
+	stub := &stubStripe{
+		ensureCust: func(_ context.Context, _, _, _, _ string) (string, error) {
+			return "cus_two", nil
+		},
+		createInvoice: func(_ context.Context, _, _ string, lines []InvoiceLine, _ int64, invoiceType string) (InvoiceResult, error) {
+			captured = lines
+			if invoiceType != "coach" {
+				t.Fatalf("invoice type = %q, want coach", invoiceType)
+			}
+			return InvoiceResult{ID: "in_coach_one", StripeEmailed: true}, nil
+		},
+	}
+	svc := NewService(repo, stub, nil, nil, Config{StripePriceCoach: "price_coach"})
+
+	groupID, camper1ID, _ := insertTwoCoachGroup(ctx, t, pool, domain.BillingBalancePaid)
+	if err := svc.WaiveCoachFee(ctx, groupID, "Admin", domain.SkipVersionCheck); err != nil {
+		t.Fatalf("WaiveCoachFee: %v", err)
+	}
+
+	sum, err := svc.UpdateCamperCoach(ctx, groupID, camper1ID, "Admin", domain.SkipVersionCheck, UpdateCamperCoachRequest{NeedsCoach: false})
+	if err != nil {
+		t.Fatalf("UpdateCamperCoach: %v", err)
+	}
+	if sum.NoOp || sum.CamperName != "Aliyah Oliveros" {
+		t.Fatalf("summary = %+v", sum)
+	}
+
+	campers, _ := repo.CampersForGroup(ctx, groupID)
+	if coachEligibleCount(campers) != 1 {
+		t.Fatalf("eligible count = %d, want 1", coachEligibleCount(campers))
+	}
+
+	if err := svc.UnwaiveCoachFee(ctx, groupID, "Admin", domain.SkipVersionCheck); err != nil {
+		t.Fatalf("UnwaiveCoachFee: %v", err)
+	}
+	if err := svc.SendCoachInvoice(ctx, groupID, "Admin", domain.SkipVersionCheck); err != nil {
+		t.Fatalf("SendCoachInvoice: %v", err)
+	}
+	if len(captured) != 1 || captured[0].Quantity != 1 {
+		t.Fatalf("invoice lines = %+v, want qty 1", captured)
+	}
+}
+
+func TestUpdateCamperCoach_guards(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{StripePriceCoach: "price_coach"})
+
+	groupID, camper1ID, _ := insertTwoCoachGroup(ctx, t, pool, domain.BillingBalancePaid)
+
+	// Coach fee already paid via separate invoice.
+	if _, err := pool.Exec(ctx, `
+		UPDATE registration_groups SET coach_fee_paid_at = NOW() WHERE id = $1`, groupID); err != nil {
+		t.Fatalf("set coach paid: %v", err)
+	}
+	_, err := svc.UpdateCamperCoach(ctx, groupID, camper1ID, "Admin", domain.SkipVersionCheck, UpdateCamperCoachRequest{NeedsCoach: false})
+	var apiErr commonerrors.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		t.Fatalf("expected bad_request when coach paid, got %v", err)
+	}
+
+	// Coach folded into balance invoice.
+	groupID2, camper2a, _ := insertTwoCoachGroup(ctx, t, pool, domain.BillingBalancePaid)
+	if _, err := pool.Exec(ctx, `
+		UPDATE registration_groups SET coach_included_in_balance = true WHERE id = $1`, groupID2); err != nil {
+		t.Fatalf("set coach in balance: %v", err)
+	}
+	_, err = svc.UpdateCamperCoach(ctx, groupID2, camper2a, "Admin", domain.SkipVersionCheck, UpdateCamperCoachRequest{NeedsCoach: false})
+	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		t.Fatalf("expected bad_request when coach in balance, got %v", err)
+	}
+
+	// Day-pass camper.
+	var dayGroup, dayCamper string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO registration_groups (
+			contact_first_name, contact_last_name, contact_email, contact_phone,
+			payment_status, total_amount_pence, currency, billing_status, version
+		) VALUES ('Day', 'Pass', 'day@example.com', '07000000002', 'paid', 5000, 'GBP', 'balance_paid', 1)
+		RETURNING id`).Scan(&dayGroup); err != nil {
+		t.Fatalf("insert day group: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO registrations (
+			group_id, is_main_contact, first_name, last_name, gender, age,
+			cell_leader_name, is_cell_leader, attendance_type, day_pass_days
+		) VALUES ($1, true, 'Day', 'Pass', 'male', 30, 'Leader', false, 'day_pass', ARRAY['mon'])
+		RETURNING id`, dayGroup).Scan(&dayCamper); err != nil {
+		t.Fatalf("insert day camper: %v", err)
+	}
+	_, err = svc.UpdateCamperCoach(ctx, dayGroup, dayCamper, "Admin", domain.SkipVersionCheck, UpdateCamperCoachRequest{NeedsCoach: true})
+	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		t.Fatalf("expected bad_request for day pass, got %v", err)
+	}
+}
+
+func TestUpdateCamperCoach_voidOpenInvoice(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+
+	var voided []string
+	stub := &stubStripe{
+		ensureCust: func(_ context.Context, _, _, _, _ string) (string, error) {
+			return "cus_two", nil
+		},
+		createInvoice: func(_ context.Context, _, _ string, _ []InvoiceLine, _ int64, _ string) (InvoiceResult, error) {
+			return InvoiceResult{ID: "in_coach_open", StripeEmailed: true}, nil
+		},
+		voidInvIdem: func(_ context.Context, id string) error {
+			voided = append(voided, id)
+			return nil
+		},
+	}
+	svc := NewService(repo, stub, nil, nil, Config{StripePriceCoach: "price_coach"})
+
+	groupID, camper1ID, _ := insertTwoCoachGroup(ctx, t, pool, domain.BillingBalancePaid)
+	if err := svc.SendCoachInvoice(ctx, groupID, "Admin", domain.SkipVersionCheck); err != nil {
+		t.Fatalf("SendCoachInvoice: %v", err)
+	}
+
+	sum, err := svc.UpdateCamperCoach(ctx, groupID, camper1ID, "Admin", domain.SkipVersionCheck, UpdateCamperCoachRequest{NeedsCoach: false})
+	if err != nil {
+		t.Fatalf("UpdateCamperCoach: %v", err)
+	}
+	if !sum.InvoiceVoided {
+		t.Fatal("expected invoice voided")
+	}
+	if len(voided) != 1 || voided[0] != "in_coach_open" {
+		t.Fatalf("voided = %v", voided)
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g == nil || g.StripeCoachInvoiceID != nil {
+		t.Fatalf("coach invoice columns not cleared: %+v", g)
+	}
+}
+
+func TestUpdateCamperCoach_noOp(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{})
+
+	groupID, camper1ID, _ := insertTwoCoachGroup(ctx, t, pool, domain.BillingBalancePaid)
+	gBefore, _ := repo.FindGroupByID(ctx, groupID)
+
+	sum, err := svc.UpdateCamperCoach(ctx, groupID, camper1ID, "Admin", domain.SkipVersionCheck, UpdateCamperCoachRequest{NeedsCoach: true})
+	if err != nil {
+		t.Fatalf("UpdateCamperCoach: %v", err)
+	}
+	if !sum.NoOp {
+		t.Fatal("expected no-op")
+	}
+	gAfter, _ := repo.FindGroupByID(ctx, groupID)
+	if gAfter.Version != gBefore.Version {
+		t.Fatalf("version changed on no-op: %d -> %d", gBefore.Version, gAfter.Version)
+	}
+}
+
+func TestUpdateCamperCoach_versionConflict(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{})
+
+	groupID, camper1ID, _ := insertTwoCoachGroup(ctx, t, pool, domain.BillingBalancePaid)
+	_, err := svc.UpdateCamperCoach(ctx, groupID, camper1ID, "Admin", 99, UpdateCamperCoachRequest{NeedsCoach: false})
+	var apiErr commonerrors.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "stale_state" {
+		t.Fatalf("expected stale_state conflict, got %v", err)
+	}
+}
+
+func TestUpdateCamperCoach_waivedRemainsWhenLastPassengerRemoved(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{StripePriceCoach: "price_coach"})
+
+	groupID, camper1ID, camper2ID := insertTwoCoachGroup(ctx, t, pool, domain.BillingBalancePaid)
+	if err := svc.WaiveCoachFee(ctx, groupID, "Admin", domain.SkipVersionCheck); err != nil {
+		t.Fatalf("WaiveCoachFee: %v", err)
+	}
+
+	if _, err := svc.UpdateCamperCoach(ctx, groupID, camper1ID, "Admin", domain.SkipVersionCheck, UpdateCamperCoachRequest{NeedsCoach: false}); err != nil {
+		t.Fatalf("UpdateCamperCoach camper1: %v", err)
+	}
+	if _, err := svc.UpdateCamperCoach(ctx, groupID, camper2ID, "Admin", domain.SkipVersionCheck, UpdateCamperCoachRequest{NeedsCoach: false}); err != nil {
+		t.Fatalf("UpdateCamperCoach camper2: %v", err)
+	}
+
+	campers, _ := repo.CampersForGroup(ctx, groupID)
+	if coachEligibleCount(campers) != 0 {
+		t.Fatalf("eligible count = %d, want 0", coachEligibleCount(campers))
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g == nil || g.CoachFeeWaivedAt == nil {
+		t.Fatalf("coach_fee_waived_at should remain set: %+v", g)
+	}
+
+	if _, err := svc.UpdateCamperCoach(ctx, groupID, camper2ID, "Admin", domain.SkipVersionCheck, UpdateCamperCoachRequest{NeedsCoach: true}); err != nil {
+		t.Fatalf("UpdateCamperCoach restore camper2: %v", err)
+	}
+	campers, _ = repo.CampersForGroup(ctx, groupID)
+	if coachEligibleCount(campers) != 1 {
+		t.Fatalf("eligible count after restore = %d, want 1", coachEligibleCount(campers))
+	}
+	g, _ = repo.FindGroupByID(ctx, groupID)
+	if g == nil || g.CoachFeeWaivedAt == nil {
+		t.Fatalf("coach_fee_waived_at should still be set after partial restore: %+v", g)
+	}
+}
+
 func validConvertRequest() ConvertToDayVisitorRequest {
 	needs := true
 	return ConvertToDayVisitorRequest{

@@ -1065,6 +1065,112 @@ func (s *Service) UpdateDayPassCamper(
 	return summary, nil
 }
 
+// UpdateCamperCoachSummary captures the outcome of toggling one camper's coach seat.
+type UpdateCamperCoachSummary struct {
+	CamperName    string `json:"camper_name"`
+	NeedsCoach    bool   `json:"needs_coach"`
+	InvoiceVoided bool   `json:"invoice_voided,omitempty"`
+	NoOp          bool   `json:"-"`
+}
+
+// UpdateCamperCoach sets whether one full-week camper travels on the coach.
+func (s *Service) UpdateCamperCoach(
+	ctx context.Context,
+	groupID, camperID, actor string,
+	expectedVersion int,
+	req UpdateCamperCoachRequest,
+) (UpdateCamperCoachSummary, error) {
+	g, err := s.repo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		return UpdateCamperCoachSummary{}, commonerrors.Internal(err.Error())
+	}
+	if g == nil {
+		return UpdateCamperCoachSummary{}, commonerrors.NotFound("group not found")
+	}
+
+	campers, err := s.repo.CampersForGroup(ctx, groupID)
+	if err != nil {
+		return UpdateCamperCoachSummary{}, commonerrors.Internal(err.Error())
+	}
+
+	var target *domain.Camper
+	for i := range campers {
+		if campers[i].ID == camperID {
+			target = &campers[i]
+			break
+		}
+	}
+	if target == nil {
+		return UpdateCamperCoachSummary{}, commonerrors.NotFound("camper not found")
+	}
+
+	summary := UpdateCamperCoachSummary{
+		CamperName: strings.TrimSpace(target.FirstName + " " + target.LastName),
+		NeedsCoach: req.NeedsCoach,
+	}
+
+	if target.AttendanceType != domain.AttendanceFullWeek {
+		return UpdateCamperCoachSummary{}, commonerrors.BadRequest("only full-week campers can use the coach", nil)
+	}
+
+	current := target.NeedsCoach != nil && *target.NeedsCoach
+	if current == req.NeedsCoach {
+		summary.NoOp = true
+		return summary, nil
+	}
+
+	if g.CoachFeePaidAt != nil ||
+		(g.CoachIncludedInBalance && g.BillingStatus == domain.BillingBalancePaid) {
+		return UpdateCamperCoachSummary{}, commonerrors.BadRequest(
+			"coach fee already paid; handle any refund in Stripe first", nil)
+	}
+	if g.CoachIncludedInBalance {
+		return UpdateCamperCoachSummary{}, commonerrors.BadRequest(
+			"coach fee is included in the balance invoice for this group", nil)
+	}
+
+	invoiceVoided := false
+	if g.StripeCoachInvoiceID != nil && strings.TrimSpace(*g.StripeCoachInvoiceID) != "" && g.CoachFeePaidAt == nil {
+		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeCoachInvoiceID); err != nil {
+			return UpdateCamperCoachSummary{}, commonerrors.BadRequest(
+				fmt.Sprintf("coach invoice void failed; coach seat was not updated: %v", err), nil)
+		}
+		invoiceVoided = true
+	}
+	summary.InvoiceVoided = invoiceVoided
+
+	meta := domain.ActionMeta{
+		Actor:           actor,
+		Action:          "camper_coach_updated",
+		ExpectedVersion: expectedVersion,
+	}
+	if err := s.repo.UpdateCamperCoachMeta(ctx, groupID, camperID, req.NeedsCoach, invoiceVoided, meta); err != nil {
+		return UpdateCamperCoachSummary{}, mapVersionErr(ctx, s.repo, groupID, err)
+	}
+
+	if g.PaymentStatus == domain.PaymentPaid {
+		remaining, err := s.repo.CampersForGroup(ctx, groupID)
+		if err != nil {
+			log.Printf("billing: load campers after coach edit %s/%s: %v", groupID, camperID, err)
+		} else {
+			gAfter, err := s.repo.FindGroupByID(ctx, groupID)
+			if err != nil || gAfter == nil {
+				log.Printf("billing: reload group after coach edit %s: %v", groupID, err)
+			} else {
+				if err := s.sheets.RemoveByGroupID(ctx, groupID); err != nil {
+					log.Printf("billing: remove group %s from sheet after coach edit: %v", groupID, err)
+				}
+				rows := sheetRowsForGroup(gAfter, remaining)
+				if err := s.sheets.AppendPaidAndRemovePending(ctx, groupID, rows); err != nil {
+					log.Printf("billing: re-sync sheet for group %s after coach edit: %v", groupID, err)
+				}
+			}
+		}
+	}
+
+	return summary, nil
+}
+
 func sheetRowsForGroup(g *domain.Group, campers []domain.Camper) []sheets.Row {
 	rows := make([]sheets.Row, 0, len(campers))
 	for _, c := range campers {

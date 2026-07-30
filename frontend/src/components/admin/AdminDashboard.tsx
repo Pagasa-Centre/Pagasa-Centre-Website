@@ -128,6 +128,14 @@ function canUnwaiveCoachFee(g: AdminGroup): boolean {
   return coachWaived(g);
 }
 
+function canEditCamperCoach(g: AdminGroup, c: AdminCamper): boolean {
+  if (c.attendance_type !== "full_week") return false;
+  if (g.is_free) return false;
+  if (coachPaid(g)) return false;
+  if (g.coach_included_in_balance) return false;
+  return true;
+}
+
 // coachStatusLabel is a short human summary for the group card.
 function coachStatusLabel(g: AdminGroup): string | null {
   if (coachEligibleCount(g) === 0) return null;
@@ -281,6 +289,7 @@ const LAST_ACTION_LABELS: Record<string, string> = {
   camper_removed: "Camper removed",
   camper_converted: "Converted to day visitor",
   camper_updated: "Day-pass details updated",
+  camper_coach_updated: "Coach seat updated",
   coach_invoice_sent: "Coach invoice sent",
   coach_fee_waived: "Coach fee waived",
   coach_fee_unwaived: "Coach fee restored",
@@ -849,6 +858,36 @@ export default function AdminDashboard() {
       await load();
     } catch (err) {
       await handleAdminError(err, "Update day-pass details failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function toggleCamperCoach(g: AdminGroup, c: AdminCamper) {
+    const next = !c.needs_coach;
+    const name = `${c.first_name} ${c.last_name}`;
+    const action = next
+      ? `Add ${name} to the coach passenger list?`
+      : `Remove ${name} from the coach passenger list?`;
+    const voidNote = g.stripe_coach_invoice_id
+      ? "\n\nAny open coach invoice will be voided so you can re-send at the corrected count."
+      : "";
+    if (!confirm(`${action}${voidNote}`)) {
+      return;
+    }
+    setBusy(`coach-toggle-${c.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await adminApi.updateCamperCoach(g.id, c.id, next, g.version);
+      setNotice(
+        next
+          ? `${name} is now on the coach.`
+          : `${name} is no longer on the coach.`,
+      );
+      await load();
+    } catch (err) {
+      await handleAdminError(err, "Coach seat update failed.");
     } finally {
       setBusy(null);
     }
@@ -1599,6 +1638,7 @@ export default function AdminDashboard() {
               onRemoveCamper={(c) => removeCamperFromGroup(g, c)}
               onConvertToDayVisitor={(c, data) => convertToDayVisitor(g, c, data)}
               onEditDayPass={(c, data) => editDayPassCamper(g, c, data)}
+              onToggleCamperCoach={(c) => toggleCamperCoach(g, c)}
               shirtSizes={shirtSizes}
               onSendCoachInvoice={() => sendCoachInvoice(g)}
               onWaiveCoachFee={() => waiveCoachFee(g)}
@@ -2346,6 +2386,7 @@ function GroupCard({
   onRemoveCamper,
   onConvertToDayVisitor,
   onEditDayPass,
+  onToggleCamperCoach,
   shirtSizes,
   onSendCoachInvoice,
   onWaiveCoachFee,
@@ -2384,6 +2425,7 @@ function GroupCard({
   onRemoveCamper: (c: AdminCamper) => void;
   onConvertToDayVisitor: (c: AdminCamper, data: ConvertDayVisitorData) => Promise<void>;
   onEditDayPass: (c: AdminCamper, data: EditDayPassData) => Promise<void>;
+  onToggleCamperCoach: (c: AdminCamper) => void;
   shirtSizes: ShirtSize[];
   onSendCoachInvoice: () => void;
   onWaiveCoachFee: () => void;
@@ -2744,10 +2786,34 @@ function GroupCard({
                       <span className="ml-1 text-xs font-semibold text-neutral-600 bg-neutral-100 px-2 py-0.5 rounded-full">
                         Age {c.age}
                       </span>
-                      {!!c.needs_coach && (
-                        <span className="ml-1 text-xs font-semibold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full">
-                          Coach
-                        </span>
+                      {canEditCamperCoach(g, c) ? (
+                        <button
+                          type="button"
+                          disabled={busy === `coach-toggle-${c.id}`}
+                          onClick={() => onToggleCamperCoach(c)}
+                          className={`ml-1 text-xs font-semibold px-2 py-0.5 rounded-full border disabled:opacity-50 ${
+                            c.needs_coach
+                              ? "text-sky-800 bg-sky-100 border-sky-200 hover:bg-sky-200"
+                              : "text-neutral-600 bg-neutral-100 border-neutral-200 hover:bg-neutral-200"
+                          }`}
+                          title={
+                            c.needs_coach
+                              ? "On coach — click to remove"
+                              : "Not on coach — click to add"
+                          }
+                        >
+                          {busy === `coach-toggle-${c.id}`
+                            ? "Saving…"
+                            : c.needs_coach
+                              ? "Coach"
+                              : "No coach"}
+                        </button>
+                      ) : (
+                        !!c.needs_coach && (
+                          <span className="ml-1 text-xs font-semibold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full">
+                            Coach
+                          </span>
+                        )
                       )}
                     </span>
                     <div className="flex flex-wrap items-center gap-2">

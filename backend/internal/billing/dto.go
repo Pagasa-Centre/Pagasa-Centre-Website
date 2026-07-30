@@ -49,3 +49,9 @@ type UpdateDayPassCamperRequest struct {
 	NeedsCatering   *bool   `json:"needs_catering"`
 	Dietary         *string `json:"dietary_requirements"`
 }
+
+// UpdateCamperCoachRequest is PATCH .../campers/{camperID}/coach.
+type UpdateCamperCoachRequest struct {
+	ExpectedVersion *int `json:"expected_version,omitempty"`
+	NeedsCoach      bool `json:"needs_coach"`
+}

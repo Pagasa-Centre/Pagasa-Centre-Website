@@ -299,6 +299,40 @@ func patchDayPassCamper(svc *billing.Service, rec *adminlog.Recorder) http.Handl
 	}
 }
 
+func patchCamperCoach(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body billing.UpdateCamperCoachRequest
+		if err := request.Decode(r, &body); err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		groupID := chi.URLParam(r, "groupID")
+		camperID := chi.URLParam(r, "camperID")
+		actor := admin.ActorFrom(r.Context())
+		sum, err := svc.UpdateCamperCoach(
+			r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion), body)
+		if err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		if sum.NoOp {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		gid := groupID
+		verb := "off"
+		if sum.NeedsCoach {
+			verb = "on"
+		}
+		summary := sum.CamperName + " coach seat turned " + verb
+		if sum.InvoiceVoided {
+			summary += "; voided open coach invoice"
+		}
+		admin.Audit(rec, r, adminlog.ActionCamperCoachUpdated, &gid, summary, sum)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 func deleteRegistration(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody

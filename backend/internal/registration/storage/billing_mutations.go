@@ -444,6 +444,51 @@ func (r *Repository) UpdateDayPassCamperMeta(
 	return tx.Commit(ctx)
 }
 
+// UpdateCamperCoachMeta sets needs_coach for one full-week camper and optionally
+// clears an open separate coach invoice on the group.
+func (r *Repository) UpdateCamperCoachMeta(
+	ctx context.Context,
+	groupID, camperID string,
+	needsCoach bool,
+	clearCoachInvoice bool,
+	meta domain.ActionMeta,
+) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	if err != nil {
+		return err
+	}
+	if g == nil {
+		return fmt.Errorf("group %q not found", groupID)
+	}
+	if err := checkVersion(g, meta); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE registrations SET needs_coach = $3
+		WHERE id = $1 AND group_id = $2 AND attendance_type = 'full_week'`,
+		camperID, groupID, needsCoach)
+	if err != nil {
+		return fmt.Errorf("update camper coach: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("camper %q not in group %q", camperID, groupID)
+	}
+	extra := ""
+	if clearCoachInvoice {
+		extra = `, stripe_coach_invoice_id = NULL, coach_invoice_due_at = NULL`
+	}
+	if err := stampExec(ctx, tx, groupID, meta, extra); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // DeleteGroupMeta permanently removes a registration group. Campers cascade-delete
 // via FK. Version is checked before delete so stale dashboards cannot remove a
 // concurrently modified group.
