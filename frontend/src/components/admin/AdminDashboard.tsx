@@ -36,12 +36,13 @@ type Category =
   | "paid"
   | "unpaid";
 
-type TabKey = "to_allocate" | "to_invoice" | "awaiting" | "paid" | "all";
+type TabKey = "to_allocate" | "to_invoice" | "awaiting" | "overdue" | "paid" | "all";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "to_allocate", label: "Needs accommodation" },
   { key: "to_invoice", label: "Ready to invoice" },
   { key: "awaiting", label: "Awaiting payment" },
+  { key: "overdue", label: "Overdue" },
   { key: "paid", label: "Paid" },
   { key: "all", label: "Everyone" },
 ];
@@ -1262,6 +1263,8 @@ export default function AdminDashboard() {
         if (tab === "all") {
           // Everyone except not-yet-deposit-paid clutter.
           if (cat === "unpaid") return false;
+        } else if (tab === "overdue") {
+          if (cat !== "awaiting" || !isOverdue(g)) return false;
         } else if (cat !== tab) {
           return false;
         }
@@ -1502,8 +1505,9 @@ export default function AdminDashboard() {
         <StatTile
           label="Overdue"
           value={counts.overdue}
+          active={tab === "overdue"}
           tone="red"
-          onClick={() => setTab("awaiting")}
+          onClick={() => setTab("overdue")}
         />
         <StatTile
           label="Paid in full"
