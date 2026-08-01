@@ -484,6 +484,12 @@ export const adminApi = {
       body: JSON.stringify({ expected_version: expectedVersion }),
     }),
 
+  markPaid: (groupId: string, expectedVersion: number) =>
+    adminFetch<void>(`/admin/registrations/${groupId}/mark-paid`, {
+      method: "POST",
+      body: JSON.stringify({ expected_version: expectedVersion }),
+    }),
+
   generateFreeCode: (password: string, note?: string) =>
     adminFetch<{ code: string }>("/admin/free-codes", {
       method: "POST",

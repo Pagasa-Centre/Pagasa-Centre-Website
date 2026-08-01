@@ -1021,6 +1021,37 @@ export default function AdminDashboard() {
     }
   }
 
+  async function markPaidGroup(g: AdminGroup) {
+    const hasInvoice = g.billing_status === "invoiced";
+    if (
+      !confirm(
+        `Mark ${g.contact_first_name} ${g.contact_last_name}'s group as paid in full?\n\n` +
+          `Use this when they have paid outside Stripe, for example by bank transfer.\n\n` +
+          (hasInvoice
+            ? "Their open Stripe invoice will be cancelled so they cannot pay it twice."
+            : "No invoice will be sent.") +
+          "\n\nThey will get a confirmation email.",
+      )
+    ) {
+      return;
+    }
+    setBusy(`markpaid-${g.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await adminApi.markPaid(g.id, g.version);
+      setNotice(
+        `${g.contact_first_name}'s group marked as paid in full.` +
+          (hasInvoice ? " Their Stripe invoice was cancelled." : ""),
+      );
+      await load();
+    } catch (err) {
+      await handleAdminError(err, "Could not mark this group as paid.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function resyncAllSheets() {
     if (
       !confirm(
@@ -1638,6 +1669,7 @@ export default function AdminDashboard() {
               onReset={() => resetAllocation(g)}
               onInvoice={() => sendInvoice(g)}
               onConfirmFree={() => confirmFreeGroup(g)}
+              onMarkPaid={() => markPaidGroup(g)}
               onResend={() => resendInvoice(g)}
               onExtend={() => extendDue(g)}
               onCancel={() => cancelGroup(g)}
@@ -2386,6 +2418,7 @@ function GroupCard({
   onReset,
   onInvoice,
   onConfirmFree,
+  onMarkPaid,
   onResend,
   onExtend,
   onCancel,
@@ -2425,6 +2458,7 @@ function GroupCard({
   onReset: () => void;
   onInvoice: () => void;
   onConfirmFree: () => void;
+  onMarkPaid: () => void;
   onResend: () => void;
   onExtend: () => void;
   onCancel: () => void;
@@ -3051,8 +3085,20 @@ function GroupCard({
                   </>
                 )}
                 {!g.is_free && (
+                  <button
+                    type="button"
+                    disabled={busy === `markpaid-${g.id}`}
+                    onClick={onMarkPaid}
+                    className="px-4 py-2.5 text-sm font-semibold text-green-700 bg-white border border-green-300 rounded-lg hover:bg-green-50 disabled:opacity-50"
+                  >
+                    {busy === `markpaid-${g.id}` ? "Saving…" : "Mark as paid"}
+                  </button>
+                )}
+                {!g.is_free && (
                   <span className="text-xs text-neutral-500">
-                    Stripe will email a secure payment link.
+                    Stripe will email a secure payment link, or use{" "}
+                    <span className="font-semibold">Mark as paid</span> if they
+                    already paid by bank transfer.
                   </span>
                 )}
               </div>
@@ -3069,6 +3115,16 @@ function GroupCard({
                   {overdue ? " · OVERDUE" : ""}
                 </p>
                 <div className="flex flex-wrap gap-2">
+                  {!g.is_free && (
+                    <button
+                      type="button"
+                      disabled={busy === `markpaid-${g.id}`}
+                      onClick={onMarkPaid}
+                      className="px-4 py-2 text-sm font-semibold text-green-700 bg-white border border-green-300 rounded-lg hover:bg-green-50 disabled:opacity-50"
+                    >
+                      {busy === `markpaid-${g.id}` ? "Saving…" : "Mark as paid"}
+                    </button>
+                  )}
                   <button
                     type="button"
                     disabled={busy === `res-${g.id}`}

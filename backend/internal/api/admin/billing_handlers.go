@@ -227,6 +227,25 @@ func postRelease(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstora
 	}
 }
 
+func postMarkPaid(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body billing.VersionedBody
+		_ = request.Decode(r, &body)
+		groupID := chi.URLParam(r, "groupID")
+		actor := admin.ActorFrom(r.Context())
+		if err := svc.MarkBalancePaidManually(
+			r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
+		gid := groupID
+		admin.Audit(rec, r, adminlog.ActionBalancePaid, &gid,
+			"Marked balance paid outside Stripe for "+admin.GroupSummary(g), nil)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 func deleteCamper(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody

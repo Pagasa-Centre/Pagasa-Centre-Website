@@ -596,6 +596,7 @@ type stubStripe struct {
 	refundInv     func(ctx context.Context, id string) (int64, error)
 	voidInv       func(ctx context.Context, id string) error
 	voidInvIdem   func(ctx context.Context, id string) error
+	getInvoice    func(ctx context.Context, id string) (InvoiceResult, error)
 	ensureCust    func(ctx context.Context, existingID, email, name, groupID string) (string, error)
 	createInvoice func(ctx context.Context, customerID, groupID string, lines []InvoiceLine, daysUntilDue int64, invoiceType string) (InvoiceResult, error)
 	creditBalance func(ctx context.Context, customerID string, amountPence int64, currency, description, idempotencyKey string) error
@@ -635,7 +636,10 @@ func (s *stubStripe) VoidInvoiceIdempotent(ctx context.Context, invoiceID string
 func (s *stubStripe) SendInvoiceEmail(context.Context, string) error {
 	return errors.New("unexpected SendInvoiceEmail")
 }
-func (s *stubStripe) GetInvoice(context.Context, string) (InvoiceResult, error) {
+func (s *stubStripe) GetInvoice(ctx context.Context, invoiceID string) (InvoiceResult, error) {
+	if s.getInvoice != nil {
+		return s.getInvoice(ctx, invoiceID)
+	}
 	return InvoiceResult{}, errors.New("unexpected GetInvoice")
 }
 func (s *stubStripe) RefundPaymentIntent(ctx context.Context, id string) (int64, error) {
@@ -2634,5 +2638,194 @@ func TestSendInvoicesBulk_skipsPrepaidGroup(t *testing.T) {
 	errs := svc.SendInvoicesBulk(ctx, "Admin", []string{groupID})
 	if len(errs) != 0 {
 		t.Fatalf("expected prepaid group skipped silently, got errs=%v", errs)
+	}
+}
+
+func TestMarkBalancePaidManually_allocatedGroupSkipsStripe(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	mailer := &recordingMailer{}
+	voids := 0
+	stub := &stubStripe{
+		voidInvIdem: func(context.Context, string) error {
+			voids++
+			return nil
+		},
+	}
+	svc := NewService(repo, stub, mailer, nil, Config{})
+
+	groupID := insertCoachGroup(ctx, t, pool, domain.BillingAllocated, "lodge", false)
+
+	if err := svc.MarkBalancePaidManually(ctx, groupID, "Diane", domain.SkipVersionCheck); err != nil {
+		t.Fatalf("MarkBalancePaidManually: %v", err)
+	}
+
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g.BillingStatus != domain.BillingBalancePaid {
+		t.Fatalf("billing_status = %q, want balance_paid", g.BillingStatus)
+	}
+	if g.BalancePaidAt == nil {
+		t.Fatal("balance_paid_at not set")
+	}
+	if voids != 0 {
+		t.Fatalf("void called %d times, want 0 for an uninvoiced group", voids)
+	}
+	if len(mailer.balancePaid) != 1 {
+		t.Fatalf("confirmation emails = %d, want 1", len(mailer.balancePaid))
+	}
+	if mailer.balancePaid[0].AmountLabel != "" {
+		t.Fatalf("amount label = %q, want blank when there is no invoice", mailer.balancePaid[0].AmountLabel)
+	}
+
+	// The family keeps the beds they were given; marking paid is not a release.
+	campers, _ := repo.CampersForGroup(ctx, groupID)
+	for _, c := range campers {
+		if c.AllocatedAccommodationCode == nil || *c.AllocatedAccommodationCode != "lodge" {
+			t.Fatalf("camper %s lost their allocation", c.FirstName)
+		}
+	}
+}
+
+func TestMarkBalancePaidManually_invoicedVoidsInvoice(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	mailer := &recordingMailer{}
+
+	var voided []string
+	stub := &stubStripe{
+		getInvoice: func(_ context.Context, id string) (InvoiceResult, error) {
+			return InvoiceResult{ID: id, AmountDuePence: 25000, Currency: "gbp"}, nil
+		},
+		voidInvIdem: func(_ context.Context, id string) error {
+			voided = append(voided, id)
+			return nil
+		},
+	}
+	svc := NewService(repo, stub, mailer, nil, Config{})
+
+	groupID := insertCoachGroup(ctx, t, pool, domain.BillingInvoiced, "lodge", false)
+	if _, err := pool.Exec(ctx, `
+		UPDATE registration_groups SET stripe_invoice_id = 'in_bank_transfer' WHERE id = $1`, groupID); err != nil {
+		t.Fatalf("seed invoice id: %v", err)
+	}
+
+	if err := svc.MarkBalancePaidManually(ctx, groupID, "Diane", domain.SkipVersionCheck); err != nil {
+		t.Fatalf("MarkBalancePaidManually: %v", err)
+	}
+
+	if len(voided) != 1 || voided[0] != "in_bank_transfer" {
+		t.Fatalf("voided = %v, want the open invoice voided once", voided)
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g.BillingStatus != domain.BillingBalancePaid {
+		t.Fatalf("billing_status = %q, want balance_paid", g.BillingStatus)
+	}
+	if len(mailer.balancePaid) != 1 || mailer.balancePaid[0].AmountLabel != "£250.00" {
+		t.Fatalf("confirmation = %+v, want one email showing £250.00", mailer.balancePaid)
+	}
+}
+
+func TestMarkBalancePaidManually_voidFailureLeavesGroupUnpaid(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	mailer := &recordingMailer{}
+	stub := &stubStripe{
+		getInvoice: func(_ context.Context, id string) (InvoiceResult, error) {
+			return InvoiceResult{ID: id, AmountDuePence: 25000, Currency: "gbp"}, nil
+		},
+		voidInvIdem: func(context.Context, string) error {
+			return errors.New("stripe down")
+		},
+	}
+	svc := NewService(repo, stub, mailer, nil, Config{})
+
+	groupID := insertCoachGroup(ctx, t, pool, domain.BillingInvoiced, "lodge", false)
+	if _, err := pool.Exec(ctx, `
+		UPDATE registration_groups SET stripe_invoice_id = 'in_void_fails' WHERE id = $1`, groupID); err != nil {
+		t.Fatalf("seed invoice id: %v", err)
+	}
+
+	err := svc.MarkBalancePaidManually(ctx, groupID, "Diane", domain.SkipVersionCheck)
+	var apiErr commonerrors.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		t.Fatalf("expected bad_request when the void fails, got %v", err)
+	}
+
+	// A live payment link plus a paid-looking group is the double charge we are
+	// preventing, so nothing may have changed.
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g.BillingStatus != domain.BillingInvoiced {
+		t.Fatalf("billing_status = %q, want it left invoiced", g.BillingStatus)
+	}
+	if g.BalancePaidAt != nil {
+		t.Fatal("balance_paid_at set despite the void failing")
+	}
+	if len(mailer.balancePaid) != 0 {
+		t.Fatalf("sent %d confirmations for a payment that was not recorded", len(mailer.balancePaid))
+	}
+}
+
+func TestMarkBalancePaidManually_guards(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{})
+
+	expectBadRequest := func(t *testing.T, err error) {
+		t.Helper()
+		var apiErr commonerrors.APIError
+		if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+			t.Fatalf("expected bad_request, got %v", err)
+		}
+	}
+
+	t.Run("already_balance_paid", func(t *testing.T) {
+		groupID := insertCoachGroup(ctx, t, pool, domain.BillingBalancePaid, "lodge", false)
+		expectBadRequest(t, svc.MarkBalancePaidManually(ctx, groupID, "Diane", domain.SkipVersionCheck))
+	})
+
+	t.Run("church_sponsored", func(t *testing.T) {
+		groupID := insertCoachGroup(ctx, t, pool, domain.BillingAllocated, "lodge", true)
+		expectBadRequest(t, svc.MarkBalancePaidManually(ctx, groupID, "Diane", domain.SkipVersionCheck))
+	})
+
+	t.Run("released", func(t *testing.T) {
+		groupID := insertCoachGroup(ctx, t, pool, domain.BillingReleased, "lodge", false)
+		expectBadRequest(t, svc.MarkBalancePaidManually(ctx, groupID, "Diane", domain.SkipVersionCheck))
+	})
+
+	t.Run("deposit_unpaid", func(t *testing.T) {
+		var groupID string
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO registration_groups (
+				contact_first_name, contact_last_name, contact_email, contact_phone,
+				payment_status, total_amount_pence, currency, billing_status
+			) VALUES ('No', 'Deposit', 'nodeposit@example.com', '07000000000', 'pending', 5000, 'GBP', 'allocated')
+			RETURNING id`).Scan(&groupID); err != nil {
+			t.Fatalf("insert group: %v", err)
+		}
+		expectBadRequest(t, svc.MarkBalancePaidManually(ctx, groupID, "Diane", domain.SkipVersionCheck))
+	})
+}
+
+func TestMarkBalancePaidManually_versionConflict(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	svc := NewService(repo, &stubStripe{}, nil, nil, Config{})
+
+	groupID := insertCoachGroup(ctx, t, pool, domain.BillingAllocated, "lodge", false)
+
+	err := svc.MarkBalancePaidManually(ctx, groupID, "Diane", 99)
+	var apiErr commonerrors.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "stale_state" {
+		t.Fatalf("expected stale_state conflict, got %v", err)
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g.BillingStatus != domain.BillingAllocated {
+		t.Fatalf("billing_status = %q, want unchanged allocated", g.BillingStatus)
 	}
 }

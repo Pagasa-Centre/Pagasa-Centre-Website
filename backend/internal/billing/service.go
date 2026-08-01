@@ -617,6 +617,102 @@ func (s *Service) sendSponsorshipConfirmedEmail(ctx context.Context, g *domain.G
 	}
 }
 
+// MarkBalancePaidManually records a balance settled outside Stripe, such as a
+// bank transfer. Any open invoice is voided first so the family cannot also pay
+// online; if that void fails the group is left untouched rather than showing as
+// paid with a live payment link.
+func (s *Service) MarkBalancePaidManually(ctx context.Context, groupID, actor string, expectedVersion int) error {
+	g, err := s.repo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		return commonerrors.Internal(err.Error())
+	}
+	if g == nil {
+		return commonerrors.NotFound("group not found")
+	}
+	if g.PaymentStatus != domain.PaymentPaid {
+		return commonerrors.BadRequest("deposit must be paid first", nil)
+	}
+	if g.IsFree {
+		return commonerrors.BadRequest(
+			"church-sponsored groups are settled with Confirm sponsorship", nil)
+	}
+	switch g.BillingStatus {
+	case domain.BillingAllocated, domain.BillingInvoiced:
+	default:
+		return commonerrors.BadRequest(
+			"only allocated or invoiced groups can be marked paid; this group is "+
+				billingStatusLabel(g.BillingStatus), nil)
+	}
+
+	amountLabel := ""
+	if g.BillingStatus == domain.BillingInvoiced &&
+		g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" {
+		res, err := s.stripe.GetInvoice(ctx, *g.StripeInvoiceID)
+		if err != nil {
+			log.Printf("billing: read invoice %s before manual mark-paid: %v", *g.StripeInvoiceID, err)
+		} else {
+			amountLabel = formatAmountLabel(res.AmountDuePence, res.Currency)
+		}
+		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeInvoiceID); err != nil {
+			return commonerrors.BadRequest(
+				fmt.Sprintf("invoice void failed; group was not marked paid: %v", err), nil)
+		}
+	}
+
+	meta := domain.ActionMeta{
+		Actor:           actor,
+		Action:          "balance_paid",
+		ExpectedVersion: expectedVersion,
+	}
+	if err := s.repo.MarkBalancePaidMeta(ctx, groupID, meta); err != nil {
+		return mapVersionErr(ctx, s.repo, groupID, err)
+	}
+
+	s.sendManualBalancePaidEmails(ctx, g, amountLabel)
+	return nil
+}
+
+// sendManualBalancePaidEmails mirrors the Stripe balance-paid notifications for
+// a payment recorded by hand. Best-effort: the payment is already committed, so
+// a mail failure must not fail the action.
+func (s *Service) sendManualBalancePaidEmails(ctx context.Context, g *domain.Group, amountLabel string) {
+	if s.mailer == nil {
+		return
+	}
+	campers, err := s.repo.CampersForGroup(ctx, g.ID)
+	if err != nil {
+		log.Printf("billing: manual mark-paid load campers (group %s): %v", g.ID, err)
+		return
+	}
+	accNames := s.accommodationNames(ctx)
+	coachCount := int64(0)
+	if g.CoachIncludedInBalance {
+		coachCount = coachEligibleCount(campers)
+	}
+	items := balanceInvoiceItems(campers, accNames, s.unitNames(ctx), coachCount)
+
+	if err := s.mailer.SendBalancePaidConfirmation(ctx, email.BalancePaidConfirmation{
+		ToEmail:     g.ContactEmail,
+		ToName:      g.ContactFirstName,
+		AmountLabel: amountLabel,
+		Items:       items,
+		Changes:     offPreferenceChanges(campers, accNames),
+	}); err != nil {
+		log.Printf("billing: manual balance-paid confirmation to %s: %v", g.ContactEmail, err)
+	}
+
+	if s.cfg.WhiteTeamEmail != "" {
+		_ = s.mailer.SendBalancePaid(ctx, email.BalancePaid{
+			ToEmail:      s.cfg.WhiteTeamEmail,
+			ContactName:  strings.TrimSpace(g.ContactFirstName + " " + g.ContactLastName),
+			ContactEmail: g.ContactEmail,
+			AmountLabel:  amountLabel,
+			PaidDate:     time.Now().Format("2 Jan 2006"),
+			Items:        items,
+		})
+	}
+}
+
 // VoidAndRelease voids the Stripe invoice (if any) and clears allocations.
 func (s *Service) VoidAndRelease(ctx context.Context, groupID, reason, actor string, expectedVersion int, cancelled bool) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
