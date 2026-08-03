@@ -34,6 +34,7 @@ type Service struct {
 	stripe stripeClient
 	mailer email.Mailer
 	sheets sheets.Sync
+	prices registration.PriceLookup
 	cfg    Config
 }
 
@@ -45,6 +46,28 @@ func NewService(repo *storage.Repository, stripe stripeClient, mailer email.Mail
 		sheetSync = sheets.NewNoopSync()
 	}
 	return &Service{repo: repo, stripe: stripe, mailer: mailer, sheets: sheetSync, cfg: cfg}
+}
+
+// WithPriceLookup supplies a live price source so a deposit charged to someone
+// who joined late reflects the price as it stands now, not as it stood when the
+// process booted. Config's copy is read once at startup and goes stale the moment
+// the White Team edits the deposit.
+func (s *Service) WithPriceLookup(p registration.PriceLookup) *Service {
+	s.prices = p
+	return s
+}
+
+// depositAmountPence is the deposit a late arrival owes. Falls back to the
+// startup copy when no live lookup is wired.
+func (s *Service) depositAmountPence(ctx context.Context) int {
+	if s.prices != nil {
+		if p, err := s.prices.GetPrice(ctx, domain.PriceDeposit); err == nil && p.AmountPence > 0 {
+			return p.AmountPence
+		} else if err != nil {
+			log.Printf("billing: live deposit price lookup: %v", err)
+		}
+	}
+	return s.cfg.DepositPricePence
 }
 
 // Allocate persists White Team placements and sets billing_status=allocated.
@@ -272,6 +295,22 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 			}
 			lines = append(lines, line)
 		}
+	}
+
+	// Bill any deposit still owed by someone added after the group's deposit
+	// checkout was settled. Charging it here, rather than chasing a second
+	// payment, means a late arrival pays the same total as everyone who
+	// registered on time, in one go.
+	for _, c := range campers {
+		if c.DepositOwedPence <= 0 {
+			continue
+		}
+		lines = append(lines, InvoiceLine{
+			AmountPence: int64(c.DepositOwedPence),
+			Currency:    g.Currency,
+			Description: fmt.Sprintf("Camp deposit — %s %s", c.FirstName, c.LastName),
+			Quantity:    1,
+		})
 	}
 
 	// Fold the coach fee into this balance invoice for coach passengers. Only
@@ -949,8 +988,14 @@ func (s *Service) ConvertCamperToDayVisitor(
 		return ConvertSummary{}, commonerrors.ValidationFailed(fields)
 	}
 
+	// A camper added after the group's deposit checkout has their deposit
+	// recorded as owed rather than paid, so there is nothing to credit back —
+	// crediting it would hand the family money they never gave us. Clearing what
+	// they owe (done in the same write) is the whole of the refund.
 	depositCreditPence := 0
-	if g.PaymentStatus == domain.PaymentPaid && target.Age >= registration.MinDepositAge {
+	if g.PaymentStatus == domain.PaymentPaid &&
+		target.Age >= registration.MinDepositAge &&
+		target.DepositOwedPence == 0 {
 		depositCreditPence = s.cfg.DepositPricePence
 	}
 	summary.DepositCreditPence = depositCreditPence
@@ -1699,6 +1744,23 @@ func coachLine(count int64, priceID string) (InvoiceLine, bool) {
 }
 
 func balanceInvoiceItems(campers []domain.Camper, accNames, unitNames map[string]string, coachCount int64) []string {
+	items := rosterItems(campers, accNames, unitNames)
+	// Deposits owed by late arrivals ride on this invoice, so the email has to
+	// itemise them or the total will not add up against the lines above it.
+	for _, c := range campers {
+		if c.DepositOwedPence > 0 {
+			items = append(items, fmt.Sprintf("%s %s — Camp deposit", c.FirstName, c.LastName))
+		}
+	}
+	if coachCount > 0 {
+		items = append(items, fmt.Sprintf("Coach transport (×%d)", coachCount))
+	}
+	return items
+}
+
+// rosterItems is one line per person on a booking, describing where they are
+// staying. Money lines are added by callers that are itemising a bill.
+func rosterItems(campers []domain.Camper, accNames, unitNames map[string]string) []string {
 	var items []string
 	for _, c := range campers {
 		if c.AttendanceType == domain.AttendanceDayPass {
@@ -1739,9 +1801,6 @@ func balanceInvoiceItems(campers []domain.Camper, accNames, unitNames map[string
 			}
 		}
 		items = append(items, name)
-	}
-	if coachCount > 0 {
-		items = append(items, fmt.Sprintf("Coach transport (×%d)", coachCount))
 	}
 	return items
 }

@@ -106,6 +106,14 @@ func (s *SMTPMailer) SendAccommodationChanged(ctx context.Context, p Accommodati
 	return s.send(ctx, p.ToEmail, subject, body)
 }
 
+func (s *SMTPMailer) SendBookingUpdated(ctx context.Context, p BookingUpdated) error {
+	subject, body, err := renderBookingUpdated(p)
+	if err != nil {
+		return err
+	}
+	return s.send(ctx, p.ToEmail, subject, body)
+}
+
 func (s *SMTPMailer) send(_ context.Context, to, subject, htmlBody string) error {
 	if to == "" {
 		return fmt.Errorf("empty recipient")

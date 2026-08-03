@@ -107,6 +107,14 @@ func (r *ResendMailer) SendAccommodationChanged(ctx context.Context, p Accommoda
 	return r.send(ctx, p.ToEmail, subject, body)
 }
 
+func (r *ResendMailer) SendBookingUpdated(ctx context.Context, p BookingUpdated) error {
+	subject, body, err := renderBookingUpdated(p)
+	if err != nil {
+		return err
+	}
+	return r.send(ctx, p.ToEmail, subject, body)
+}
+
 type resendRequest struct {
 	From    string   `json:"from"`
 	To      []string `json:"to"`

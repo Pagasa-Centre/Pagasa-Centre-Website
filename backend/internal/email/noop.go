@@ -98,3 +98,13 @@ func (NoopMailer) SendAccommodationChanged(_ context.Context, p AccommodationCha
 		p.ToEmail, subject, len(p.Items))
 	return nil
 }
+
+func (NoopMailer) SendBookingUpdated(_ context.Context, p BookingUpdated) error {
+	subject, _, err := renderBookingUpdated(p)
+	if err != nil {
+		return err
+	}
+	log.Printf("[email noop] to=%s subject=%q campers=%d added=%q (booking updated)",
+		p.ToEmail, subject, len(p.Campers), p.AddedName)
+	return nil
+}

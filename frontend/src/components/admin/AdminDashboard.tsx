@@ -11,10 +11,13 @@ import {
   type AdminGroup,
   type AdminCamper,
   type AllocateCamper,
+  type EditCamperPayload,
+  type NewCamperPayload,
   AdminApiError,
 } from "@/lib/admin-api";
 import {
   ACCOMMODATION_CHILD_CODE,
+  ACCOMMODATION_TENT_CODE,
   DAY_PASS_DAYS,
   MAX_CHILD_ACCOMMODATION_AGE,
   MIN_DEPOSIT_AGE,
@@ -295,6 +298,10 @@ const LAST_ACTION_LABELS: Record<string, string> = {
   camper_converted: "Converted to day visitor",
   camper_updated: "Day-pass details updated",
   camper_coach_updated: "Coach seat updated",
+  camper_edited: "Camper details edited",
+  camper_added: "Person added to booking",
+  main_contact_moved: "Main contact changed",
+  camper_deposit_waived: "Deposit waived",
   coach_invoice_sent: "Coach invoice sent",
   coach_fee_waived: "Coach fee waived",
   coach_fee_unwaived: "Coach fee restored",
@@ -335,6 +342,11 @@ export default function AdminDashboard() {
   // Group IDs whose (already-saved) allocation is being re-edited.
   const [editing, setEditing] = useState<Record<string, boolean>>({});
   const [shirtSizes, setShirtSizes] = useState<ShirtSize[]>([]);
+  // Read live so the "they will be charged X" copy on Add person matches what
+  // the invoice will actually say, even after the White Team edits the price.
+  const [depositPence, setDepositPence] = useState<number | null>(null);
+  const depositLabel =
+    depositPence === null ? "camp" : formatPence(depositPence);
 
   const accName = useCallback(
     (code: string | null | undefined): string => {
@@ -355,12 +367,13 @@ export default function AdminDashboard() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [reg, acc, unitRes, cfg, sizesRes] = await Promise.all([
+      const [reg, acc, unitRes, cfg, sizesRes, priceRes] = await Promise.all([
         adminApi.listRegistrations(),
         adminApi.accommodations(),
         adminApi.accommodationUnits(),
         adminApi.campConfig(),
         camp.shirtSizes(),
+        camp.prices(),
       ]);
       setGroups(reg.groups);
       setAccommodations(acc.accommodations);
@@ -368,6 +381,9 @@ export default function AdminDashboard() {
       setRegistrationsOpen(cfg.registrations_open);
       setPaymentMode(cfg.registration_payment_mode ?? "deposit");
       setShirtSizes(sizesRes.sizes);
+      setDepositPence(
+        priceRes.prices.find((p) => p.code === "deposit")?.amount_pence ?? null,
+      );
       const next: Record<string, AllocState> = {};
       const nextUnits: Record<string, UnitAllocState> = {};
       for (const g of reg.groups) {
@@ -893,6 +909,113 @@ export default function AdminDashboard() {
       await load();
     } catch (err) {
       await handleAdminError(err, "Coach seat update failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function editCamper(
+    g: AdminGroup,
+    c: AdminCamper,
+    data: EditCamperPayload,
+  ) {
+    setBusy(`editcamper-${c.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await adminApi.editCamper(g.id, c.id, data, g.version);
+      const replaced = res.previous_name !== res.camper_name;
+      setNotice(
+        (replaced
+          ? `${res.previous_name} replaced with ${res.camper_name}.`
+          : `${res.camper_name}'s details updated.`) +
+          (res.invoice_voided
+            ? " Their invoice was cancelled because the amount changed — send a new one."
+            : ""),
+      );
+      await load();
+      return true;
+    } catch (err) {
+      await handleAdminError(err, "Could not save these changes.");
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function addCamper(g: AdminGroup, camper: NewCamperPayload) {
+    setBusy(`addcamper-${g.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await adminApi.addCamper(g.id, camper, g.version);
+      const bits = [`${res.camper_name} added to ${g.contact_first_name}'s booking.`];
+      if (res.deposit_owed_pence > 0) {
+        bits.push(
+          `They owe a ${formatPence(res.deposit_owed_pence)} deposit, which will go on the balance invoice.`,
+        );
+      }
+      if (res.needs_allocation) {
+        bits.push("Allocate their accommodation next.");
+      }
+      if (res.invoice_voided) {
+        bits.push("The open invoice was cancelled — send a new one once allocated.");
+      }
+      setNotice(bits.join(" "));
+      await load();
+      return true;
+    } catch (err) {
+      await handleAdminError(err, "Could not add this person.");
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function makeMainContact(g: AdminGroup, c: AdminCamper) {
+    if (
+      !confirm(
+        `Make ${c.first_name} ${c.last_name} the main contact for this booking?\n\n` +
+          "This only changes who the booking is listed under. The contact name, " +
+          "email and phone the White Team writes to stay as they are — edit those " +
+          "with Edit contact.",
+      )
+    ) {
+      return;
+    }
+    setBusy(`mainc-${c.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await adminApi.makeMainContact(g.id, c.id, g.version);
+      setNotice(`${c.first_name} ${c.last_name} is now the main contact.`);
+      await load();
+    } catch (err) {
+      await handleAdminError(err, "Could not change the main contact.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function waiveCamperDeposit(g: AdminGroup, c: AdminCamper) {
+    if (
+      !confirm(
+        `Waive the ${formatPence(depositOwed(c))} deposit owed by ${c.first_name} ${c.last_name}?\n\n` +
+          "They will not be charged it on the balance invoice. Use this when they " +
+          "are replacing someone who already paid a deposit.",
+      )
+    ) {
+      return;
+    }
+    setBusy(`waivedep-${c.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await adminApi.waiveCamperDeposit(g.id, c.id, g.version);
+      setNotice(`Deposit waived for ${c.first_name} ${c.last_name}.`);
+      await load();
+    } catch (err) {
+      await handleAdminError(err, "Could not waive this deposit.");
     } finally {
       setBusy(null);
     }
@@ -1679,6 +1802,11 @@ export default function AdminDashboard() {
               onConvertToDayVisitor={(c, data) => convertToDayVisitor(g, c, data)}
               onEditDayPass={(c, data) => editDayPassCamper(g, c, data)}
               onToggleCamperCoach={(c) => toggleCamperCoach(g, c)}
+              onEditCamper={(c, data) => editCamper(g, c, data)}
+              onAddCamper={(data) => addCamper(g, data)}
+              onMakeMainContact={(c) => makeMainContact(g, c)}
+              onWaiveDeposit={(c) => waiveCamperDeposit(g, c)}
+              depositLabel={depositLabel}
               shirtSizes={shirtSizes}
               onSendCoachInvoice={() => sendCoachInvoice(g)}
               onWaiveCoachFee={() => waiveCoachFee(g)}
@@ -1995,6 +2123,775 @@ function depositCreditEligible(g: AdminGroup, c: AdminCamper): boolean {
 
 function canEditDayPass(c: AdminCamper): boolean {
   return c.attendance_type === "day_pass";
+}
+
+// Details can always be corrected. Changes that alter what the family owes are
+// refused by the server on a settled balance, so the button stays available for
+// the spelling fixes that make up most edits.
+function canEditCamperDetails(): boolean {
+  return true;
+}
+
+function canMakeMainContact(g: AdminGroup, c: AdminCamper): boolean {
+  return !c.is_main_contact && g.campers.length > 1;
+}
+
+// A person can only join a booking that is still being paid for in the normal
+// way. Anything already settled has no invoice left to put them on.
+function canAddCamper(g: AdminGroup): boolean {
+  return (
+    g.payment_status === "paid" &&
+    !g.is_free &&
+    !g.paid_in_full_at_registration &&
+    g.billing_status !== "balance_paid"
+  );
+}
+
+function depositOwed(c: AdminCamper): number {
+  return c.deposit_owed_pence ?? 0;
+}
+
+function canWaiveDeposit(g: AdminGroup, c: AdminCamper): boolean {
+  return depositOwed(c) > 0 && g.billing_status !== "balance_paid";
+}
+
+function poundLabel(pence: number): string {
+  return `£${(pence / 100).toFixed(2)}`;
+}
+
+type EditCamperData = EditCamperPayload;
+
+// CamperAdminActions is the per-person controls that apply in every billing
+// state: correct their details, hand them the main-contact marker, or write off
+// a deposit they were charged for arriving late.
+function CamperAdminActions({
+  g,
+  c,
+  busy,
+  editOpen,
+  onToggleEdit,
+  onMakeMainContact,
+  onWaiveDeposit,
+}: {
+  g: AdminGroup;
+  c: AdminCamper;
+  busy: string | null;
+  editOpen: boolean;
+  onToggleEdit: () => void;
+  onMakeMainContact: (c: AdminCamper) => void;
+  onWaiveDeposit: (c: AdminCamper) => void;
+}) {
+  return (
+    <>
+      {depositOwed(c) > 0 && (
+        <span className="text-xs font-semibold text-amber-800 bg-amber-100 border border-amber-200 px-2 py-1 rounded-full shrink-0">
+          {poundLabel(depositOwed(c))} deposit due
+        </span>
+      )}
+      {canWaiveDeposit(g, c) && (
+        <button
+          type="button"
+          disabled={busy === `waivedep-${c.id}`}
+          onClick={() => onWaiveDeposit(c)}
+          className="px-3 py-1.5 text-xs font-semibold text-amber-800 bg-white border border-amber-300 rounded-lg hover:bg-amber-50 disabled:opacity-50 shrink-0"
+        >
+          {busy === `waivedep-${c.id}` ? "Waiving…" : "Waive deposit"}
+        </button>
+      )}
+      {canEditCamperDetails() && (
+        <button
+          type="button"
+          disabled={busy === `editcamper-${c.id}`}
+          onClick={onToggleEdit}
+          className="px-3 py-1.5 text-xs font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100 disabled:opacity-50 shrink-0"
+        >
+          {editOpen ? "Close" : "Edit details"}
+        </button>
+      )}
+      {canMakeMainContact(g, c) && (
+        <button
+          type="button"
+          disabled={busy === `mainc-${c.id}`}
+          onClick={() => onMakeMainContact(c)}
+          className="px-3 py-1.5 text-xs font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100 disabled:opacity-50 shrink-0"
+        >
+          {busy === `mainc-${c.id}` ? "Saving…" : "Make main contact"}
+        </button>
+      )}
+    </>
+  );
+}
+
+function EditCamperPanel({
+  camper,
+  accommodations,
+  units,
+  shirtSizes,
+  busy,
+  warnRepricing,
+  onConfirm,
+  onCancel,
+}: {
+  camper: AdminCamper;
+  accommodations: AdminAccommodation[];
+  units: AdminAccommodationUnit[];
+  shirtSizes: ShirtSize[];
+  busy: boolean;
+  warnRepricing: boolean;
+  onConfirm: (data: EditCamperData) => void;
+  onCancel: () => void;
+}) {
+  const fullWeek = camper.attendance_type === "full_week";
+  const [firstName, setFirstName] = useState(camper.first_name);
+  const [lastName, setLastName] = useState(camper.last_name);
+  const [gender, setGender] = useState(camper.gender ?? "");
+  const [age, setAge] = useState(String(camper.age));
+  const [cellLeader, setCellLeader] = useState(camper.cell_leader_name ?? "");
+  const [isCellLeader, setIsCellLeader] = useState(!!camper.is_cell_leader);
+  const [shirtSize, setShirtSize] = useState(camper.shirt_size ?? "");
+  const [dietary, setDietary] = useState(camper.dietary_requirements ?? "");
+  const [firstChoice, setFirstChoice] = useState(
+    camper.accommodation_first_choice ?? "",
+  );
+  const [secondChoice, setSecondChoice] = useState(
+    camper.accommodation_second_choice ?? "",
+  );
+  const [allocated, setAllocated] = useState(
+    camper.allocated_accommodation_code ?? "",
+  );
+  const [unit, setUnit] = useState(camper.allocated_unit_code ?? "");
+
+  const ageNum = Number(age);
+  const tierUnits = units.filter((u) => u.accommodation_code === allocated);
+  const childAge = ageNum > 0 && ageNum <= MAX_CHILD_ACCOMMODATION_AGE;
+  const childBlocked =
+    (allocated === ACCOMMODATION_CHILD_CODE ||
+      firstChoice === ACCOMMODATION_CHILD_CODE ||
+      secondChoice === ACCOMMODATION_CHILD_CODE) &&
+    !childAge;
+
+  const secondRequired =
+    fullWeek &&
+    firstChoice !== ACCOMMODATION_CHILD_CODE &&
+    firstChoice !== ACCOMMODATION_TENT_CODE;
+
+  const canSubmit =
+    firstName.trim() !== "" &&
+    lastName.trim() !== "" &&
+    gender !== "" &&
+    ageNum > 0 &&
+    ageNum < 120 &&
+    cellLeader.trim() !== "" &&
+    !childBlocked &&
+    (!fullWeek ||
+      (shirtSize !== "" &&
+        firstChoice !== "" &&
+        (!secondRequired || secondChoice !== "") &&
+        secondChoice !== firstChoice));
+
+  return (
+    <div className="mt-2 w-full basis-full rounded-lg border border-neutral-300 bg-neutral-50 p-4 flex flex-col gap-4">
+      <p className="text-sm font-semibold text-neutral-900">
+        Edit {camper.first_name} {camper.last_name}
+      </p>
+      <p className="text-xs text-neutral-600">
+        To swap this person for someone else, type the new person&apos;s details
+        over the top. They keep this seat, its deposit and its accommodation.
+      </p>
+      {warnRepricing && (
+        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2">
+          This group has an open invoice. If your change alters what they owe —
+          a different accommodation, or an age that crosses {MIN_DEPOSIT_AGE} —
+          that invoice is cancelled and you will need to send a new one.
+        </p>
+      )}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-widest text-neutral-700">
+          First name <span className="text-primary">*</span>
+          <input
+            value={firstName}
+            onChange={(e) => setFirstName(e.target.value)}
+            className="px-3 py-2 bg-white border border-neutral-300 text-neutral-900 text-sm font-normal normal-case tracking-normal rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-widest text-neutral-700">
+          Last name <span className="text-primary">*</span>
+          <input
+            value={lastName}
+            onChange={(e) => setLastName(e.target.value)}
+            className="px-3 py-2 bg-white border border-neutral-300 text-neutral-900 text-sm font-normal normal-case tracking-normal rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-widest text-neutral-700">
+          Gender <span className="text-primary">*</span>
+          <select
+            value={gender}
+            onChange={(e) => setGender(e.target.value)}
+            className="px-3 py-2 bg-white border border-neutral-300 text-neutral-900 text-sm font-normal normal-case tracking-normal rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <option value="">— Choose —</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-widest text-neutral-700">
+          Age <span className="text-primary">*</span>
+          <input
+            type="number"
+            min={1}
+            max={119}
+            value={age}
+            onChange={(e) => setAge(e.target.value)}
+            className="px-3 py-2 bg-white border border-neutral-300 text-neutral-900 text-sm font-normal normal-case tracking-normal rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-widest text-neutral-700">
+          Cell leader <span className="text-primary">*</span>
+          <input
+            value={cellLeader}
+            onChange={(e) => setCellLeader(e.target.value)}
+            className="px-3 py-2 bg-white border border-neutral-300 text-neutral-900 text-sm font-normal normal-case tracking-normal rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        </label>
+        <label className="flex items-center gap-2 text-sm text-neutral-800 sm:mt-6">
+          <input
+            type="checkbox"
+            checked={isCellLeader}
+            onChange={(e) => setIsCellLeader(e.target.checked)}
+            className="text-primary focus:ring-primary"
+          />
+          They are a cell leader
+        </label>
+      </div>
+
+      {fullWeek && (
+        <>
+          <ShirtSizeSelect
+            id={`editc-${camper.id}-shirt`}
+            name={`editc-${camper.id}-shirt`}
+            value={shirtSize}
+            sizes={shirtSizes}
+            required
+            onChange={setShirtSize}
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-widest text-neutral-700">
+              1st choice <span className="text-primary">*</span>
+              <select
+                value={firstChoice}
+                onChange={(e) => setFirstChoice(e.target.value)}
+                className="px-3 py-2 bg-white border border-neutral-300 text-neutral-900 text-sm font-normal normal-case tracking-normal rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+              >
+                <option value="">— Choose —</option>
+                {accommodations.map((a) => (
+                  <option key={a.code} value={a.code}>
+                    {a.display_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-widest text-neutral-700">
+              2nd choice {secondRequired && <span className="text-primary">*</span>}
+              <select
+                value={secondChoice}
+                onChange={(e) => setSecondChoice(e.target.value)}
+                className="px-3 py-2 bg-white border border-neutral-300 text-neutral-900 text-sm font-normal normal-case tracking-normal rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+              >
+                <option value="">— None —</option>
+                {accommodations.map((a) => (
+                  <option key={a.code} value={a.code}>
+                    {a.display_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-widest text-neutral-700">
+              Allocated accommodation
+              <select
+                value={allocated}
+                onChange={(e) => {
+                  setAllocated(e.target.value);
+                  setUnit("");
+                }}
+                className="px-3 py-2 bg-white border border-neutral-300 text-neutral-900 text-sm font-normal normal-case tracking-normal rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+              >
+                <option value="">— Not allocated —</option>
+                {accommodations.map((a) => (
+                  <option key={a.code} value={a.code}>
+                    {a.display_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {tierUnits.length > 0 && (
+              <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-widest text-neutral-700">
+                Unit
+                <select
+                  value={unit}
+                  onChange={(e) => setUnit(e.target.value)}
+                  className="px-3 py-2 bg-white border border-neutral-300 text-neutral-900 text-sm font-normal normal-case tracking-normal rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  <option value="">— Unit (optional) —</option>
+                  {tierUnits.map((u) => (
+                    <option key={u.code} value={u.code}>
+                      {u.display_name} (sleeps {u.capacity})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+          <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-widest text-neutral-700">
+            Allergies / dietary requirements
+            <textarea
+              rows={2}
+              value={dietary}
+              onChange={(e) => setDietary(e.target.value)}
+              className="px-3 py-2 bg-white border border-neutral-300 text-neutral-900 text-sm font-normal normal-case tracking-normal rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-y"
+            />
+          </label>
+        </>
+      )}
+
+      {childBlocked && (
+        <p className="text-xs font-semibold text-red-700">
+          Child accommodation is only for campers aged{" "}
+          {MAX_CHILD_ACCOMMODATION_AGE} or under. Choose another accommodation
+          before saving this age.
+        </p>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={busy || !canSubmit}
+          onClick={() =>
+            onConfirm({
+              first_name: firstName.trim(),
+              last_name: lastName.trim(),
+              gender,
+              age: ageNum,
+              cell_leader_name: cellLeader.trim(),
+              is_cell_leader: isCellLeader,
+              shirt_size: shirtSize,
+              dietary_requirements: dietary,
+              accommodation_first_choice: firstChoice,
+              accommodation_second_choice: secondChoice,
+              allocated_accommodation_code: allocated,
+              allocated_unit_code: unit,
+            })
+          }
+          className="px-5 py-2.5 text-sm font-bold text-white bg-neutral-800 rounded-lg hover:bg-neutral-700 disabled:opacity-40"
+        >
+          {busy ? "Saving…" : "Save changes"}
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onCancel}
+          className="px-4 py-2.5 text-sm font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AddCamperPanel({
+  accommodations,
+  shirtSizes,
+  busy,
+  depositLabel,
+  onConfirm,
+  onCancel,
+}: {
+  accommodations: AdminAccommodation[];
+  shirtSizes: ShirtSize[];
+  busy: boolean;
+  depositLabel: string;
+  onConfirm: (data: NewCamperPayload) => void;
+  onCancel: () => void;
+}) {
+  const [type, setType] = useState<"full_week" | "day_pass">("full_week");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [gender, setGender] = useState("");
+  const [age, setAge] = useState("");
+  const [cellLeader, setCellLeader] = useState("");
+  const [isCellLeader, setIsCellLeader] = useState(false);
+  const [shirtSize, setShirtSize] = useState("");
+  const [dietary, setDietary] = useState("");
+  const [firstChoice, setFirstChoice] = useState("");
+  const [secondChoice, setSecondChoice] = useState("");
+  const [needsCoach, setNeedsCoach] = useState(false);
+  const [days, setDays] = useState<string[]>([]);
+  const [tshirtOption, setTshirtOption] = useState<
+    "" | "team_activities" | "tshirt_only" | "none"
+  >("");
+  const [needsCatering, setNeedsCatering] = useState<boolean | null>(null);
+
+  const ageNum = Number(age);
+  const childAge = ageNum > 0 && ageNum <= MAX_CHILD_ACCOMMODATION_AGE;
+  const childBlocked =
+    (firstChoice === ACCOMMODATION_CHILD_CODE ||
+      secondChoice === ACCOMMODATION_CHILD_CODE) &&
+    !childAge;
+  const secondRequired =
+    firstChoice !== ACCOMMODATION_CHILD_CODE &&
+    firstChoice !== ACCOMMODATION_TENT_CODE;
+
+  const commonOk =
+    firstName.trim() !== "" &&
+    lastName.trim() !== "" &&
+    gender !== "" &&
+    ageNum > 0 &&
+    ageNum < 120 &&
+    cellLeader.trim() !== "";
+
+  const canSubmit =
+    commonOk &&
+    (type === "full_week"
+      ? shirtSize !== "" &&
+        firstChoice !== "" &&
+        (!secondRequired || secondChoice !== "") &&
+        secondChoice !== firstChoice &&
+        !childBlocked
+      : days.length > 0 &&
+        tshirtOption !== "" &&
+        needsCatering !== null &&
+        (tshirtOption === "none" || shirtSize !== ""));
+
+  const chargesDeposit = type === "full_week" && ageNum >= MIN_DEPOSIT_AGE;
+
+  return (
+    <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 flex flex-col gap-4">
+      <p className="text-sm font-semibold text-emerald-900">
+        Add someone to this booking
+      </p>
+      <p className="text-xs text-emerald-900">
+        {chargesDeposit
+          ? `They will be charged their ${depositLabel} deposit on the balance invoice, alongside their accommodation, so they pay the same as everyone else.`
+          : "Fill in their details to add them to this family's booking."}
+      </p>
+      <div className="flex gap-4">
+        {(
+          [
+            { v: "full_week" as const, label: "Full week" },
+            { v: "day_pass" as const, label: "Day visitor" },
+          ] as const
+        ).map((opt) => (
+          <label
+            key={opt.v}
+            className="flex items-center gap-2 text-sm text-neutral-800"
+          >
+            <input
+              type="radio"
+              checked={type === opt.v}
+              onChange={() => setType(opt.v)}
+              className="text-primary focus:ring-primary"
+            />
+            {opt.label}
+          </label>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-widest text-neutral-700">
+          First name <span className="text-primary">*</span>
+          <input
+            value={firstName}
+            onChange={(e) => setFirstName(e.target.value)}
+            className="px-3 py-2 bg-white border border-neutral-300 text-neutral-900 text-sm font-normal normal-case tracking-normal rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-widest text-neutral-700">
+          Last name <span className="text-primary">*</span>
+          <input
+            value={lastName}
+            onChange={(e) => setLastName(e.target.value)}
+            className="px-3 py-2 bg-white border border-neutral-300 text-neutral-900 text-sm font-normal normal-case tracking-normal rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-widest text-neutral-700">
+          Gender <span className="text-primary">*</span>
+          <select
+            value={gender}
+            onChange={(e) => setGender(e.target.value)}
+            className="px-3 py-2 bg-white border border-neutral-300 text-neutral-900 text-sm font-normal normal-case tracking-normal rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <option value="">— Choose —</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-widest text-neutral-700">
+          Age <span className="text-primary">*</span>
+          <input
+            type="number"
+            min={1}
+            max={119}
+            value={age}
+            onChange={(e) => setAge(e.target.value)}
+            className="px-3 py-2 bg-white border border-neutral-300 text-neutral-900 text-sm font-normal normal-case tracking-normal rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-widest text-neutral-700">
+          Cell leader <span className="text-primary">*</span>
+          <input
+            value={cellLeader}
+            onChange={(e) => setCellLeader(e.target.value)}
+            className="px-3 py-2 bg-white border border-neutral-300 text-neutral-900 text-sm font-normal normal-case tracking-normal rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        </label>
+        <label className="flex items-center gap-2 text-sm text-neutral-800 sm:mt-6">
+          <input
+            type="checkbox"
+            checked={isCellLeader}
+            onChange={(e) => setIsCellLeader(e.target.checked)}
+            className="text-primary focus:ring-primary"
+          />
+          They are a cell leader
+        </label>
+      </div>
+
+      {type === "full_week" ? (
+        <>
+          <ShirtSizeSelect
+            id="addc-shirt"
+            name="addc-shirt"
+            value={shirtSize}
+            sizes={shirtSizes}
+            required
+            onChange={setShirtSize}
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-widest text-neutral-700">
+              1st choice <span className="text-primary">*</span>
+              <select
+                value={firstChoice}
+                onChange={(e) => setFirstChoice(e.target.value)}
+                className="px-3 py-2 bg-white border border-neutral-300 text-neutral-900 text-sm font-normal normal-case tracking-normal rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+              >
+                <option value="">— Choose —</option>
+                {accommodations.map((a) => (
+                  <option key={a.code} value={a.code}>
+                    {a.display_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-widest text-neutral-700">
+              2nd choice {secondRequired && <span className="text-primary">*</span>}
+              <select
+                value={secondChoice}
+                onChange={(e) => setSecondChoice(e.target.value)}
+                className="px-3 py-2 bg-white border border-neutral-300 text-neutral-900 text-sm font-normal normal-case tracking-normal rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+              >
+                <option value="">— None —</option>
+                {accommodations.map((a) => (
+                  <option key={a.code} value={a.code}>
+                    {a.display_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-neutral-800">
+            <input
+              type="checkbox"
+              checked={needsCoach}
+              onChange={(e) => setNeedsCoach(e.target.checked)}
+              className="text-primary focus:ring-primary"
+            />
+            They need a coach seat
+          </label>
+          <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-widest text-neutral-700">
+            Allergies / dietary requirements
+            <textarea
+              rows={2}
+              value={dietary}
+              onChange={(e) => setDietary(e.target.value)}
+              className="px-3 py-2 bg-white border border-neutral-300 text-neutral-900 text-sm font-normal normal-case tracking-normal rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-y"
+            />
+          </label>
+          {childBlocked && (
+            <p className="text-xs font-semibold text-red-700">
+              Child accommodation is only for campers aged{" "}
+              {MAX_CHILD_ACCOMMODATION_AGE} or under.
+            </p>
+          )}
+        </>
+      ) : (
+        <>
+          <div className="flex flex-col gap-2">
+            <span className="text-xs font-bold uppercase tracking-widest text-neutral-700">
+              Days attending <span className="text-primary">*</span>
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {DAY_PASS_DAYS.map((d) => {
+                const checked = days.includes(d.code);
+                return (
+                  <label
+                    key={d.code}
+                    className={`flex items-center gap-3 p-3 border cursor-pointer text-sm text-neutral-800 transition-colors ${
+                      checked
+                        ? "bg-primary/5 border-primary"
+                        : "bg-white border-neutral-300 hover:border-primary/60"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) =>
+                        setDays((prev) =>
+                          e.target.checked
+                            ? [...prev, d.code]
+                            : prev.filter((x) => x !== d.code),
+                        )
+                      }
+                      className="text-primary focus:ring-primary"
+                    />
+                    {d.label}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <span className="text-xs font-bold uppercase tracking-widest text-neutral-700">
+              T-shirt <span className="text-primary">*</span>
+            </span>
+            {(
+              [
+                {
+                  v: "team_activities" as const,
+                  label: "Participating in team activities (T-shirt required)",
+                },
+                {
+                  v: "tshirt_only" as const,
+                  label: "Purchasing an official camp T-shirt",
+                },
+                { v: "none" as const, label: "Not purchasing a T-shirt" },
+              ] as const
+            ).map((opt) => (
+              <label
+                key={opt.v}
+                className="flex items-start gap-3 text-sm text-neutral-800"
+              >
+                <input
+                  type="radio"
+                  checked={tshirtOption === opt.v}
+                  onChange={() => {
+                    setTshirtOption(opt.v);
+                    setShirtSize(
+                      opt.v === "none" ? SHIRT_SIZE_NOT_APPLICABLE : "",
+                    );
+                  }}
+                  className="text-primary focus:ring-primary mt-0.5"
+                />
+                <span>{opt.label}</span>
+              </label>
+            ))}
+          </div>
+          <ShirtSizeSelect
+            id="addc-dp-shirt"
+            name="addc-dp-shirt"
+            value={tshirtOption === "none" ? "" : shirtSize}
+            sizes={shirtSizes}
+            required={tshirtOption !== "none" && tshirtOption !== ""}
+            disabled={tshirtOption === "none"}
+            onChange={setShirtSize}
+          />
+          <div className="flex flex-col gap-2">
+            <span className="text-xs font-bold uppercase tracking-widest text-neutral-700">
+              Catering required? <span className="text-primary">*</span>
+            </span>
+            <div className="flex gap-4">
+              {(
+                [
+                  { v: true, label: "Yes" },
+                  { v: false, label: "No" },
+                ] as const
+              ).map((opt) => (
+                <label
+                  key={String(opt.v)}
+                  className="flex items-center gap-2 text-sm text-neutral-800"
+                >
+                  <input
+                    type="radio"
+                    checked={needsCatering === opt.v}
+                    onChange={() => setNeedsCatering(opt.v)}
+                    className="text-primary focus:ring-primary"
+                  />
+                  {opt.label}
+                </label>
+              ))}
+            </div>
+          </div>
+          <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-widest text-neutral-700">
+            Allergies / dietary requirements
+            <textarea
+              rows={2}
+              value={dietary}
+              onChange={(e) => setDietary(e.target.value)}
+              className="px-3 py-2 bg-white border border-neutral-300 text-neutral-900 text-sm font-normal normal-case tracking-normal rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-y"
+            />
+          </label>
+        </>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={busy || !canSubmit}
+          onClick={() => {
+            if (!canSubmit) return;
+            onConfirm({
+              first_name: firstName.trim(),
+              last_name: lastName.trim(),
+              gender,
+              age: ageNum,
+              cell_leader_name: cellLeader.trim(),
+              is_cell_leader: isCellLeader,
+              attendance:
+                type === "full_week"
+                  ? {
+                      type: "full_week",
+                      shirt_size: shirtSize,
+                      dietary_requirements: dietary,
+                      needs_coach: needsCoach,
+                      accommodation_first_choice: firstChoice,
+                      accommodation_second_choice: secondChoice,
+                    }
+                  : {
+                      type: "day_pass",
+                      days,
+                      tshirt_option: tshirtOption,
+                      shirt_size:
+                        tshirtOption === "none"
+                          ? SHIRT_SIZE_NOT_APPLICABLE
+                          : shirtSize,
+                      needs_catering: needsCatering ?? false,
+                      dietary_requirements: dietary,
+                    },
+            });
+          }}
+          className="px-5 py-2.5 text-sm font-bold text-white bg-emerald-700 rounded-lg hover:bg-emerald-800 disabled:opacity-40"
+        >
+          {busy ? "Adding…" : "Add to booking"}
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onCancel}
+          className="px-4 py-2.5 text-sm font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
 }
 
 type ConvertDayVisitorData = {
@@ -2428,6 +3325,11 @@ function GroupCard({
   onConvertToDayVisitor,
   onEditDayPass,
   onToggleCamperCoach,
+  onEditCamper,
+  onAddCamper,
+  onMakeMainContact,
+  onWaiveDeposit,
+  depositLabel,
   shirtSizes,
   onSendCoachInvoice,
   onWaiveCoachFee,
@@ -2468,6 +3370,11 @@ function GroupCard({
   onConvertToDayVisitor: (c: AdminCamper, data: ConvertDayVisitorData) => Promise<void>;
   onEditDayPass: (c: AdminCamper, data: EditDayPassData) => Promise<void>;
   onToggleCamperCoach: (c: AdminCamper) => void;
+  onEditCamper: (c: AdminCamper, data: EditCamperPayload) => Promise<boolean>;
+  onAddCamper: (data: NewCamperPayload) => Promise<boolean>;
+  onMakeMainContact: (c: AdminCamper) => void;
+  onWaiveDeposit: (c: AdminCamper) => void;
+  depositLabel: string;
   shirtSizes: ShirtSize[];
   onSendCoachInvoice: () => void;
   onWaiveCoachFee: () => void;
@@ -2484,6 +3391,8 @@ function GroupCard({
   const [contactOpen, setContactOpen] = useState(false);
   const [convertCamperId, setConvertCamperId] = useState<string | null>(null);
   const [editDayPassId, setEditDayPassId] = useState<string | null>(null);
+  const [editCamperId, setEditCamperId] = useState<string | null>(null);
+  const [addCamperOpen, setAddCamperOpen] = useState(false);
   const [cFirst, setCFirst] = useState(g.contact_first_name);
   const [cLast, setCLast] = useState(g.contact_last_name);
   const [cEmail, setCEmail] = useState(g.contact_email);
@@ -2769,6 +3678,17 @@ function GroupCard({
                           : "Convert to day visitor"}
                       </button>
                     )}
+                    <CamperAdminActions
+                      g={g}
+                      c={c}
+                      busy={busy}
+                      editOpen={editCamperId === c.id}
+                      onToggleEdit={() =>
+                        setEditCamperId((id) => (id === c.id ? null : c.id))
+                      }
+                      onMakeMainContact={onMakeMainContact}
+                      onWaiveDeposit={onWaiveDeposit}
+                    />
                     {convertCamperId === c.id && (
                       <ConvertDayVisitorPanel
                         camper={c}
@@ -2781,6 +3701,22 @@ function GroupCard({
                           );
                         }}
                         onCancel={() => setConvertCamperId(null)}
+                      />
+                    )}
+                    {editCamperId === c.id && (
+                      <EditCamperPanel
+                        camper={c}
+                        accommodations={accommodations}
+                        units={units}
+                        shirtSizes={shirtSizes}
+                        busy={busy === `editcamper-${c.id}`}
+                        warnRepricing={g.billing_status === "invoiced"}
+                        onConfirm={(data) => {
+                          void onEditCamper(c, data).then((ok) => {
+                            if (ok) setEditCamperId(null);
+                          });
+                        }}
+                        onCancel={() => setEditCamperId(null)}
                       />
                     )}
                   </div>
@@ -2903,6 +3839,17 @@ function GroupCard({
                             : "Convert to day visitor"}
                         </button>
                       )}
+                      <CamperAdminActions
+                        g={g}
+                        c={c}
+                        busy={busy}
+                        editOpen={editCamperId === c.id}
+                        onToggleEdit={() =>
+                          setEditCamperId((id) => (id === c.id ? null : c.id))
+                        }
+                        onMakeMainContact={onMakeMainContact}
+                        onWaiveDeposit={onWaiveDeposit}
+                      />
                     </div>
                     {convertCamperId === c.id && (
                       <ConvertDayVisitorPanel
@@ -2916,6 +3863,22 @@ function GroupCard({
                           );
                         }}
                         onCancel={() => setConvertCamperId(null)}
+                      />
+                    )}
+                    {editCamperId === c.id && (
+                      <EditCamperPanel
+                        camper={c}
+                        accommodations={accommodations}
+                        units={units}
+                        shirtSizes={shirtSizes}
+                        busy={busy === `editcamper-${c.id}`}
+                        warnRepricing={g.billing_status === "invoiced"}
+                        onConfirm={(data) => {
+                          void onEditCamper(c, data).then((ok) => {
+                            if (ok) setEditCamperId(null);
+                          });
+                        }}
+                        onCancel={() => setEditCamperId(null)}
                       />
                     )}
                   </div>
@@ -2968,6 +3931,19 @@ function GroupCard({
                               {busy === `rmcamper-${c.id}` ? "Removing…" : "Remove"}
                             </button>
                           )}
+                          <CamperAdminActions
+                            g={g}
+                            c={c}
+                            busy={busy}
+                            editOpen={editCamperId === c.id}
+                            onToggleEdit={() =>
+                              setEditCamperId((id) =>
+                                id === c.id ? null : c.id,
+                              )
+                            }
+                            onMakeMainContact={onMakeMainContact}
+                            onWaiveDeposit={onWaiveDeposit}
+                          />
                         </div>
                         {editDayPassId === c.id && (
                           <EditDayPassPanel
@@ -2980,6 +3956,22 @@ function GroupCard({
                               );
                             }}
                             onCancel={() => setEditDayPassId(null)}
+                          />
+                        )}
+                        {editCamperId === c.id && (
+                          <EditCamperPanel
+                            camper={c}
+                            accommodations={accommodations}
+                            units={units}
+                            shirtSizes={shirtSizes}
+                            busy={busy === `editcamper-${c.id}`}
+                            warnRepricing={g.billing_status === "invoiced"}
+                            onConfirm={(data) => {
+                              void onEditCamper(c, data).then((ok) => {
+                                if (ok) setEditCamperId(null);
+                              });
+                            }}
+                            onCancel={() => setEditCamperId(null)}
                           />
                         )}
                       </div>
@@ -3171,6 +4163,33 @@ function GroupCard({
                   : ""}
                 .
               </p>
+            )}
+          </div>
+        )}
+
+        {canAddCamper(g) && (
+          <div className="mt-4">
+            <button
+              type="button"
+              disabled={busy === `addcamper-${g.id}`}
+              onClick={() => setAddCamperOpen((v) => !v)}
+              className="px-4 py-2 text-sm font-semibold text-emerald-800 bg-white border border-emerald-300 rounded-lg hover:bg-emerald-50 disabled:opacity-50"
+            >
+              {addCamperOpen ? "Close" : "Add person"}
+            </button>
+            {addCamperOpen && (
+              <AddCamperPanel
+                accommodations={accommodations}
+                shirtSizes={shirtSizes}
+                busy={busy === `addcamper-${g.id}`}
+                depositLabel={depositLabel}
+                onConfirm={(data) => {
+                  void onAddCamper(data).then((ok) => {
+                    if (ok) setAddCamperOpen(false);
+                  });
+                }}
+                onCancel={() => setAddCamperOpen(false)}
+              />
             )}
           </div>
         )}

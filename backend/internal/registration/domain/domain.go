@@ -113,6 +113,7 @@ type Camper struct {
 	AllocatedUnitCode          *string    `json:"allocated_unit_code,omitempty"`
 	BilledStripePriceID        *string    `json:"billed_stripe_price_id,omitempty"`
 	DepositCreditPence         int        `json:"deposit_credit_pence"`
+	DepositOwedPence           int        `json:"deposit_owed_pence"`
 	CreatedAt                  time.Time  `json:"created_at"`
 }
 

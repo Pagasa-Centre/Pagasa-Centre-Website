@@ -129,7 +129,8 @@ func main() {
 		InvoiceDueDays:         cfg.InvoiceDueDays,
 		WhiteTeamEmail:         cfg.WhiteTeamEmail,
 	}
-	billSvc := billing.NewService(regRepo, billing.NewStripeBilling(), mailer, sheetSync, billCfg)
+	billSvc := billing.NewService(regRepo, billing.NewStripeBilling(), mailer, sheetSync, billCfg).
+		WithPriceLookup(campPriceAdapter{repo: campRepo})
 
 	adminAuth := middleware.AuthConfig{
 		Password:         cfg.AdminPassword,

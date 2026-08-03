@@ -21,6 +21,25 @@ type Mailer interface {
 	SendSponsorshipConfirmed(ctx context.Context, p SponsorshipConfirmed) error
 	SendAccommodationChanged(ctx context.Context, p AccommodationChangedNotice) error
 	SendCoachInvoice(ctx context.Context, p CoachInvoice) error
+	SendBookingUpdated(ctx context.Context, p BookingUpdated) error
+}
+
+// BookingUpdated tells a family that who is on their booking has changed —
+// someone replaced, or someone added. The roster is the point of the email: it
+// is what they need to check, and it is what goes wrong when a swap is handled
+// by message alone.
+type BookingUpdated struct {
+	ToEmail string
+	ToName  string
+	// Campers is the booking as it stands now, one line per person, e.g.
+	// "Priscilla Fundi — Tent".
+	Campers []string
+	// AddedName is set when this change added someone, and drives the note that
+	// a charge for them is on the way.
+	AddedName string
+	// InvoiceCancelled is set when the change voided a live invoice, so the
+	// family does not sit waiting on a payment link that no longer works.
+	InvoiceCancelled bool
 }
 
 // AccommodationChange describes one camper placed outside their 1st/2nd choice.

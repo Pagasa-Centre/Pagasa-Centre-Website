@@ -20,6 +20,7 @@ var csvHeader = []string{
 	"accommodation_first_choice", "accommodation_second_choice", "roommate_requests",
 	"allocated_accommodation_code", "billed_stripe_price_id",
 	"day_pass_days", "day_pass_tshirt_option", "day_pass_needs_catering",
+	"deposit_owed_pence",
 }
 
 // WriteCSV emits a flat CSV — one row per camper — combining group fields and
@@ -66,6 +67,7 @@ func WriteCSV(w io.Writer, groups []domain.Group, campersByGroup map[string][]do
 				strings.Join(c.DayPassDays, "|"),
 				deref(c.DayPassTshirtOption),
 				formatBoolPtr(c.DayPassNeedsCatering),
+				strconv.Itoa(c.DepositOwedPence),
 			}
 			if err := cw.Write(row); err != nil {
 				return err

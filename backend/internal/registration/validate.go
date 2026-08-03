@@ -41,30 +41,7 @@ func Validate(req domain.SubmitRequest) error {
 		if c.IsMainContact {
 			mainContactCount++
 		}
-		if strings.TrimSpace(c.FirstName) == "" {
-			fields[prefix+".first_name"] = "is required"
-		}
-		if strings.TrimSpace(c.LastName) == "" {
-			fields[prefix+".last_name"] = "is required"
-		}
-		if c.Gender != domain.GenderMale && c.Gender != domain.GenderFemale {
-			fields[prefix+".gender"] = "must be 'male' or 'female'"
-		}
-		if c.Age <= 0 || c.Age >= 120 {
-			fields[prefix+".age"] = "must be between 1 and 119"
-		}
-		if strings.TrimSpace(c.CellLeaderName) == "" {
-			fields[prefix+".cell_leader_name"] = "is required"
-		}
-
-		switch c.Attendance.Type {
-		case domain.AttendanceFullWeek:
-			validateFullWeek(prefix+".attendance", c.Attendance, c.Age, fields)
-		case domain.AttendanceDayPass:
-			ValidateDayPass(prefix+".attendance", c.Attendance, fields)
-		default:
-			fields[prefix+".attendance.type"] = "must be 'full_week' or 'day_pass'"
-		}
+		ValidateCamper(prefix, c, fields)
 	}
 
 	if len(req.Campers) > 0 && mainContactCount != 1 {
@@ -82,6 +59,50 @@ const maxRoommateRequestLen = 500
 const AccommodationChild = "child"
 const AccommodationTent = "tent"
 const MaxChildAccommodationAge = 12
+
+// ValidateCamper applies every rule that must hold for one camper, whoever is
+// creating them. The public form runs it per camper in a submission; admin edits
+// and admin-added campers run it on a single person, so both paths enforce the
+// same thing and cannot drift apart.
+func ValidateCamper(prefix string, c domain.CamperDTO, fields map[string]string) {
+	if strings.TrimSpace(c.FirstName) == "" {
+		fields[prefix+".first_name"] = "is required"
+	}
+	if strings.TrimSpace(c.LastName) == "" {
+		fields[prefix+".last_name"] = "is required"
+	}
+	if c.Gender != domain.GenderMale && c.Gender != domain.GenderFemale {
+		fields[prefix+".gender"] = "must be 'male' or 'female'"
+	}
+	if c.Age <= 0 || c.Age >= 120 {
+		fields[prefix+".age"] = "must be between 1 and 119"
+	}
+	if strings.TrimSpace(c.CellLeaderName) == "" {
+		fields[prefix+".cell_leader_name"] = "is required"
+	}
+
+	switch c.Attendance.Type {
+	case domain.AttendanceFullWeek:
+		validateFullWeek(prefix+".attendance", c.Attendance, c.Age, fields)
+	case domain.AttendanceDayPass:
+		ValidateDayPass(prefix+".attendance", c.Attendance, fields)
+	default:
+		fields[prefix+".attendance.type"] = "must be 'full_week' or 'day_pass'"
+	}
+}
+
+// ValidateAllocatedAccommodation applies the child-accommodation age limit to a
+// camper's actual placement, not just the preference they picked at signup.
+// Registration only ever sees preferences, so this rule has no reason to exist
+// there — but an admin can age a camper past the limit while they sit in a child
+// room, which is exactly how a teenager ends up in "sharing with parent".
+func ValidateAllocatedAccommodation(prefix, code string, age int, fields map[string]string) {
+	if strings.TrimSpace(code) == AccommodationChild && age > MaxChildAccommodationAge {
+		fields[prefix] = fmt.Sprintf(
+			"child accommodation is only available for campers aged %d or under; "+
+				"move them to another accommodation first", MaxChildAccommodationAge)
+	}
+}
 
 func validateFullWeek(prefix string, a domain.AttendanceDTO, age int, fields map[string]string) {
 	first := strings.TrimSpace(a.AccommodationFirstChoice)

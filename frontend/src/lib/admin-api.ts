@@ -108,9 +108,65 @@ export type AdminCamper = {
   shirt_size?: string | null;
   dietary_requirements?: string | null;
   deposit_credit_pence?: number;
+  deposit_owed_pence?: number;
+  cell_leader_name?: string;
+  is_cell_leader?: boolean;
+  gender?: string;
   allocated_accommodation_code?: string | null;
   allocated_unit_code?: string | null;
   billed_stripe_price_id?: string | null;
+};
+
+// EditCamperPayload replaces a camper's details wholesale — every field is sent
+// every time, matching what the endpoint expects.
+export type EditCamperPayload = {
+  first_name: string;
+  last_name: string;
+  gender: string;
+  age: number;
+  cell_leader_name: string;
+  is_cell_leader: boolean;
+  shirt_size: string;
+  dietary_requirements: string;
+  accommodation_first_choice: string;
+  accommodation_second_choice: string;
+  allocated_accommodation_code: string;
+  allocated_unit_code: string;
+};
+
+export type NewCamperPayload = {
+  first_name: string;
+  last_name: string;
+  gender: string;
+  age: number;
+  cell_leader_name: string;
+  is_cell_leader: boolean;
+  attendance: {
+    type: "full_week" | "day_pass";
+    shirt_size?: string;
+    dietary_requirements?: string;
+    needs_coach?: boolean;
+    accommodation_first_choice?: string;
+    accommodation_second_choice?: string;
+    days?: string[];
+    tshirt_option?: string;
+    needs_catering?: boolean;
+  };
+};
+
+export type EditCamperResult = {
+  camper_name: string;
+  previous_name: string;
+  invoice_voided: boolean;
+  repriced: boolean;
+};
+
+export type AddCamperResult = {
+  camper_id: string;
+  camper_name: string;
+  deposit_owed_pence: number;
+  invoice_voided: boolean;
+  needs_allocation: boolean;
 };
 
 export type AdminGroup = {
@@ -428,6 +484,56 @@ export const adminApi = {
           expected_version: expectedVersion,
           needs_coach: needsCoach,
         }),
+      },
+    ),
+
+  editCamper: (
+    groupId: string,
+    camperId: string,
+    data: EditCamperPayload,
+    expectedVersion: number,
+  ) =>
+    adminFetch<EditCamperResult>(
+      `/admin/registrations/${groupId}/campers/${camperId}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ expected_version: expectedVersion, ...data }),
+      },
+    ),
+
+  addCamper: (
+    groupId: string,
+    camper: NewCamperPayload,
+    expectedVersion: number,
+  ) =>
+    adminFetch<AddCamperResult>(`/admin/registrations/${groupId}/campers`, {
+      method: "POST",
+      body: JSON.stringify({ expected_version: expectedVersion, camper }),
+    }),
+
+  makeMainContact: (
+    groupId: string,
+    camperId: string,
+    expectedVersion: number,
+  ) =>
+    adminFetch<void>(
+      `/admin/registrations/${groupId}/campers/${camperId}/make-main-contact`,
+      {
+        method: "POST",
+        body: JSON.stringify({ expected_version: expectedVersion }),
+      },
+    ),
+
+  waiveCamperDeposit: (
+    groupId: string,
+    camperId: string,
+    expectedVersion: number,
+  ) =>
+    adminFetch<void>(
+      `/admin/registrations/${groupId}/campers/${camperId}/waive-deposit`,
+      {
+        method: "POST",
+        body: JSON.stringify({ expected_version: expectedVersion }),
       },
     ),
 

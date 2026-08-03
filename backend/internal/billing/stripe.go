@@ -42,12 +42,22 @@ func (s *StripeBilling) EnsureCustomer(ctx context.Context, existingID, email, n
 	return c.ID, nil
 }
 
-// InvoiceLine is one billed item: a Stripe Price and how many units of it.
-// Quantity < 1 is treated as 1.
+// InvoiceLine is one line on an invoice, billed either from a catalogued Stripe
+// Price or as an ad-hoc amount. Ad-hoc lines exist for charges that have no
+// standing Price of their own — a deposit owed by someone who joined after the
+// group's deposit checkout was already paid. Quantity < 1 is treated as 1.
 type InvoiceLine struct {
 	PriceID  string
 	Quantity int64
+
+	// AmountPence and Description drive an ad-hoc line, used only when PriceID
+	// is empty. Currency defaults to GBP when blank.
+	AmountPence int64
+	Description string
+	Currency    string
 }
+
+func (l InvoiceLine) isAdHoc() bool { return l.PriceID == "" && l.AmountPence > 0 }
 
 // InvoiceResult is the outcome of creating/looking up a balance invoice.
 type InvoiceResult struct {
@@ -96,7 +106,7 @@ func (s *StripeBilling) CreateInvoice(
 	}
 
 	for _, line := range lines {
-		if line.PriceID == "" {
+		if line.PriceID == "" && !line.isAdHoc() {
 			continue
 		}
 		qty := line.Quantity
@@ -105,15 +115,29 @@ func (s *StripeBilling) CreateInvoice(
 		}
 		itemParams := &stripe.InvoiceItemParams{
 			Customer: stripe.String(customerID),
-			Pricing: &stripe.InvoiceItemPricingParams{
-				Price: stripe.String(line.PriceID),
-			},
-			Quantity: stripe.Int64(qty),
 			Invoice:  stripe.String(inv.ID),
+		}
+		if line.isAdHoc() {
+			currency := line.Currency
+			if currency == "" {
+				currency = string(stripe.CurrencyGBP)
+			}
+			// Amount is the line total, and Stripe rejects it alongside a
+			// quantity, so the quantity is folded into the amount instead.
+			itemParams.Amount = stripe.Int64(line.AmountPence * qty)
+			itemParams.Currency = stripe.String(strings.ToLower(currency))
+			itemParams.Description = stripe.String(line.Description)
+		} else {
+			itemParams.Quantity = stripe.Int64(qty)
+			itemParams.Pricing = &stripe.InvoiceItemPricingParams{
+				Price: stripe.String(line.PriceID),
+			}
 		}
 		itemParams.Context = ctx
 		if _, err := invoiceitem.New(itemParams); err != nil {
-			return InvoiceResult{}, fmt.Errorf("create invoice item for price %s: %w", line.PriceID, err)
+			return InvoiceResult{}, fmt.Errorf(
+				"create invoice item (price %q, description %q): %w",
+				line.PriceID, line.Description, err)
 		}
 	}
 

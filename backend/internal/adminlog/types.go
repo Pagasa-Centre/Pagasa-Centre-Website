@@ -36,14 +36,22 @@ const (
 	ActionFreeCodeRevoked     = "free_code_revoked"
 	ActionFreeConfirmed       = "free_confirmed"
 	ActionRegistrationDeleted = "registration_deleted"
-	ActionCamperRemoved         = "camper_removed"
-	ActionCamperConverted       = "camper_converted"
-	ActionCamperUpdated         = "camper_updated"
-	ActionCamperCoachUpdated    = "camper_coach_updated"
-	ActionCoachInvoiceSent      = "coach_invoice_sent"
-	ActionCoachFeeWaived        = "coach_fee_waived"
-	ActionCoachFeeUnwaived      = "coach_fee_unwaived"
-	ActionSheetResynced         = "sheet_resynced"
+	ActionCamperRemoved       = "camper_removed"
+	ActionCamperConverted     = "camper_converted"
+	ActionCamperUpdated       = "camper_updated"
+	ActionCamperCoachUpdated  = "camper_coach_updated"
+	// ActionCamperUpdated above belongs to the day-pass editor. General camper
+	// edits get their own action so the audit trail can tell "we changed their
+	// t-shirt" apart from "we swapped who is going".
+	ActionCamperEdited        = "camper_edited"
+	ActionCamperAdded         = "camper_added"
+	ActionMainContactMoved    = "main_contact_moved"
+	ActionCamperDepositWaived = "camper_deposit_waived"
+
+	ActionCoachInvoiceSent = "coach_invoice_sent"
+	ActionCoachFeeWaived   = "coach_fee_waived"
+	ActionCoachFeeUnwaived = "coach_fee_unwaived"
+	ActionSheetResynced    = "sheet_resynced"
 
 	ActionPaymentModeToggle         = "payment_mode_toggle"
 	ActionAccommodationAvailability = "accommodation_availability"

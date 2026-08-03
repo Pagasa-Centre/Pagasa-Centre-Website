@@ -20,9 +20,15 @@ import (
 // recordingMailer captures family-facing confirmation sends for assertions.
 type recordingMailer struct {
 	email.NoopMailer
-	sponsorships []email.SponsorshipConfirmed
-	balancePaid  []email.BalancePaidConfirmation
-	accomChanged []email.AccommodationChangedNotice
+	sponsorships   []email.SponsorshipConfirmed
+	balancePaid    []email.BalancePaidConfirmation
+	accomChanged   []email.AccommodationChangedNotice
+	bookingUpdated []email.BookingUpdated
+}
+
+func (m *recordingMailer) SendBookingUpdated(_ context.Context, p email.BookingUpdated) error {
+	m.bookingUpdated = append(m.bookingUpdated, p)
+	return nil
 }
 
 func (m *recordingMailer) SendSponsorshipConfirmed(_ context.Context, p email.SponsorshipConfirmed) error {

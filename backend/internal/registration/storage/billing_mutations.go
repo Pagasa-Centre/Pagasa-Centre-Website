@@ -376,7 +376,8 @@ func (r *Repository) ConvertCamperToDayPassMeta(
 			allocated_accommodation_code = NULL,
 			allocated_unit_code = NULL,
 			billed_stripe_price_id = NULL,
-			deposit_credit_pence = $8
+			deposit_credit_pence = $8,
+			deposit_owed_pence = 0
 		WHERE id = $1 AND group_id = $2`,
 		camperID, groupID, dp.Days, dp.TshirtOption, dp.NeedsCatering, dp.ShirtSize, dp.Dietary, depositCreditPence)
 	if err != nil {
@@ -519,10 +520,37 @@ func (r *Repository) DeleteGroupMeta(ctx context.Context, groupID string, meta d
 	return tx.Commit(ctx)
 }
 
-// MarkBalancePaidMeta sets balance_paid with attribution (Stripe webhook).
+// MarkBalancePaidMeta sets balance_paid with attribution. Both settlement routes
+// land here — the Stripe webhook when the family pays their invoice, and the
+// manual bank-transfer button — so any deposit owed by a late arrival is cleared
+// in the same transaction. Leaving it behind would let a settled deposit reappear
+// on a later invoice.
 func (r *Repository) MarkBalancePaidMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if meta.EnforceVersion() {
+		g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+		if err != nil {
+			return err
+		}
+		if err := checkVersion(g, meta); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE registrations SET deposit_owed_pence = 0
+		  WHERE group_id = $1 AND deposit_owed_pence > 0`, groupID); err != nil {
+		return fmt.Errorf("clear outstanding deposits: %w", err)
+	}
 	extra := `, billing_status = 'balance_paid', balance_paid_at = $3`
-	return r.stampGroupPool(ctx, groupID, meta, extra, time.Now().UTC())
+	if err := stampExec(ctx, tx, groupID, meta, extra, time.Now().UTC()); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // ExtendInvoiceDueAtMeta updates due date with optional version check.

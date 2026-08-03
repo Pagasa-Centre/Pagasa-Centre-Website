@@ -352,6 +352,107 @@ func patchCamperCoach(svc *billing.Service, rec *adminlog.Recorder) http.Handler
 	}
 }
 
+func patchCamper(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body billing.EditCamperRequest
+		if err := request.Decode(r, &body); err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		groupID := chi.URLParam(r, "groupID")
+		camperID := chi.URLParam(r, "camperID")
+		actor := admin.ActorFrom(r.Context())
+		sum, err := svc.EditCamper(
+			r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion), body)
+		if err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		gid := groupID
+		summary := "Edited " + sum.PreviousName
+		if sum.CamperName != sum.PreviousName {
+			summary = "Replaced " + sum.PreviousName + " with " + sum.CamperName
+		}
+		if sum.InvoiceVoided {
+			summary += "; voided open invoice"
+		}
+		admin.Audit(rec, r, adminlog.ActionCamperEdited, &gid, summary, sum)
+		render.Json(w, http.StatusOK, sum)
+	}
+}
+
+func postAddCamper(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body billing.AddCamperRequest
+		if err := request.Decode(r, &body); err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		groupID := chi.URLParam(r, "groupID")
+		actor := admin.ActorFrom(r.Context())
+		sum, err := svc.AddCamper(
+			r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion), body)
+		if err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		gid := groupID
+		summary := "Added " + sum.CamperName + " to the booking"
+		if sum.DepositOwedPence > 0 {
+			summary += fmt.Sprintf("; owes a %s deposit", formatPence(sum.DepositOwedPence))
+		}
+		if sum.InvoiceVoided {
+			summary += "; voided open invoice"
+		}
+		admin.Audit(rec, r, adminlog.ActionCamperAdded, &gid, summary, sum)
+		render.Json(w, http.StatusCreated, sum)
+	}
+}
+
+func postMakeMainContact(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body billing.VersionedBody
+		_ = request.Decode(r, &body)
+		groupID := chi.URLParam(r, "groupID")
+		camperID := chi.URLParam(r, "camperID")
+		actor := admin.ActorFrom(r.Context())
+		name, err := svc.MakeMainContact(
+			r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion))
+		if err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		gid := groupID
+		admin.Audit(rec, r, adminlog.ActionMainContactMoved, &gid,
+			"Made "+name+" the main contact", nil)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func postWaiveCamperDeposit(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body billing.VersionedBody
+		_ = request.Decode(r, &body)
+		groupID := chi.URLParam(r, "groupID")
+		camperID := chi.URLParam(r, "camperID")
+		actor := admin.ActorFrom(r.Context())
+		name, err := svc.WaiveCamperDeposit(
+			r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion))
+		if err != nil {
+			commonerrors.WriteError(w, err)
+			return
+		}
+		gid := groupID
+		admin.Audit(rec, r, adminlog.ActionCamperDepositWaived, &gid,
+			"Waived the outstanding deposit for "+name, nil)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func formatPence(pence int) string {
+	return fmt.Sprintf("£%d.%02d", pence/100, pence%100)
+}
+
 func deleteRegistration(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody

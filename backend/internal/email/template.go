@@ -405,6 +405,60 @@ func renderSponsorshipConfirmed(p SponsorshipConfirmed) (subject, htmlBody strin
 	return subject, htmlBody, nil
 }
 
+func renderBookingUpdated(p BookingUpdated) (subject, htmlBody string, err error) {
+	subject = "Your PC Summer Camp 2026 booking has been updated"
+	name := p.ToName
+	if name == "" {
+		name = "there"
+	}
+	items := ""
+	for _, it := range p.Campers {
+		items += "<li>" + template.HTMLEscapeString(it) + "</li>"
+	}
+	rosterBlock := ""
+	if items != "" {
+		rosterBlock = `<p style="margin:16px 0 4px;"><strong>Who is on your booking now:</strong></p><ul style="margin:0 0 16px;">` + items + "</ul>"
+	}
+
+	intro := "The White Team has updated who is on your <strong>PC Summer Camp 2026</strong> booking."
+	if p.AddedName != "" {
+		intro = fmt.Sprintf(
+			"<strong>%s</strong> has been added to your <strong>PC Summer Camp 2026</strong> booking.",
+			template.HTMLEscapeString(p.AddedName))
+	}
+
+	chargeBlock := ""
+	if p.AddedName != "" {
+		chargeBlock = `<p>Their place and deposit will be added to your balance invoice, so the amount you owe will go up accordingly.</p>`
+	}
+
+	invoiceBlock := ""
+	if p.InvoiceCancelled {
+		invoiceBlock = `<p style="margin:16px 0; padding:12px 16px; background:#fff7ed; border-left:4px solid #f59e0b;">` +
+			`Because this changed what you owe, your previous invoice has been cancelled — please don't try to pay it. ` +
+			`A replacement invoice with the correct amount is on its way.</p>`
+	}
+
+	htmlBody = fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en"><body style="font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; color:#1a1a1a; line-height:1.55; max-width:600px; margin:0 auto; padding:24px;">
+  <h1 style="font-size:22px; margin:0 0 16px;">Your booking has been updated</h1>
+  <p>Hi %s,</p>
+  <p>%s</p>
+  %s
+  %s
+  %s
+  <p>Please check the list above is right. If anything looks wrong, reply to this email or speak to your cell leader.</p>
+  <p style="margin-top:32px;">God bless,<br>The PC Summer Camp 2026 team</p>
+</body></html>`,
+		template.HTMLEscapeString(name),
+		intro,
+		rosterBlock,
+		chargeBlock,
+		invoiceBlock,
+	)
+	return subject, htmlBody, nil
+}
+
 func renderWhiteTeamNotification(p WhiteTeamNotification) (subject, htmlBody string, err error) {
 	subject = p.Subject
 	body := template.HTMLEscapeString(p.Body)
