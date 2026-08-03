@@ -233,11 +233,18 @@ func (s *StripeBilling) VoidInvoiceIdempotent(ctx context.Context, invoiceID str
 	return s.VoidInvoice(ctx, invoiceID)
 }
 
-// RefundPaymentIntent refunds a captured PaymentIntent. Returns the refunded
-// amount in pence. Treats charge_already_refunded as success so a delete retry
-// after a partial failure can still complete.
-func (s *StripeBilling) RefundPaymentIntent(ctx context.Context, paymentIntentID string) (int64, error) {
+// refundPaymentIntent refunds a captured PaymentIntent, in part or in full: an
+// amountPence of 0 means refund everything, which lets Stripe decide the total
+// rather than us restating it. Returns the refunded amount in pence. Treats
+// charge_already_refunded as success so a delete retry after a partial failure
+// can still complete.
+func (s *StripeBilling) refundPaymentIntent(
+	ctx context.Context, paymentIntentID string, amountPence int64,
+) (int64, error) {
 	params := &stripe.RefundParams{PaymentIntent: stripe.String(paymentIntentID)}
+	if amountPence > 0 {
+		params.Amount = stripe.Int64(amountPence)
+	}
 	params.Context = ctx
 	rf, err := refund.New(params)
 	if err != nil {
@@ -250,18 +257,39 @@ func (s *StripeBilling) RefundPaymentIntent(ctx context.Context, paymentIntentID
 	return rf.Amount, nil
 }
 
-// RefundInvoice refunds the payment associated with a paid balance invoice.
+// RefundInvoiceKeeping refunds the payment behind a paid invoice, less keepPence
+// which stays with the church because it is non-refundable deposit that was
+// billed on this invoice. A keepPence of 0 refunds the payment in full.
+//
+// Returns 0 without refunding anything when there is nothing to give back: the
+// invoice has no Stripe payment behind it, which is the case for a balance
+// settled by bank transfer, or the amount kept covers the whole payment.
+//
 // v85 invoices expose payments via InvoicePayment objects, not a top-level
-// PaymentIntent field.
-func (s *StripeBilling) RefundInvoice(ctx context.Context, invoiceID string) (int64, error) {
+// PaymentIntent field, and it is that object which reports what was actually
+// paid towards this invoice.
+func (s *StripeBilling) RefundInvoiceKeeping(
+	ctx context.Context, invoiceID string, keepPence int64,
+) (int64, error) {
 	listParams := &stripe.InvoicePaymentListParams{Invoice: stripe.String(invoiceID)}
 	listParams.Context = ctx
 	it := invoicepayment.List(listParams)
 	for it.Next() {
 		ip := it.InvoicePayment()
-		if ip.Payment != nil && ip.Payment.PaymentIntent != nil {
-			return s.RefundPaymentIntent(ctx, ip.Payment.PaymentIntent.ID)
+		if ip.Payment == nil || ip.Payment.PaymentIntent == nil {
+			continue
 		}
+		if keepPence <= 0 {
+			return s.refundPaymentIntent(ctx, ip.Payment.PaymentIntent.ID, 0)
+		}
+		// A deposit that swallows the whole payment leaves nothing to give back.
+		// That is a real outcome — a balance made up only of late arrivals'
+		// deposits — and asking Stripe for a zero or negative refund is an error.
+		refundable := ip.AmountPaid - keepPence
+		if refundable <= 0 {
+			return 0, nil
+		}
+		return s.refundPaymentIntent(ctx, ip.Payment.PaymentIntent.ID, refundable)
 	}
 	if err := it.Err(); err != nil {
 		return 0, fmt.Errorf("list invoice payments %s: %w", invoiceID, err)

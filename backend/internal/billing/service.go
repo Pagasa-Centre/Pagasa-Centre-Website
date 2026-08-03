@@ -23,8 +23,7 @@ type stripeClient interface {
 	VoidInvoiceIdempotent(ctx context.Context, invoiceID string) error
 	SendInvoiceEmail(ctx context.Context, invoiceID string) error
 	GetInvoice(ctx context.Context, invoiceID string) (InvoiceResult, error)
-	RefundPaymentIntent(ctx context.Context, paymentIntentID string) (int64, error)
-	RefundInvoice(ctx context.Context, invoiceID string) (int64, error)
+	RefundInvoiceKeeping(ctx context.Context, invoiceID string, keepPence int64) (int64, error)
 	CreditCustomerBalance(ctx context.Context, customerID string, amountPence int64, currency, description, idempotencyKey string) error
 }
 
@@ -1422,18 +1421,27 @@ func (s *Service) ResyncAllSheets(ctx context.Context, actor string) (int, map[s
 }
 
 // DeleteSummary captures Stripe cleanup performed when a registration is deleted.
+//
+// RetainedPence and AmountPence never overlap: the first is deposit money the
+// church keeps, the second is money handed back. Together they account for what
+// the family paid, which is what makes the audit line answerable later.
 type DeleteSummary struct {
 	ContactName     string
 	ContactEmail    string
-	DepositRefunded bool
 	BalanceRefunded bool
 	InvoiceVoided   bool
 	AmountPence     int64
+	RetainedPence   int64
 }
 
-// DeleteRegistration refunds/voids Stripe state, permanently removes the group
-// row, and best-effort cleans up the Google Sheet. Aborts before delete if any
-// non-idempotent Stripe step fails.
+// DeleteRegistration keeps the family's deposit, refunds and voids the rest of
+// their Stripe state, permanently removes the group row, and best-effort cleans
+// up the Google Sheet. Aborts before delete if any non-idempotent Stripe step
+// fails, so a failed refund never leaves a half-deleted registration.
+//
+// The deposit is non-refundable, which is what families are told when they pay,
+// so nothing here refunds it. Anyone who genuinely needs to return one does it in
+// Stripe deliberately.
 func (s *Service) DeleteRegistration(ctx context.Context, groupID, actor string, expectedVersion int) (DeleteSummary, error) {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
@@ -1443,30 +1451,48 @@ func (s *Service) DeleteRegistration(ctx context.Context, groupID, actor string,
 		return DeleteSummary{}, commonerrors.NotFound("group not found")
 	}
 
+	// A registration paid for in full at signup put the deposit and everything
+	// else on one charge, and the deposit portion is stored nowhere, so there is
+	// no way to refund the rest without either guessing or refunding money the
+	// church is entitled to keep. Hand that decision to a human in Stripe.
+	if g.PaidInFullAtRegistration && g.PaymentStatus == domain.PaymentPaid {
+		return DeleteSummary{}, commonerrors.BadRequest(
+			"this family paid for everything in one payment, so the deposit cannot be "+
+				"separated from the rest automatically. Refund what they are owed in "+
+				"Stripe first, then delete the registration.", nil)
+	}
+
 	summary := DeleteSummary{
 		ContactName:  strings.TrimSpace(g.ContactFirstName + " " + g.ContactLastName),
 		ContactEmail: g.ContactEmail,
 	}
 
+	// Deposit money arrives by two routes: the group's checkout at registration,
+	// and a line on the balance invoice for anyone added after that checkout
+	// settled. Both are kept, so both count towards what was retained, and the
+	// invoiced part has to come off the balance refund below.
+	campers, err := s.repo.CampersForGroup(ctx, groupID)
+	if err != nil {
+		return DeleteSummary{}, commonerrors.Internal(err.Error())
+	}
+	var depositOnInvoice int64
+	for _, c := range campers {
+		depositOnInvoice += int64(c.DepositPaidPence)
+	}
+	if g.PaymentStatus == domain.PaymentPaid {
+		summary.RetainedPence = int64(g.TotalAmountPence)
+	}
+	summary.RetainedPence += depositOnInvoice
+
 	var refundTotal int64
 
-	if g.PaymentStatus == domain.PaymentPaid && g.StripePaymentIntentID != nil && *g.StripePaymentIntentID != "" {
-		amt, err := s.stripe.RefundPaymentIntent(ctx, *g.StripePaymentIntentID)
-		if err != nil {
-			return DeleteSummary{}, commonerrors.BadRequest(
-				fmt.Sprintf("deposit refund failed; registration was not deleted: %v", err), nil)
-		}
-		summary.DepositRefunded = true
-		refundTotal += amt
-	}
-
 	if g.BillingStatus == domain.BillingBalancePaid && g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" {
-		amt, err := s.stripe.RefundInvoice(ctx, *g.StripeInvoiceID)
+		amt, err := s.stripe.RefundInvoiceKeeping(ctx, *g.StripeInvoiceID, depositOnInvoice)
 		if err != nil {
 			return DeleteSummary{}, commonerrors.BadRequest(
 				fmt.Sprintf("balance refund failed; registration was not deleted: %v", err), nil)
 		}
-		summary.BalanceRefunded = true
+		summary.BalanceRefunded = amt > 0
 		refundTotal += amt
 	}
 

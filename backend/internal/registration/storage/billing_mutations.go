@@ -522,9 +522,15 @@ func (r *Repository) DeleteGroupMeta(ctx context.Context, groupID string, meta d
 
 // MarkBalancePaidMeta sets balance_paid with attribution. Both settlement routes
 // land here — the Stripe webhook when the family pays their invoice, and the
-// manual bank-transfer button — so any deposit owed by a late arrival is cleared
-// in the same transaction. Leaving it behind would let a settled deposit reappear
-// on a later invoice.
+// manual bank-transfer button — so any deposit owed by a late arrival is settled
+// in the same transaction: it moves out of what they owe and into what they have
+// paid. Clearing what is owed keeps a settled deposit off any later invoice;
+// recording what was paid is what lets a delete keep that deposit rather than
+// hand it back inside the balance refund.
+//
+// This is the only place a deposit becomes paid. Waiving a deposit and converting
+// a camper to a day visitor also zero what is owed, but no money arrives, so
+// neither may write the paid column.
 func (r *Repository) MarkBalancePaidMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -542,9 +548,11 @@ func (r *Repository) MarkBalancePaidMeta(ctx context.Context, groupID string, me
 		}
 	}
 	if _, err := tx.Exec(ctx,
-		`UPDATE registrations SET deposit_owed_pence = 0
+		`UPDATE registrations
+		    SET deposit_paid_pence = deposit_paid_pence + deposit_owed_pence,
+		        deposit_owed_pence = 0
 		  WHERE group_id = $1 AND deposit_owed_pence > 0`, groupID); err != nil {
-		return fmt.Errorf("clear outstanding deposits: %w", err)
+		return fmt.Errorf("settle outstanding deposits: %w", err)
 	}
 	extra := `, billing_status = 'balance_paid', balance_paid_at = $3`
 	if err := stampExec(ctx, tx, groupID, meta, extra, time.Now().UTC()); err != nil {

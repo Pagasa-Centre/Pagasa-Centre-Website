@@ -114,7 +114,11 @@ type Camper struct {
 	BilledStripePriceID        *string    `json:"billed_stripe_price_id,omitempty"`
 	DepositCreditPence         int        `json:"deposit_credit_pence"`
 	DepositOwedPence           int        `json:"deposit_owed_pence"`
-	CreatedAt                  time.Time  `json:"created_at"`
+	// DepositPaidPence is deposit money this camper actually paid on a balance
+	// invoice, as opposed to at the group's deposit checkout. Kept rather than
+	// refunded when the registration is deleted.
+	DepositPaidPence int       `json:"deposit_paid_pence"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 // ListFilter narrows admin listings.

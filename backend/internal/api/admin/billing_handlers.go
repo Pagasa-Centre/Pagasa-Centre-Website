@@ -470,10 +470,18 @@ func deleteRegistration(svc *billing.Service, rec *adminlog.Recorder) http.Handl
 	}
 }
 
+// formatDeleteAuditSummary writes the one line that outlives a deleted
+// registration. Deleting is a hard delete, so once the row is gone this is the
+// only record inside the app of money the church kept — which is why the kept and
+// refunded figures are stated separately and never rolled into one total.
 func formatDeleteAuditSummary(sum billing.DeleteSummary) string {
 	text := "Deleted registration for " + sum.ContactName + " (" + sum.ContactEmail + ")"
+	if sum.RetainedPence > 0 {
+		text += fmt.Sprintf("; kept the %s non-refundable deposit",
+			formatPence(int(sum.RetainedPence)))
+	}
 	if sum.AmountPence > 0 {
-		text += fmt.Sprintf("; refunded £%d.%02d", sum.AmountPence/100, sum.AmountPence%100)
+		text += fmt.Sprintf("; refunded %s", formatPence(int(sum.AmountPence)))
 	}
 	if sum.InvoiceVoided {
 		text += "; voided open invoice"

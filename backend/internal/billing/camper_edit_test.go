@@ -1131,26 +1131,120 @@ func TestSendInvoice_billsOutstandingDeposit(t *testing.T) {
 	}
 }
 
-func TestMarkBalancePaid_clearsOutstandingDeposits(t *testing.T) {
+// Settling a balance is the one place a deposit becomes paid: what the camper
+// owed moves into what they have paid. Clearing the owed figure keeps the deposit
+// off any later invoice; recording the paid figure is what lets a later delete
+// keep that money instead of refunding it.
+func TestMarkBalancePaid_settlesOutstandingDeposits(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
 	repo := storage.NewRepository(pool)
-	svc := NewService(repo, &stubStripe{}, &recordingMailer{}, nil, Config{})
 
-	groupID, _, otherID := insertEditableGroup(ctx, t, pool, domain.BillingAllocated)
-	if _, err := pool.Exec(ctx,
-		`UPDATE registrations SET deposit_owed_pence = 5000 WHERE id = $1`, otherID); err != nil {
-		t.Fatalf("seed deposit owed: %v", err)
+	settle := map[string]func(*Service, string) error{
+		"bank transfer": func(svc *Service, groupID string) error {
+			return svc.MarkBalancePaidManually(ctx, groupID, "Diane", domain.SkipVersionCheck)
+		},
+		"stripe webhook": func(svc *Service, groupID string) error {
+			return svc.HandleInvoicePaid(ctx, "in_settle", groupID, 17000, "gbp")
+		},
 	}
 
-	if err := svc.MarkBalancePaidManually(ctx, groupID, "Diane", domain.SkipVersionCheck); err != nil {
-		t.Fatalf("MarkBalancePaidManually: %v", err)
+	for name, run := range settle {
+		t.Run(name, func(t *testing.T) {
+			svc := NewService(repo, &stubStripe{}, &recordingMailer{}, nil, Config{})
+			groupID, _, otherID := insertEditableGroup(ctx, t, pool, domain.BillingAllocated)
+			if _, err := pool.Exec(ctx,
+				`UPDATE registrations SET deposit_owed_pence = 5000 WHERE id = $1`, otherID); err != nil {
+				t.Fatalf("seed deposit owed: %v", err)
+			}
+
+			if err := run(svc, groupID); err != nil {
+				t.Fatalf("settle balance: %v", err)
+			}
+
+			campers, _ := repo.CampersForGroup(ctx, groupID)
+			got := camperByID(t, campers, otherID)
+			if got.DepositOwedPence != 0 {
+				t.Fatalf("deposit_owed_pence = %d, want 0 once the balance is settled",
+					got.DepositOwedPence)
+			}
+			if got.DepositPaidPence != 5000 {
+				t.Fatalf("deposit_paid_pence = %d, want the 5000 they just paid",
+					got.DepositPaidPence)
+			}
+		})
+	}
+}
+
+// Waiving a deposit and converting a camper to a day visitor both zero what is
+// owed without any money arriving. Recording either as paid would have the church
+// keep money it never received, and a delete report a retained amount that never
+// existed.
+func TestDepositOwed_clearedWithoutPaymentIsNotRecordedAsPaid(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	needsCatering := false
+
+	clear := map[string]func(*Service, string, string) error{
+		"waived": func(svc *Service, groupID, camperID string) error {
+			_, err := svc.WaiveCamperDeposit(ctx, groupID, camperID, "Diane", domain.SkipVersionCheck)
+			return err
+		},
+		"converted to day visitor": func(svc *Service, groupID, camperID string) error {
+			_, err := svc.ConvertCamperToDayVisitor(
+				ctx, groupID, camperID, "Diane", domain.SkipVersionCheck,
+				ConvertToDayVisitorRequest{
+					Days:          []string{"mon"},
+					TshirtOption:  domain.TshirtOptionNone,
+					NeedsCatering: &needsCatering,
+				})
+			return err
+		},
 	}
 
-	campers, _ := repo.CampersForGroup(ctx, groupID)
-	if got := camperByID(t, campers, otherID); got.DepositOwedPence != 0 {
-		t.Fatalf("deposit_owed_pence = %d, want 0 once the balance is settled",
-			got.DepositOwedPence)
+	for name, run := range clear {
+		t.Run(name, func(t *testing.T) {
+			stub := &stubStripe{
+				ensureCust: func(_ context.Context, _, _, _, _ string) (string, error) {
+					return "cus_edit", nil
+				},
+			}
+			svc := NewService(repo, stub, &recordingMailer{}, nil, Config{
+				DepositPricePence:  5000,
+				StripePriceDayPass: "price_day",
+			})
+			groupID, _, otherID := insertEditableGroup(ctx, t, pool, domain.BillingAllocated)
+			if _, err := pool.Exec(ctx,
+				`UPDATE registrations SET deposit_owed_pence = 5000 WHERE id = $1`, otherID); err != nil {
+				t.Fatalf("seed deposit owed: %v", err)
+			}
+
+			if err := run(svc, groupID, otherID); err != nil {
+				t.Fatalf("clear deposit: %v", err)
+			}
+
+			campers, _ := repo.CampersForGroup(ctx, groupID)
+			got := camperByID(t, campers, otherID)
+			if got.DepositOwedPence != 0 {
+				t.Fatalf("deposit_owed_pence = %d, want 0", got.DepositOwedPence)
+			}
+			if got.DepositPaidPence != 0 {
+				t.Fatalf("deposit_paid_pence = %d, want 0: nobody paid this deposit",
+					got.DepositPaidPence)
+			}
+
+			// The point of all this: deleting afterwards keeps only the deposit
+			// that came in at checkout, never the one nobody paid.
+			sum, err := svc.DeleteRegistration(ctx, groupID, "Diane", domain.SkipVersionCheck)
+			if err != nil {
+				t.Fatalf("DeleteRegistration: %v", err)
+			}
+			if sum.RetainedPence != 10000 {
+				t.Fatalf("retained = %d, want only the 10000 paid at checkout",
+					sum.RetainedPence)
+			}
+		})
 	}
 }
 

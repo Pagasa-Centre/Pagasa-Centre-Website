@@ -1023,15 +1023,39 @@ export default function AdminDashboard() {
 
   async function deleteRegistration(g: AdminGroup) {
     const name = `${g.contact_first_name} ${g.contact_last_name}`;
+    const paidInOnePayment =
+      g.paid_in_full_at_registration && g.payment_status === "paid";
+
+    // A single payment covering deposit and camp cost can't be split, so this
+    // one is settled in Stripe by hand. Say so before she commits to it rather
+    // than letting the request come back refused.
+    if (paidInOnePayment) {
+      setNotice(null);
+      setError(
+        `${name} paid for their whole camp in one payment, so their non-refundable ` +
+          `deposit can't be separated from the rest automatically. Refund what they ` +
+          `are owed in Stripe first, then delete the registration.`,
+      );
+      return;
+    }
+
+    const depositKept =
+      g.payment_status === "paid" && g.total_amount_pence > 0
+        ? formatPence(g.total_amount_pence, g.currency)
+        : null;
+
     if (g.billing_status === "balance_paid") {
+      const kept = depositKept
+        ? `Their ${depositKept} deposit is non-refundable and will be KEPT.`
+        : `Any deposit they paid is non-refundable and will be KEPT.`;
       const typed = prompt(
-        `This will permanently delete ${name}'s registration and REFUND their full deposit and balance.\n\nType DELETE to confirm:`,
+        `This will permanently delete ${name}'s registration.\n\n${kept} The rest of what they paid will be refunded.\n\nType DELETE to confirm:`,
       );
       if (typed !== "DELETE") return;
-    } else if (g.payment_status === "paid") {
+    } else if (depositKept) {
       if (
         !confirm(
-          `Permanently delete ${name}'s registration? This will REFUND the ${formatPence(g.total_amount_pence, g.currency)} deposit and cannot be undone.`,
+          `Permanently delete ${name}'s registration?\n\nTheir ${depositKept} deposit is non-refundable and will be KEPT — nothing will be refunded. This cannot be undone.`,
         )
       ) {
         return;
