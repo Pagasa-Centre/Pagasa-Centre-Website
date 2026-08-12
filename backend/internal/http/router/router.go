@@ -6,7 +6,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	accomapi "pagasacentre/backend/internal/api/accommodation"
-	adminapi "pagasacentre/backend/internal/api/admin"
+	campadminapi "pagasacentre/backend/internal/api/campadmin"
 	campapi "pagasacentre/backend/internal/api/camp"
 	consentapi "pagasacentre/backend/internal/api/consent"
 	paymentapi "pagasacentre/backend/internal/api/payment"
@@ -50,7 +50,7 @@ func New(cfg Config) http.Handler {
 		render.Json(w, http.StatusOK, map[string]string{"status": "ok", "commit": cfg.Commit})
 	})
 
-	r.Get("/admin/stream", adminapi.HandleStream(cfg.AdminAuth, cfg.AdminHub))
+	r.Get("/camp-admin/stream", campadminapi.HandleStream(cfg.AdminAuth, cfg.AdminHub))
 
 	r.Route("/api", func(r chi.Router) {
 		middleware.WithRequestTimeout(r)
@@ -65,9 +65,9 @@ func New(cfg Config) http.Handler {
 		r.Get("/consent-form", cfg.ConsentHandler.GetConsentForm())
 	})
 
-	r.Route("/admin", func(r chi.Router) {
+	r.Route("/camp-admin", func(r chi.Router) {
 		middleware.WithRequestTimeout(r)
-		adminapi.Mount(r, cfg.AdminAuth, cfg.RegRepo, cfg.CampRepo, cfg.RegSvc, cfg.BillSvc, cfg.PaySvc, cfg.AdminRec)
+		campadminapi.Mount(r, cfg.AdminAuth, cfg.RegRepo, cfg.CampRepo, cfg.RegSvc, cfg.BillSvc, cfg.PaySvc, cfg.AdminRec)
 	})
 
 	return r

@@ -1,5 +1,5 @@
-import AdminDashboard from "@/components/admin/AdminDashboard";
+import CampAdminDashboard from "@/components/camp-admin/CampAdminDashboard";
 
-export default function AdminPage() {
-  return <AdminDashboard />;
+export default function CampAdminPage() {
+  return <CampAdminDashboard />;
 }

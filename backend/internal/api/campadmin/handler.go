@@ -1,5 +1,5 @@
-// Package admin exposes management endpoints for church staff (White Team).
-package admin
+// Package campadmin exposes management endpoints for church staff (White Team).
+package campadmin
 
 import (
 	"context"

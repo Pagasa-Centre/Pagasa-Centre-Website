@@ -1,4 +1,4 @@
-// Admin API client.
+// Camp admin API client.
 //
 // Auth uses a bearer token stored in localStorage rather than a cookie. The
 // dashboard and the API live on different domains, so a session cookie is
@@ -7,9 +7,11 @@
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
+const CAMP_ADMIN_API_PREFIX = "/camp-admin";
+
 const TOKEN_KEY = "pc_admin_token";
 
-export function getAdminToken(): string | null {
+export function getCampAdminToken(): string | null {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem(TOKEN_KEY);
 }
@@ -29,21 +31,21 @@ export type ApiError = {
   fields?: Record<string, string>;
 };
 
-export class AdminApiError extends Error {
+export class CampAdminApiError extends Error {
   constructor(
     public detail: ApiError,
     public status: number,
   ) {
     super(detail.message);
-    this.name = "AdminApiError";
+    this.name = "CampAdminApiError";
   }
 }
 
-async function adminFetch<T>(
+async function campAdminFetch<T>(
   path: string,
   options?: RequestInit,
 ): Promise<T> {
-  const token = getAdminToken();
+  const token = getCampAdminToken();
   const res = await fetch(`${API_BASE}${path}`, {
     cache: "no-store",
     credentials: "include",
@@ -67,7 +69,7 @@ async function adminFetch<T>(
     } catch {
       // fall through
     }
-    throw new AdminApiError(err, res.status);
+    throw new CampAdminApiError(err, res.status);
   }
   if (res.headers.get("content-type")?.includes("application/json")) {
     return res.json() as Promise<T>;
@@ -236,14 +238,14 @@ export type AdminCampConfig = {
 };
 
 /** Opens the admin SSE stream. Caller must close on unmount. */
-export function openAdminEventStream(handlers: {
+export function openCampAdminEventStream(handlers: {
   onEvent: (ev: AdminEvent) => void;
   onOpen?: () => void;
   onError?: () => void;
 }): EventSource | null {
-  const token = getAdminToken();
+  const token = getCampAdminToken();
   if (!token) return null;
-  const url = `${API_BASE}/admin/stream?token=${encodeURIComponent(token)}`;
+  const url = `${API_BASE}${CAMP_ADMIN_API_PREFIX}/stream?token=${encodeURIComponent(token)}`;
   const es = new EventSource(url);
   es.addEventListener("changed", (msg) => {
     try {
@@ -257,10 +259,10 @@ export function openAdminEventStream(handlers: {
   return es;
 }
 
-export const adminApi = {
+export const campAdminApi = {
   login: async (password: string, firstName: string, lastName: string) => {
-    const res = await adminFetch<{ token?: string; name?: string }>(
-      "/admin/login",
+    const res = await campAdminFetch<{ token?: string; name?: string }>(
+      `${CAMP_ADMIN_API_PREFIX}/login`,
       {
         method: "POST",
         body: JSON.stringify({
@@ -278,22 +280,22 @@ export const adminApi = {
 
   logout: async () => {
     try {
-      await adminFetch<void>("/admin/logout", { method: "POST" });
+      await campAdminFetch<void>(`${CAMP_ADMIN_API_PREFIX}/logout`, { method: "POST" });
     } finally {
       setToken(null);
     }
   },
 
   checkSession: () =>
-    adminFetch<{ name: string }>("/admin/session", { method: "GET" }),
+    campAdminFetch<{ name: string }>(`${CAMP_ADMIN_API_PREFIX}/session`, { method: "GET" }),
 
   listEvents: (params?: { limit?: number; before?: number }) => {
     const q = new URLSearchParams();
     if (params?.limit) q.set("limit", String(params.limit));
     if (params?.before) q.set("before", String(params.before));
     const qs = q.toString();
-    return adminFetch<{ events: AdminEvent[] }>(
-      `/admin/events${qs ? `?${qs}` : ""}`,
+    return campAdminFetch<{ events: AdminEvent[] }>(
+      `${CAMP_ADMIN_API_PREFIX}/events${qs ? `?${qs}` : ""}`,
     );
   },
 
@@ -305,8 +307,8 @@ export const adminApi = {
     if (params?.status) q.set("status", params.status);
     if (params?.billing_status) q.set("billing_status", params.billing_status);
     const qs = q.toString();
-    return adminFetch<{ groups: AdminGroup[] }>(
-      `/admin/registrations${qs ? `?${qs}` : ""}`,
+    return campAdminFetch<{ groups: AdminGroup[] }>(
+      `${CAMP_ADMIN_API_PREFIX}/registrations${qs ? `?${qs}` : ""}`,
     );
   },
 
@@ -320,24 +322,24 @@ export const adminApi = {
       resend_confirmation: boolean;
     },
   ) =>
-    adminFetch<void>(`/admin/registrations/${groupId}/contact`, {
+    campAdminFetch<void>(`${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/contact`, {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
 
   accommodations: () =>
-    adminFetch<{ accommodations: AdminAccommodation[] }>(
-      "/admin/accommodations",
+    campAdminFetch<{ accommodations: AdminAccommodation[] }>(
+      `${CAMP_ADMIN_API_PREFIX}/accommodations`,
     ),
 
   accommodationUnits: () =>
-    adminFetch<{ units: AdminAccommodationUnit[] }>(
-      "/admin/accommodation-units",
+    campAdminFetch<{ units: AdminAccommodationUnit[] }>(
+      `${CAMP_ADMIN_API_PREFIX}/accommodation-units`,
     ),
 
   setAccommodationAvailability: (code: string, available: boolean) =>
-    adminFetch<{ code: string; available_for_registration: boolean }>(
-      `/admin/accommodations/${code}/availability`,
+    campAdminFetch<{ code: string; available_for_registration: boolean }>(
+      `${CAMP_ADMIN_API_PREFIX}/accommodations/${code}/availability`,
       { method: "PUT", body: JSON.stringify({ available }) },
     ),
 
@@ -346,26 +348,26 @@ export const adminApi = {
     campers: AllocateCamper[],
     expectedVersion: number,
   ) =>
-    adminFetch<void>(`/admin/registrations/${groupId}/allocation`, {
+    campAdminFetch<void>(`${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/allocation`, {
       method: "PUT",
       body: JSON.stringify({ campers, expected_version: expectedVersion }),
     }),
 
   unallocate: (groupId: string, expectedVersion: number) =>
-    adminFetch<void>(`/admin/registrations/${groupId}/unallocate`, {
+    campAdminFetch<void>(`${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/unallocate`, {
       method: "POST",
       body: JSON.stringify({ expected_version: expectedVersion }),
     }),
 
   sendInvoice: (groupId: string, expectedVersion: number) =>
-    adminFetch<void>(`/admin/registrations/${groupId}/invoice`, {
+    campAdminFetch<void>(`${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/invoice`, {
       method: "POST",
       body: JSON.stringify({ expected_version: expectedVersion }),
     }),
 
   sendInvoiceBulk: (groupIds: string[]) =>
-    adminFetch<void | { errors: Record<string, string> }>(
-      "/admin/registrations/invoice-bulk",
+    campAdminFetch<void | { errors: Record<string, string> }>(
+      `${CAMP_ADMIN_API_PREFIX}/registrations/invoice-bulk`,
       {
         method: "POST",
         body: JSON.stringify({ group_ids: groupIds }),
@@ -373,14 +375,14 @@ export const adminApi = {
     ),
 
   sendCoachInvoice: (groupId: string, expectedVersion: number) =>
-    adminFetch<void>(`/admin/registrations/${groupId}/coach-invoice`, {
+    campAdminFetch<void>(`${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/coach-invoice`, {
       method: "POST",
       body: JSON.stringify({ expected_version: expectedVersion }),
     }),
 
   sendCoachInvoiceBulk: (groupIds: string[]) =>
-    adminFetch<void | { errors: Record<string, string> }>(
-      "/admin/registrations/coach-invoice-bulk",
+    campAdminFetch<void | { errors: Record<string, string> }>(
+      `${CAMP_ADMIN_API_PREFIX}/registrations/coach-invoice-bulk`,
       {
         method: "POST",
         body: JSON.stringify({ group_ids: groupIds }),
@@ -388,38 +390,38 @@ export const adminApi = {
     ),
 
   waiveCoachFee: (groupId: string, expectedVersion: number) =>
-    adminFetch<void>(`/admin/registrations/${groupId}/coach-invoice/waive`, {
+    campAdminFetch<void>(`${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/coach-invoice/waive`, {
       method: "POST",
       body: JSON.stringify({ expected_version: expectedVersion }),
     }),
 
   unwaiveCoachFee: (groupId: string, expectedVersion: number) =>
-    adminFetch<void>(`/admin/registrations/${groupId}/coach-invoice/unwaive`, {
+    campAdminFetch<void>(`${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/coach-invoice/unwaive`, {
       method: "POST",
       body: JSON.stringify({ expected_version: expectedVersion }),
     }),
 
   release: (groupId: string, expectedVersion: number) =>
-    adminFetch<void>(`/admin/registrations/${groupId}/release`, {
+    campAdminFetch<void>(`${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/release`, {
       method: "POST",
       body: JSON.stringify({ expected_version: expectedVersion }),
     }),
 
   cancel: (groupId: string, expectedVersion: number) =>
-    adminFetch<void>(`/admin/registrations/${groupId}/cancel`, {
+    campAdminFetch<void>(`${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/cancel`, {
       method: "POST",
       body: JSON.stringify({ expected_version: expectedVersion }),
     }),
 
   deleteRegistration: (groupId: string, expectedVersion: number) =>
-    adminFetch<void>(`/admin/registrations/${groupId}/delete`, {
+    campAdminFetch<void>(`${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/delete`, {
       method: "POST",
       body: JSON.stringify({ expected_version: expectedVersion }),
     }),
 
   removeCamper: (groupId: string, camperId: string, expectedVersion: number) =>
-    adminFetch<void>(
-      `/admin/registrations/${groupId}/campers/${camperId}/delete`,
+    campAdminFetch<void>(
+      `${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/campers/${camperId}/delete`,
       {
         method: "POST",
         body: JSON.stringify({ expected_version: expectedVersion }),
@@ -437,8 +439,8 @@ export const adminApi = {
     },
     expectedVersion: number,
   ) =>
-    adminFetch<void>(
-      `/admin/registrations/${groupId}/campers/${camperId}/convert-day-visitor`,
+    campAdminFetch<void>(
+      `${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/campers/${camperId}/convert-day-visitor`,
       {
         method: "POST",
         body: JSON.stringify({
@@ -459,8 +461,8 @@ export const adminApi = {
     },
     expectedVersion: number,
   ) =>
-    adminFetch<void>(
-      `/admin/registrations/${groupId}/campers/${camperId}/day-pass`,
+    campAdminFetch<void>(
+      `${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/campers/${camperId}/day-pass`,
       {
         method: "PATCH",
         body: JSON.stringify({
@@ -476,8 +478,8 @@ export const adminApi = {
     needsCoach: boolean,
     expectedVersion: number,
   ) =>
-    adminFetch<void>(
-      `/admin/registrations/${groupId}/campers/${camperId}/coach`,
+    campAdminFetch<void>(
+      `${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/campers/${camperId}/coach`,
       {
         method: "PATCH",
         body: JSON.stringify({
@@ -493,8 +495,8 @@ export const adminApi = {
     data: EditCamperPayload,
     expectedVersion: number,
   ) =>
-    adminFetch<EditCamperResult>(
-      `/admin/registrations/${groupId}/campers/${camperId}`,
+    campAdminFetch<EditCamperResult>(
+      `${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/campers/${camperId}`,
       {
         method: "PATCH",
         body: JSON.stringify({ expected_version: expectedVersion, ...data }),
@@ -506,7 +508,7 @@ export const adminApi = {
     camper: NewCamperPayload,
     expectedVersion: number,
   ) =>
-    adminFetch<AddCamperResult>(`/admin/registrations/${groupId}/campers`, {
+    campAdminFetch<AddCamperResult>(`${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/campers`, {
       method: "POST",
       body: JSON.stringify({ expected_version: expectedVersion, camper }),
     }),
@@ -516,8 +518,8 @@ export const adminApi = {
     camperId: string,
     expectedVersion: number,
   ) =>
-    adminFetch<void>(
-      `/admin/registrations/${groupId}/campers/${camperId}/make-main-contact`,
+    campAdminFetch<void>(
+      `${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/campers/${camperId}/make-main-contact`,
       {
         method: "POST",
         body: JSON.stringify({ expected_version: expectedVersion }),
@@ -529,8 +531,8 @@ export const adminApi = {
     camperId: string,
     expectedVersion: number,
   ) =>
-    adminFetch<void>(
-      `/admin/registrations/${groupId}/campers/${camperId}/waive-deposit`,
+    campAdminFetch<void>(
+      `${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/campers/${camperId}/waive-deposit`,
       {
         method: "POST",
         body: JSON.stringify({ expected_version: expectedVersion }),
@@ -538,14 +540,14 @@ export const adminApi = {
     ),
 
   resendInvoice: (groupId: string, expectedVersion: number) =>
-    adminFetch<void>(`/admin/registrations/${groupId}/invoice/resend`, {
+    campAdminFetch<void>(`${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/invoice/resend`, {
       method: "POST",
       body: JSON.stringify({ expected_version: expectedVersion }),
     }),
 
   resyncAllSheets: () =>
-    adminFetch<{ synced: number; errors?: Record<string, string> }>(
-      "/admin/registrations/sheet-resync-all",
+    campAdminFetch<{ synced: number; errors?: Record<string, string> }>(
+      `${CAMP_ADMIN_API_PREFIX}/registrations/sheet-resync-all`,
       {
         method: "POST",
         body: JSON.stringify({}),
@@ -553,7 +555,7 @@ export const adminApi = {
     ),
 
   extendDue: (groupId: string, dueAt: string, expectedVersion: number) =>
-    adminFetch<void>(`/admin/registrations/${groupId}/invoice-due`, {
+    campAdminFetch<void>(`${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/invoice-due`, {
       method: "PATCH",
       body: JSON.stringify({
         due_at: dueAt,
@@ -562,22 +564,22 @@ export const adminApi = {
     }),
 
   sweep: () =>
-    adminFetch<{ released: number }>("/admin/billing/sweep", {
+    campAdminFetch<{ released: number }>(`${CAMP_ADMIN_API_PREFIX}/billing/sweep`, {
       method: "POST",
       body: JSON.stringify({}),
     }),
 
-  campConfig: () => adminFetch<AdminCampConfig>("/admin/camp-config"),
+  campConfig: () => campAdminFetch<AdminCampConfig>(`${CAMP_ADMIN_API_PREFIX}/camp-config`),
 
   setRegistrationsOpen: (open: boolean) =>
-    adminFetch<{ registrations_open: boolean }>("/admin/registrations-open", {
+    campAdminFetch<{ registrations_open: boolean }>(`${CAMP_ADMIN_API_PREFIX}/registrations-open`, {
       method: "PUT",
       body: JSON.stringify({ open }),
     }),
 
   setRegistrationPaymentMode: (mode: "deposit" | "full") =>
-    adminFetch<{ registration_payment_mode: string }>(
-      "/admin/registration-payment-mode",
+    campAdminFetch<{ registration_payment_mode: string }>(
+      `${CAMP_ADMIN_API_PREFIX}/registration-payment-mode`,
       {
         method: "PUT",
         body: JSON.stringify({ mode }),
@@ -585,26 +587,26 @@ export const adminApi = {
     ),
 
   confirmFree: (groupId: string, expectedVersion: number) =>
-    adminFetch<void>(`/admin/registrations/${groupId}/confirm-free`, {
+    campAdminFetch<void>(`${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/confirm-free`, {
       method: "POST",
       body: JSON.stringify({ expected_version: expectedVersion }),
     }),
 
   markPaid: (groupId: string, expectedVersion: number) =>
-    adminFetch<void>(`/admin/registrations/${groupId}/mark-paid`, {
+    campAdminFetch<void>(`${CAMP_ADMIN_API_PREFIX}/registrations/${groupId}/mark-paid`, {
       method: "POST",
       body: JSON.stringify({ expected_version: expectedVersion }),
     }),
 
   generateFreeCode: (password: string, note?: string) =>
-    adminFetch<{ code: string }>("/admin/free-codes", {
+    campAdminFetch<{ code: string }>(`${CAMP_ADMIN_API_PREFIX}/free-codes`, {
       method: "POST",
       body: JSON.stringify({ password, note: note ?? "" }),
     }),
 
   listFreeCodes: () =>
-    adminFetch<{ codes: FreeCode[] }>("/admin/free-codes"),
+    campAdminFetch<{ codes: FreeCode[] }>(`${CAMP_ADMIN_API_PREFIX}/free-codes`),
 
   revokeFreeCode: (id: string) =>
-    adminFetch<void>(`/admin/free-codes/${id}/revoke`, { method: "POST" }),
+    campAdminFetch<void>(`${CAMP_ADMIN_API_PREFIX}/free-codes/${id}/revoke`, { method: "POST" }),
 };

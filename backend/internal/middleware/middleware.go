@@ -20,7 +20,7 @@ func UseDefaults(r chi.Router, allowedOrigins string) {
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
-	// NOTE: Request timeout is NOT applied here — SSE /admin/stream must run
+	// NOTE: Request timeout is NOT applied here — SSE /camp-admin/stream must run
 	// unbounded. Apply WithRequestTimeout on route groups that need it.
 
 	origins := parseOrigins(allowedOrigins)
@@ -37,7 +37,7 @@ func UseDefaults(r chi.Router, allowedOrigins string) {
 	}))
 }
 
-// WithRequestTimeout applies a 60s deadline to ordinary API/admin handlers.
+// WithRequestTimeout applies a 60s deadline to ordinary API/camp-admin handlers.
 // Do not wrap the SSE stream route with this middleware.
 func WithRequestTimeout(r chi.Router) {
 	r.Use(chimiddleware.Timeout(60_000_000_000))

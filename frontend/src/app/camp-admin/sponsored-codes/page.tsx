@@ -4,10 +4,10 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  adminApi,
+  campAdminApi,
   type FreeCode,
-  AdminApiError,
-} from "@/lib/admin-api";
+  CampAdminApiError,
+} from "@/lib/camp-admin-api";
 
 function formatTime(iso: string): string {
   try {
@@ -29,7 +29,7 @@ function codeStatus(c: FreeCode): string {
   return "Unused";
 }
 
-export default function AdminSponsoredCodesPage() {
+export default function CampAdminSponsoredCodesPage() {
   const router = useRouter();
   const [codes, setCodes] = useState<FreeCode[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,12 +43,12 @@ export default function AdminSponsoredCodesPage() {
 
   const fetchCodes = useCallback(async () => {
     try {
-      const res = await adminApi.listFreeCodes();
+      const res = await campAdminApi.listFreeCodes();
       setCodes(res.codes ?? []);
       setError(null);
     } catch (err) {
-      if (err instanceof AdminApiError && err.status === 401) {
-        router.replace("/admin/login");
+      if (err instanceof CampAdminApiError && err.status === 401) {
+        router.replace("/camp-admin/login");
         return;
       }
       setError("Could not load sponsorship codes.");
@@ -58,10 +58,10 @@ export default function AdminSponsoredCodesPage() {
   }, [router]);
 
   useEffect(() => {
-    adminApi
+    campAdminApi
       .checkSession()
       .then(() => fetchCodes())
-      .catch(() => router.replace("/admin/login"));
+      .catch(() => router.replace("/camp-admin/login"));
   }, [fetchCodes, router]);
 
   async function handleGenerate(e: React.FormEvent) {
@@ -70,13 +70,13 @@ export default function AdminSponsoredCodesPage() {
     setError(null);
     setGeneratedCode(null);
     try {
-      const res = await adminApi.generateFreeCode(password, note);
+      const res = await campAdminApi.generateFreeCode(password, note);
       setGeneratedCode(res.code);
       setPassword("");
       setNote("");
       await fetchCodes();
     } catch (err) {
-      if (err instanceof AdminApiError) {
+      if (err instanceof CampAdminApiError) {
         setError(err.detail.message);
       } else {
         setError("Could not generate code.");
@@ -93,10 +93,10 @@ export default function AdminSponsoredCodesPage() {
     setRevoking(id);
     setError(null);
     try {
-      await adminApi.revokeFreeCode(id);
+      await campAdminApi.revokeFreeCode(id);
       await fetchCodes();
     } catch (err) {
-      if (err instanceof AdminApiError) {
+      if (err instanceof CampAdminApiError) {
         setError(err.detail.message);
       } else {
         setError("Could not revoke code.");
@@ -135,7 +135,7 @@ export default function AdminSponsoredCodesPage() {
           </p>
         </div>
         <Link
-          href="/admin"
+          href="/camp-admin"
           className="px-4 py-2 text-sm font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100"
         >
           Back to dashboard

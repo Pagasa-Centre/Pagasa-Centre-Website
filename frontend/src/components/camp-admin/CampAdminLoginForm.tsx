@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { adminApi, AdminApiError } from "@/lib/admin-api";
+import { campAdminApi, CampAdminApiError } from "@/lib/camp-admin-api";
 
-export default function AdminLoginForm() {
+export default function CampAdminLoginForm() {
   const router = useRouter();
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -17,11 +17,11 @@ export default function AdminLoginForm() {
     setError(null);
     setLoading(true);
     try {
-      await adminApi.login(password, firstName.trim(), lastName.trim());
-      router.push("/admin");
+      await campAdminApi.login(password, firstName.trim(), lastName.trim());
+      router.push("/camp-admin");
       router.refresh();
     } catch (err) {
-      if (err instanceof AdminApiError) {
+      if (err instanceof CampAdminApiError) {
         setError(err.detail.message);
       } else {
         setError("Login failed. Check the API URL and try again.");

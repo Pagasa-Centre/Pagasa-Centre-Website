@@ -4,11 +4,11 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  adminApi,
-  openAdminEventStream,
+  campAdminApi,
+  openCampAdminEventStream,
   type AdminEvent,
-  AdminApiError,
-} from "@/lib/admin-api";
+  CampAdminApiError,
+} from "@/lib/camp-admin-api";
 
 function formatEventTime(iso: string): string {
   try {
@@ -24,7 +24,7 @@ function formatEventTime(iso: string): string {
   }
 }
 
-export default function AdminActivityPage() {
+export default function CampAdminActivityPage() {
   const router = useRouter();
   const [events, setEvents] = useState<AdminEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,12 +33,12 @@ export default function AdminActivityPage() {
 
   const fetchEvents = useCallback(async () => {
     try {
-      const res = await adminApi.listEvents({ limit: 100 });
+      const res = await campAdminApi.listEvents({ limit: 100 });
       setEvents(res.events ?? []);
       setError(null);
     } catch (err) {
-      if (err instanceof AdminApiError && err.status === 401) {
-        router.replace("/admin/login");
+      if (err instanceof CampAdminApiError && err.status === 401) {
+        router.replace("/camp-admin/login");
         return;
       }
       setError("Could not load activity log.");
@@ -48,15 +48,15 @@ export default function AdminActivityPage() {
   }, [router]);
 
   useEffect(() => {
-    adminApi
+    campAdminApi
       .checkSession()
       .then(() => fetchEvents())
-      .catch(() => router.replace("/admin/login"));
+      .catch(() => router.replace("/camp-admin/login"));
   }, [fetchEvents, router]);
 
   useEffect(() => {
     let debounce: ReturnType<typeof setTimeout> | null = null;
-    const es = openAdminEventStream({
+    const es = openCampAdminEventStream({
       onOpen: () => {
         setReconnecting(false);
         void fetchEvents();
@@ -97,7 +97,7 @@ export default function AdminActivityPage() {
           )}
         </div>
         <Link
-          href="/admin"
+          href="/camp-admin"
           className="px-4 py-2 text-sm font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100"
         >
           Back to dashboard

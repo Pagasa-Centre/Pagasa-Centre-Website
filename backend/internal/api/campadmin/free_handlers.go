@@ -1,4 +1,4 @@
-package admin
+package campadmin
 
 import (
 	"net/http"

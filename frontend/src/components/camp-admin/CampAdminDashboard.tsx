@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  adminApi,
-  openAdminEventStream,
+  campAdminApi,
+  openCampAdminEventStream,
   type AdminAccommodation,
   type AdminAccommodationUnit,
   type AdminGroup,
@@ -13,8 +13,8 @@ import {
   type AllocateCamper,
   type EditCamperPayload,
   type NewCamperPayload,
-  AdminApiError,
-} from "@/lib/admin-api";
+  CampAdminApiError,
+} from "@/lib/camp-admin-api";
 import {
   ACCOMMODATION_CHILD_CODE,
   ACCOMMODATION_TENT_CODE,
@@ -317,7 +317,7 @@ function formatLastAction(g: AdminGroup): string | null {
   return `${label} by ${g.last_action_by} · ${formatDateTime(g.last_action_at)}`;
 }
 
-export default function AdminDashboard() {
+export default function CampAdminDashboard() {
   const router = useRouter();
   const [groups, setGroups] = useState<AdminGroup[]>([]);
   const [accommodations, setAccommodations] = useState<AdminAccommodation[]>([]);
@@ -368,10 +368,10 @@ export default function AdminDashboard() {
     setError(null);
     try {
       const [reg, acc, unitRes, cfg, sizesRes, priceRes] = await Promise.all([
-        adminApi.listRegistrations(),
-        adminApi.accommodations(),
-        adminApi.accommodationUnits(),
-        adminApi.campConfig(),
+        campAdminApi.listRegistrations(),
+        campAdminApi.accommodations(),
+        campAdminApi.accommodationUnits(),
+        campAdminApi.campConfig(),
         camp.shirtSizes(),
         camp.prices(),
       ]);
@@ -408,8 +408,8 @@ export default function AdminDashboard() {
       setAlloc(next);
       setUnitAlloc(nextUnits);
     } catch (err) {
-      if (err instanceof AdminApiError && err.status === 401) {
-        router.replace("/admin/login");
+      if (err instanceof CampAdminApiError && err.status === 401) {
+        router.replace("/camp-admin/login");
         return;
       }
       setError("Could not load registrations. Please refresh the page.");
@@ -420,18 +420,18 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     setLoading(true);
-    adminApi
+    campAdminApi
       .checkSession()
       .then((session) => {
         setActorName(session.name);
         return load();
       })
-      .catch(() => router.replace("/admin/login"));
+      .catch(() => router.replace("/camp-admin/login"));
   }, [load, router]);
 
   useEffect(() => {
     let debounce: ReturnType<typeof setTimeout> | null = null;
-    const es = openAdminEventStream({
+    const es = openCampAdminEventStream({
       onOpen: () => {
         setStreamReconnecting(false);
         void load();
@@ -449,8 +449,8 @@ export default function AdminDashboard() {
   }, [load]);
 
   async function handleAdminError(err: unknown, fallback: string) {
-    setError(err instanceof AdminApiError ? err.detail.message : fallback);
-    if (err instanceof AdminApiError && err.status === 409) {
+    setError(err instanceof CampAdminApiError ? err.detail.message : fallback);
+    if (err instanceof CampAdminApiError && err.status === 409) {
       await load();
     }
   }
@@ -577,7 +577,7 @@ export default function AdminDashboard() {
         if (unit) payload.allocated_unit_code = unit;
         return payload;
       });
-      await adminApi.saveAllocation(g.id, campers, g.version);
+      await campAdminApi.saveAllocation(g.id, campers, g.version);
       setEditing((e) => {
         const next = { ...e };
         delete next[g.id];
@@ -604,7 +604,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.unallocate(g.id, g.version);
+      await campAdminApi.unallocate(g.id, g.version);
       setEditing((e) => {
         const next = { ...e };
         delete next[g.id];
@@ -624,7 +624,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.sendInvoice(g.id, g.version);
+      await campAdminApi.sendInvoice(g.id, g.version);
       setNotice(`Invoice emailed to ${g.contact_email}.`);
       await load();
     } catch (err) {
@@ -647,7 +647,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.sendCoachInvoice(g.id, g.version);
+      await campAdminApi.sendCoachInvoice(g.id, g.version);
       setNotice(`Coach invoice emailed to ${g.contact_email}.`);
       await load();
     } catch (err) {
@@ -670,7 +670,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.waiveCoachFee(g.id, g.version);
+      await campAdminApi.waiveCoachFee(g.id, g.version);
       setNotice(`Coach fee waived for ${g.contact_first_name} ${g.contact_last_name}.`);
       await load();
     } catch (err) {
@@ -692,7 +692,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.unwaiveCoachFee(g.id, g.version);
+      await campAdminApi.unwaiveCoachFee(g.id, g.version);
       setNotice(`Coach fee restored for ${g.contact_first_name} ${g.contact_last_name}.`);
       await load();
     } catch (err) {
@@ -716,7 +716,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      const res = await adminApi.sendCoachInvoiceBulk(ids);
+      const res = await campAdminApi.sendCoachInvoiceBulk(ids);
       if (res && typeof res === "object" && "errors" in res) {
         const errs = (res as { errors: Record<string, string> }).errors;
         setError(
@@ -749,7 +749,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      const res = await adminApi.sendInvoiceBulk(ids);
+      const res = await campAdminApi.sendInvoiceBulk(ids);
       if (res && typeof res === "object" && "errors" in res) {
         const errs = (res as { errors: Record<string, string> }).errors;
         setError(
@@ -778,7 +778,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.cancel(g.id, g.version);
+      await campAdminApi.cancel(g.id, g.version);
       setNotice(
         `Cancelled ${g.contact_first_name}'s allocation — revised-invoice email sent.`,
       );
@@ -802,7 +802,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.release(g.id, g.version);
+      await campAdminApi.release(g.id, g.version);
       setNotice(`Released ${g.contact_first_name}'s accommodation.`);
       await load();
     } catch (err) {
@@ -824,7 +824,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.removeCamper(g.id, c.id, g.version);
+      await campAdminApi.removeCamper(g.id, c.id, g.version);
       setNotice(`Removed ${c.first_name} from ${g.contact_first_name}'s booking.`);
       await load();
     } catch (err) {
@@ -848,7 +848,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.convertToDayVisitor(g.id, c.id, data, g.version);
+      await campAdminApi.convertToDayVisitor(g.id, c.id, data, g.version);
       setNotice(
         `Converted ${c.first_name} ${c.last_name} to a day visitor.`,
       );
@@ -874,7 +874,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.updateDayPassCamper(g.id, c.id, data, g.version);
+      await campAdminApi.updateDayPassCamper(g.id, c.id, data, g.version);
       setNotice(`Updated day-pass details for ${c.first_name} ${c.last_name}.`);
       await load();
     } catch (err) {
@@ -900,7 +900,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.updateCamperCoach(g.id, c.id, next, g.version);
+      await campAdminApi.updateCamperCoach(g.id, c.id, next, g.version);
       setNotice(
         next
           ? `${name} is now on the coach.`
@@ -923,7 +923,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      const res = await adminApi.editCamper(g.id, c.id, data, g.version);
+      const res = await campAdminApi.editCamper(g.id, c.id, data, g.version);
       const replaced = res.previous_name !== res.camper_name;
       setNotice(
         (replaced
@@ -948,7 +948,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      const res = await adminApi.addCamper(g.id, camper, g.version);
+      const res = await campAdminApi.addCamper(g.id, camper, g.version);
       const bits = [`${res.camper_name} added to ${g.contact_first_name}'s booking.`];
       if (res.deposit_owed_pence > 0) {
         bits.push(
@@ -987,7 +987,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.makeMainContact(g.id, c.id, g.version);
+      await campAdminApi.makeMainContact(g.id, c.id, g.version);
       setNotice(`${c.first_name} ${c.last_name} is now the main contact.`);
       await load();
     } catch (err) {
@@ -1011,7 +1011,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.waiveCamperDeposit(g.id, c.id, g.version);
+      await campAdminApi.waiveCamperDeposit(g.id, c.id, g.version);
       setNotice(`Deposit waived for ${c.first_name} ${c.last_name}.`);
       await load();
     } catch (err) {
@@ -1071,7 +1071,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.deleteRegistration(g.id, g.version);
+      await campAdminApi.deleteRegistration(g.id, g.version);
       setNotice(`Deleted ${g.contact_first_name}'s registration.`);
       await load();
     } catch (err) {
@@ -1086,7 +1086,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.resendInvoice(g.id, g.version);
+      await campAdminApi.resendInvoice(g.id, g.version);
       setNotice(`Reminder re-sent to ${g.contact_email}.`);
     } catch (err) {
       await handleAdminError(err, "Resend failed.");
@@ -1109,7 +1109,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.extendDue(g.id, due.toISOString(), g.version);
+      await campAdminApi.extendDue(g.id, due.toISOString(), g.version);
       setNotice(`New due date set to ${formatDate(due.toISOString())}.`);
       await load();
     } catch (err) {
@@ -1133,7 +1133,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.updateContact(g.id, data);
+      await campAdminApi.updateContact(g.id, data);
       setNotice(
         data.resend_confirmation
           ? `Contact details updated. Confirmation email re-sent to ${data.email}.`
@@ -1143,7 +1143,7 @@ export default function AdminDashboard() {
       return true;
     } catch (err) {
       setError(
-        err instanceof AdminApiError
+        err instanceof CampAdminApiError
           ? err.detail.message
           : "Could not update contact details.",
       );
@@ -1158,7 +1158,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.confirmFree(g.id, g.version);
+      await campAdminApi.confirmFree(g.id, g.version);
       setNotice(`Sponsorship confirmed for ${g.contact_first_name}'s group.`);
       await load();
     } catch (err) {
@@ -1186,7 +1186,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.markPaid(g.id, g.version);
+      await campAdminApi.markPaid(g.id, g.version);
       setNotice(
         `${g.contact_first_name}'s group marked as paid in full.` +
           (hasInvoice ? " Their Stripe invoice was cancelled." : ""),
@@ -1211,7 +1211,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      const res = await adminApi.resyncAllSheets();
+      const res = await campAdminApi.resyncAllSheets();
       if (res.errors && Object.keys(res.errors).length > 0) {
         setError(
           `Re-synced ${res.synced} group(s), but ${Object.keys(res.errors).length} failed. Check the activity log and try again for those groups.`,
@@ -1222,7 +1222,7 @@ export default function AdminDashboard() {
       await load();
     } catch (err) {
       setError(
-        err instanceof AdminApiError
+        err instanceof CampAdminApiError
           ? err.detail.message
           : "Google Sheet re-sync failed.",
       );
@@ -1243,12 +1243,12 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      const res = await adminApi.sweep();
+      const res = await campAdminApi.sweep();
       setNotice(`Released ${res.released} overdue group(s).`);
       await load();
     } catch (err) {
       setError(
-        err instanceof AdminApiError ? err.detail.message : "Sweep failed.",
+        err instanceof CampAdminApiError ? err.detail.message : "Sweep failed.",
       );
     } finally {
       setBusy(null);
@@ -1272,7 +1272,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      const res = await adminApi.setRegistrationsOpen(next);
+      const res = await campAdminApi.setRegistrationsOpen(next);
       setRegistrationsOpen(res.registrations_open);
       setNotice(
         res.registrations_open
@@ -1281,7 +1281,7 @@ export default function AdminDashboard() {
       );
     } catch (err) {
       setError(
-        err instanceof AdminApiError
+        err instanceof CampAdminApiError
           ? err.detail.message
           : `Could not ${verb.toLowerCase()} registration.`,
       );
@@ -1312,7 +1312,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      const res = await adminApi.setRegistrationPaymentMode(next);
+      const res = await campAdminApi.setRegistrationPaymentMode(next);
       const mode = res.registration_payment_mode as "deposit" | "full";
       setPaymentMode(mode);
       setNotice(
@@ -1322,7 +1322,7 @@ export default function AdminDashboard() {
       );
     } catch (err) {
       setError(
-        err instanceof AdminApiError
+        err instanceof CampAdminApiError
           ? err.detail.message
           : "Could not change payment mode.",
       );
@@ -1344,7 +1344,7 @@ export default function AdminDashboard() {
     setError(null);
     setNotice(null);
     try {
-      await adminApi.setAccommodationAvailability(code, next);
+      await campAdminApi.setAccommodationAvailability(code, next);
       await load();
       setNotice(
         next
@@ -1353,7 +1353,7 @@ export default function AdminDashboard() {
       );
     } catch (err) {
       setError(
-        err instanceof AdminApiError
+        err instanceof CampAdminApiError
           ? err.detail.message
           : `Could not update availability for "${code}".`,
       );
@@ -1363,8 +1363,8 @@ export default function AdminDashboard() {
   }
 
   async function logout() {
-    await adminApi.logout();
-    router.replace("/admin/login");
+    await campAdminApi.logout();
+    router.replace("/camp-admin/login");
   }
 
   const counts = useMemo(() => {
@@ -1501,13 +1501,13 @@ export default function AdminDashboard() {
         </div>
         <div className="flex items-center gap-2">
           <Link
-            href="/admin/sponsored-codes"
+            href="/camp-admin/sponsored-codes"
             className="px-3 py-2 text-sm font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100"
           >
             Sponsorship codes
           </Link>
           <Link
-            href="/admin/activity"
+            href="/camp-admin/activity"
             className="px-3 py-2 text-sm font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-100"
           >
             Activity log

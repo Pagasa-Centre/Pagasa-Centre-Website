@@ -1,9 +1,9 @@
-import AdminLoginForm from "@/components/admin/AdminLoginForm";
+import CampAdminLoginForm from "@/components/camp-admin/CampAdminLoginForm";
 
-export default function AdminLoginPage() {
+export default function CampAdminLoginPage() {
   return (
     <div className="min-h-[60vh] flex items-center justify-center">
-      <AdminLoginForm />
+      <CampAdminLoginForm />
     </div>
   );
 }

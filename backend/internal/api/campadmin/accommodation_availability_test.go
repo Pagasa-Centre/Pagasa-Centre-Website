@@ -1,4 +1,4 @@
-package admin
+package campadmin
 
 import (
 	"bytes"
@@ -17,7 +17,7 @@ import (
 func availabilityRouter(repo *regstorage.Repository) *chi.Mux {
 	r := chi.NewRouter()
 	// nil recorder is fine: admin.Audit is a no-op when rec == nil.
-	r.Put("/admin/accommodations/{code}/availability", putAccommodationAvailability(repo, nil))
+	r.Put("/camp-admin/accommodations/{code}/availability", putAccommodationAvailability(repo, nil))
 	return r
 }
 
@@ -27,7 +27,7 @@ func availabilityRouter(repo *regstorage.Repository) *chi.Mux {
 func TestPutAccommodationAvailability_MissingAvailable(t *testing.T) {
 	r := availabilityRouter(regstorage.NewRepository(nil))
 	req := httptest.NewRequest(http.MethodPut,
-		"/admin/accommodations/lodge/availability", bytes.NewBufferString("{}"))
+		"/camp-admin/accommodations/lodge/availability", bytes.NewBufferString("{}"))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -47,7 +47,7 @@ func TestPutAccommodationAvailability_Valid(t *testing.T) {
 
 	r := availabilityRouter(repo)
 	req := httptest.NewRequest(http.MethodPut,
-		"/admin/accommodations/lodge/availability",
+		"/camp-admin/accommodations/lodge/availability",
 		bytes.NewBufferString(`{"available":false}`))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

@@ -60,7 +60,7 @@ Existing domains: `camp`, `accommodation`, `registration`, `consent` (api only),
 
 6. **No flat feature packages.** Do not put handlers, services, repos, and domain types in one `internal/foo/` package. Do not reintroduce `Mount()` per feature — add routes in `internal/http/router/router.go`.
 
-7. **SSE `/admin/stream`** must stay **outside** the request-timeout middleware group (see router).
+7. **SSE `/camp-admin/stream`** must stay **outside** the request-timeout middleware group (see router).
 
 ## Model types (no entity layer)
 

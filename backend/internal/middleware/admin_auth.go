@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	sessionCookieName = "pc_admin_session"
+	sessionCookieName = "pc_camp_admin_session"
 	sessionDuration   = 7 * 24 * time.Hour
 	maxLoginAttempts  = 10
 	loginWindow       = 15 * time.Minute
@@ -161,7 +161,7 @@ func setSessionCookie(w http.ResponseWriter, cfg AuthConfig, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    token,
-		Path:     "/admin",
+		Path:     "/camp-admin",
 		HttpOnly: true,
 		Secure:   cfg.SecureCookie,
 		SameSite: sameSiteMode(cfg),
@@ -173,7 +173,7 @@ func clearSessionCookie(w http.ResponseWriter, cfg AuthConfig) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",
-		Path:     "/admin",
+		Path:     "/camp-admin",
 		HttpOnly: true,
 		Secure:   cfg.SecureCookie,
 		SameSite: sameSiteMode(cfg),

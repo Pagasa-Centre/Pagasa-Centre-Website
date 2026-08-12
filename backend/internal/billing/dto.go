@@ -10,18 +10,18 @@ type AllocateCamper struct {
 	BilledStripePriceID string `json:"billed_stripe_price_id,omitempty"`
 }
 
-// AllocateRequest is PUT /admin/registrations/{groupID}/allocation.
+// AllocateRequest is PUT /camp-admin/registrations/{groupID}/allocation.
 type AllocateRequest struct {
 	Campers          []AllocateCamper `json:"campers"`
 	ExpectedVersion  *int             `json:"expected_version,omitempty"`
 }
 
-// BulkInvoiceRequest is POST /admin/registrations/invoice-bulk.
+// BulkInvoiceRequest is POST /camp-admin/registrations/invoice-bulk.
 type BulkInvoiceRequest struct {
 	GroupIDs []string `json:"group_ids"`
 }
 
-// ExtendDueRequest is PATCH /admin/registrations/{groupID}/invoice-due.
+// ExtendDueRequest is PATCH /camp-admin/registrations/{groupID}/invoice-due.
 type ExtendDueRequest struct {
 	DueAt           string `json:"due_at"` // RFC3339
 	ExpectedVersion *int   `json:"expected_version,omitempty"`

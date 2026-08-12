@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 // Dedicated, distraction-free shell for the White Team. Intentionally does NOT
 // include the public site Navbar/Footer so there is maximum room for the
 // allocation + invoicing workflow.
-export default function AdminLayout({
+export default function CampAdminLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (

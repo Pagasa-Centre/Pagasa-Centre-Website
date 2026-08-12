@@ -8,7 +8,7 @@ import (
 	"pagasacentre/backend/internal/registration/domain"
 )
 
-// Audit records an admin action (exported for api/admin).
+// Audit records an admin action (exported for api/campadmin).
 func Audit(rec *adminlog.Recorder, r *http.Request, action string, groupID *string, summary string, meta any) {
 	if rec == nil {
 		return
