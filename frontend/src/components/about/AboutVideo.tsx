@@ -15,8 +15,8 @@ export default function AboutVideo() {
 
         <div className="relative w-full aspect-video rounded-lg overflow-hidden shadow-lg">
           <iframe
-            src="https://www.youtube.com/embed/R1FKgMnBJNw"
-            title="Pag-Asa Centre"
+            src="https://www.youtube.com/embed/xkyzez8G0u8"
+            title="Pag-Asa Centre 19th Anniversary Video | 2026"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             allowFullScreen
             className="absolute inset-0 w-full h-full"
