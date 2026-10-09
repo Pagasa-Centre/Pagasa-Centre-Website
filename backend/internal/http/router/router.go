@@ -11,6 +11,7 @@ import (
 	consentapi "pagasacentre/backend/internal/api/consent"
 	paymentapi "pagasacentre/backend/internal/api/payment"
 	regapi "pagasacentre/backend/internal/api/registration"
+	sermonapi "pagasacentre/backend/internal/api/sermon"
 	"pagasacentre/backend/internal/adminlog"
 	"pagasacentre/backend/internal/billing"
 	"pagasacentre/backend/internal/middleware"
@@ -32,6 +33,7 @@ type Config struct {
 	RegistrationHandler   *regapi.Handler
 	PaymentHandler        *paymentapi.Handler
 	ConsentHandler        *consentapi.Handler
+	SermonHandler         *sermonapi.Handler
 
 	RegRepo   *regstorage.Repository
 	CampRepo  *campstorage.Repository
@@ -63,6 +65,7 @@ func New(cfg Config) http.Handler {
 		r.Get("/registration-pricing", cfg.RegistrationHandler.Pricing())
 		r.Post("/payments/webhook", cfg.PaymentHandler.Webhook())
 		r.Get("/consent-form", cfg.ConsentHandler.GetConsentForm())
+		r.Get("/sermons/latest", cfg.SermonHandler.GetLatest())
 	})
 
 	r.Route("/camp-admin", func(r chi.Router) {

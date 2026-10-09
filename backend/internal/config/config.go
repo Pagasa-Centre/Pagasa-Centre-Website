@@ -58,6 +58,10 @@ type Config struct {
 	StripePricePod            string
 	StripePriceTent           string
 	StripePriceChild312       string // 3-12 child with parent
+
+	// YouTube Data API — optional; enables latest completed livestream sync.
+	YouTubeAPIKey    string
+	YouTubeChannelID string
 }
 
 func Load() (Config, error) {
@@ -98,6 +102,8 @@ func Load() (Config, error) {
 		StripePricePod:            os.Getenv("STRIPE_PRICE_POD"),
 		StripePriceTent:           os.Getenv("STRIPE_PRICE_TENT"),
 		StripePriceChild312:       os.Getenv("STRIPE_PRICE_CHILD_3_12"),
+		YouTubeAPIKey:             os.Getenv("YOUTUBE_API_KEY"),
+		YouTubeChannelID:          os.Getenv("YOUTUBE_CHANNEL_ID"),
 	}
 
 	var missing []string

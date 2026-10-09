@@ -1,3 +1,5 @@
+import LatestSermonVideo from "@/components/home/LatestSermonVideo";
+
 export default function Sermons() {
   return (
     <section className="py-20 bg-white" id="sermons">
@@ -10,23 +12,13 @@ export default function Sermons() {
             Watch our latest messages
           </h2>
           <p className="mt-4 text-neutral-600 max-w-xl mx-auto">
-            Can't make it in person? Watch our live-streamed services and
+            Can&apos;t make it in person? Watch our live-streamed services and
             sermon recordings online.
           </p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
-          {/* Latest sermon video */}
-          <div className="relative aspect-video bg-ink rounded-2xl overflow-hidden shadow-xl">
-            <iframe
-              src="https://www.youtube-nocookie.com/embed/eVnwI5YWbzU?rel=0"
-              title="Latest sermon — Pag-Asa Centre"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              allowFullScreen
-              referrerPolicy="strict-origin-when-cross-origin"
-              className="absolute inset-0 w-full h-full"
-            />
-          </div>
+          <LatestSermonVideo />
 
           {/* Info */}
           <div className="space-y-6">

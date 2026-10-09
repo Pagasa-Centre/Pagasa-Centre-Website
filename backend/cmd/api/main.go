@@ -17,6 +17,7 @@ import (
 	consentapi "pagasacentre/backend/internal/api/consent"
 	paymentapi "pagasacentre/backend/internal/api/payment"
 	regapi "pagasacentre/backend/internal/api/registration"
+	sermonapi "pagasacentre/backend/internal/api/sermon"
 	"pagasacentre/backend/internal/accommodation"
 	"pagasacentre/backend/internal/adminlog"
 	"pagasacentre/backend/internal/billing"
@@ -27,6 +28,8 @@ import (
 	"pagasacentre/backend/internal/middleware"
 	"pagasacentre/backend/internal/payment"
 	"pagasacentre/backend/internal/registration"
+	"pagasacentre/backend/internal/sermon"
+	sermonstorage "pagasacentre/backend/internal/sermon/storage"
 	regstorage "pagasacentre/backend/internal/registration/storage"
 	campstorage "pagasacentre/backend/internal/camp/storage"
 	accomstorage "pagasacentre/backend/internal/accommodation/storage"
@@ -159,6 +162,37 @@ func main() {
 	cronScheduler.Start()
 	defer cronScheduler.Stop()
 
+	sermonRepo := sermonstorage.NewRepository(pool)
+	var sermonFinder sermon.LiveFinder
+	if cfg.YouTubeAPIKey != "" && cfg.YouTubeChannelID != "" {
+		sermonFinder = sermon.NewYouTubeClient(cfg.YouTubeAPIKey, cfg.YouTubeChannelID)
+	} else {
+		log.Println("youtube: YOUTUBE_API_KEY or YOUTUBE_CHANNEL_ID unset; latest sermon sync disabled")
+	}
+	sermonSvc := sermon.NewService(sermonRepo, sermonFinder)
+	if sermonFinder != nil {
+		go func() {
+			if err := sermonSvc.Sync(context.Background()); err != nil {
+				log.Printf("sermon sync (startup): %v", err)
+			}
+		}()
+		london, locErr := time.LoadLocation("Europe/London")
+		if locErr != nil {
+			log.Fatalf("sermon cron location: %v", locErr)
+		}
+		sermonCron := cron.New(cron.WithLocation(london))
+		_, err = sermonCron.AddFunc("0 19 * * 0", func() {
+			if syncErr := sermonSvc.Sync(context.Background()); syncErr != nil {
+				log.Printf("sermon sync (weekly): %v", syncErr)
+			}
+		})
+		if err != nil {
+			log.Fatalf("sermon cron: %v", err)
+		}
+		sermonCron.Start()
+		defer sermonCron.Stop()
+	}
+
 	commit := os.Getenv("RAILWAY_GIT_COMMIT_SHA")
 	if commit == "" {
 		commit = "unknown"
@@ -177,6 +211,7 @@ func main() {
 		RegistrationHandler:  regapi.NewHandler(regSvc),
 		PaymentHandler:       paymentapi.NewHandler(paySvc, billSvc, stripeCli),
 		ConsentHandler:       consentapi.NewHandler(),
+		SermonHandler:        sermonapi.NewHandler(sermonSvc),
 		RegRepo:              regRepo,
 		CampRepo:             campRepo,
 		RegSvc:               regSvc,

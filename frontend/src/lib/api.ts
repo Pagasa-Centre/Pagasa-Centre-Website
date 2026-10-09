@@ -67,6 +67,16 @@ export const events = {
   list: () => apiFetch<unknown[]>("/events"),
 };
 
+// --- Latest sermon (homepage) ---
+export type LatestSermon = {
+  videoId: string;
+  title: string;
+};
+
+export const sermons = {
+  latest: () => apiFetch<LatestSermon>("/api/sermons/latest"),
+};
+
 // --- Camp registration ----------------------------------------------------
 
 export type CampConfig = {
