@@ -76,7 +76,7 @@ export const locations: LocationDetail[] = [
     name: "West Midlands & Worcestershire, UK",
     venue: "The Old Library Centre",
     address: "65 Ombersley Street East, Droitwich Spa, WR9 8QS",
-    schedule: "Saturday | 2:00PM - 6:00PM (Every other week)",
+    schedule: "Saturday | 2:00PM - 6:00PM",
     imageUrl: "/loc-droitwich.png",
   },
   {
