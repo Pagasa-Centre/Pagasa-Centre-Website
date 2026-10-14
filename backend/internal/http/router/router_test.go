@@ -1,10 +1,34 @@
 package router
 
 import (
+	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
+
+type stubPinger struct{ err error }
+
+func (s stubPinger) Ping(context.Context) error { return s.err }
+
+func TestHealth(t *testing.T) {
+	ok := New(Config{Commit: "abc", DB: stubPinger{}})
+	down := New(Config{Commit: "abc", DB: stubPinger{err: context.DeadlineExceeded}})
+
+	okRes := httptest.NewRecorder()
+	ok.ServeHTTP(okRes, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if okRes.Code != http.StatusOK {
+		t.Fatalf("healthy status = %d", okRes.Code)
+	}
+
+	downRes := httptest.NewRecorder()
+	down.ServeHTTP(downRes, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if downRes.Code != http.StatusServiceUnavailable {
+		body, _ := io.ReadAll(downRes.Body)
+		t.Fatalf("unhealthy status = %d body %s", downRes.Code, body)
+	}
+}
 
 func TestCampAdminRoutes(t *testing.T) {
 	h := New(Config{})

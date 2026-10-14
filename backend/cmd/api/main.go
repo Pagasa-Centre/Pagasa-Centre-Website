@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -51,6 +52,21 @@ import (
 //  7. Serve it on an http.Server that has timeouts, in a goroutine.
 //  8. Block until SIGINT/SIGTERM, then shut down with a deadline.
 func main() {
+	// Non-zero exit after the defers below have closed the pool and stopped jobs.
+	// os.Exit would skip those defers, so it runs from the first defer, which
+	// is the last to execute.
+	exitCode := 0
+	defer func() {
+		if exitCode != 0 {
+			os.Exit(exitCode)
+		}
+	}()
+
+	// Cancelled when the process is asked to shut down, so an in-flight billing
+	// sweep or sermon sync stops instead of running against a closing database.
+	jobCtx, stopJobs := context.WithCancel(context.Background())
+	defer stopJobs()
+
 	// 1. Config. Read the environment once, at the edge. Fail the process now
 	// if something required is missing — a half-configured server that starts
 	// and then errors on the first request is harder to diagnose.
@@ -182,7 +198,7 @@ func main() {
 	// runs once per replica; move it out if that would double-charge or double-send.
 	cronScheduler := cron.New()
 	_, err = cronScheduler.AddFunc("0 3 * * *", func() {
-		n, sweepErr := billSvc.SweepOverdue(context.Background())
+		n, sweepErr := billSvc.SweepOverdue(jobCtx)
 		if sweepErr != nil {
 			log.Printf("billing sweep: %v", sweepErr)
 			return
@@ -205,9 +221,12 @@ func main() {
 		log.Println("youtube: YOUTUBE_API_KEY or YOUTUBE_CHANNEL_ID unset; latest sermon sync disabled")
 	}
 	sermonSvc := sermon.NewService(sermonRepo, sermonFinder)
+	var startupSync sync.WaitGroup
 	if sermonFinder != nil {
+		startupSync.Add(1)
 		go func() {
-			if err := sermonSvc.Sync(context.Background()); err != nil {
+			defer startupSync.Done()
+			if err := sermonSvc.Sync(jobCtx); err != nil {
 				log.Printf("sermon sync (startup): %v", err)
 			}
 		}()
@@ -217,7 +236,7 @@ func main() {
 		}
 		sermonCron := cron.New(cron.WithLocation(london))
 		_, err = sermonCron.AddFunc("0 19 * * 0", func() {
-			if syncErr := sermonSvc.Sync(context.Background()); syncErr != nil {
+			if syncErr := sermonSvc.Sync(jobCtx); syncErr != nil {
 				log.Printf("sermon sync (weekly): %v", syncErr)
 			}
 		})
@@ -245,6 +264,7 @@ func main() {
 		AllowedOrigin:        cfg.AllowedOrigin,
 		Commit:               commit,
 		AdminAuth:            adminAuth,
+		DB:                   pool,
 		CampHandler:          campapi.NewHandler(campSvc),
 		AccommodationHandler: accomapi.NewHandler(accSvc),
 		RegistrationHandler:  regapi.NewHandler(regSvc),
@@ -271,28 +291,39 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	// Listen in a goroutine so main can stay on the next step and wait for a
-	// shutdown signal. http.ErrServerClosed is the normal error from Shutdown,
-	// so only any other error is fatal.
+	// Listen in a goroutine so main can wait for a shutdown signal. A listen
+	// failure is sent back here instead of calling log.Fatalf in the goroutine,
+	// which would skip the defers that close the pool and stop the jobs.
+	// http.ErrServerClosed is the normal error from Shutdown.
+	listenErr := make(chan error, 1)
 	go func() {
 		log.Printf("Pag-Asa Centre API listening on %s", srv.Addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("server: %v", err)
+			listenErr <- err
 		}
 	}()
 
 	// 8. Graceful shutdown. Kubernetes, Railway, and a Ctrl-C all deliver
-	// SIGTERM or SIGINT. Stop accepting new connections, let in-flight requests
-	// finish, then return so the defers above close the pool and stop the jobs.
-	// The timeout is the deadline: after it, remaining requests are dropped
-	// rather than hanging the deploy.
+	// SIGTERM or SIGINT. Cancel background work first, stop accepting new
+	// connections, let in-flight requests finish, then return so the defers
+	// above stop the jobs and close the pool. The timeout is the deadline:
+	// after it, remaining requests are dropped rather than hanging the deploy.
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	<-stop
-	log.Println("shutting down...")
+	select {
+	case sig := <-stop:
+		log.Printf("shutting down: %s", sig)
+	case err := <-listenErr:
+		log.Printf("server: %v", err)
+		exitCode = 1
+	}
+	stopJobs()
+	startupSync.Wait()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	_ = srv.Shutdown(shutdownCtx)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("server shutdown: %v", err)
+	}
 }
 
 func applyStripePriceOverrides(ctx context.Context, repo *regstorage.Repository, cfg config.Config) {
