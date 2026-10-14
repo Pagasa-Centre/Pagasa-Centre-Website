@@ -12,41 +12,64 @@ import (
 
 	"github.com/robfig/cron/v3"
 
+	"pagasacentre/backend/internal/accommodation"
+	accomstorage "pagasacentre/backend/internal/accommodation/storage"
+	"pagasacentre/backend/internal/adminlog"
 	accomapi "pagasacentre/backend/internal/api/accommodation"
 	campapi "pagasacentre/backend/internal/api/camp"
 	consentapi "pagasacentre/backend/internal/api/consent"
 	paymentapi "pagasacentre/backend/internal/api/payment"
 	regapi "pagasacentre/backend/internal/api/registration"
 	sermonapi "pagasacentre/backend/internal/api/sermon"
-	"pagasacentre/backend/internal/accommodation"
-	"pagasacentre/backend/internal/adminlog"
 	"pagasacentre/backend/internal/billing"
 	"pagasacentre/backend/internal/camp"
+	campstorage "pagasacentre/backend/internal/camp/storage"
 	"pagasacentre/backend/internal/config"
 	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/http/router"
 	"pagasacentre/backend/internal/middleware"
 	"pagasacentre/backend/internal/payment"
 	"pagasacentre/backend/internal/registration"
+	regstorage "pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/sermon"
 	sermonstorage "pagasacentre/backend/internal/sermon/storage"
-	regstorage "pagasacentre/backend/internal/registration/storage"
-	campstorage "pagasacentre/backend/internal/camp/storage"
-	accomstorage "pagasacentre/backend/internal/accommodation/storage"
 	"pagasacentre/backend/internal/sheets"
 	commondb "pagasacentre/backend/pkg/commonlibrary/db"
 )
 
+// main is the composition root: the one place that knows concrete types and
+// connects them. A production API's main should do these steps, in this order,
+// and almost nothing else. Business rules live in services, SQL in repositories,
+// HTTP in handlers.
+//
+//  1. Load config and fail fast if a required setting is missing.
+//  2. Migrate the database before accepting traffic.
+//  3. Open a connection pool, and close it when the process exits.
+//  4. Construct dependencies bottom-up: repositories, then services, then handlers.
+//  5. Start background jobs, and stop them on shutdown.
+//  6. Build one HTTP handler from those dependencies.
+//  7. Serve it on an http.Server that has timeouts, in a goroutine.
+//  8. Block until SIGINT/SIGTERM, then shut down with a deadline.
 func main() {
+	// 1. Config. Read the environment once, at the edge. Fail the process now
+	// if something required is missing — a half-configured server that starts
+	// and then errors on the first request is harder to diagnose.
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
 
+	// 2. Migrations. Apply schema changes before any query runs, so the code
+	// and the database cannot disagree. Small services do this on boot. Larger
+	// ones often run the same migrations as a separate deploy step so several
+	// replicas don't migrate at once.
 	if err := commondb.RunMigrations(cfg.DatabaseURL, "file://migrations"); err != nil {
 		log.Fatalf("migrations: %v", err)
 	}
 
+	// 3. Database pool. One long-lived pool shared by every repository. defer
+	// Close runs when main returns, including after a graceful shutdown, so
+	// connections are not left open on the database.
 	ctx := context.Background()
 	pool, err := commondb.New(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -54,6 +77,10 @@ func main() {
 	}
 	defer pool.Close()
 
+	// 4. Dependencies, bottom-up. Repositories need the pool. Services need
+	// repositories and external clients. Handlers need services. Nothing below
+	// main imports a concrete constructor from another layer, so tests can
+	// substitute fakes and the dependency rule stays intact.
 	accRepo := accomstorage.NewRepository(pool)
 	accSvc := accommodation.NewService(accRepo)
 	campRepo := campstorage.NewRepository(pool)
@@ -67,6 +94,9 @@ func main() {
 		cfg.StripeSuccessURL, cfg.StripeCancelURL,
 	)
 
+	// Optional integrations. If a required client (the database, Stripe) cannot
+	// start, the process should exit. If an optional one cannot, fall back to a
+	// no-op and log it, so one missing integration does not take the API down.
 	var mailer email.Mailer
 	switch {
 	case cfg.ResendAPIKey != "" && cfg.EmailFrom != "":
@@ -145,6 +175,11 @@ func main() {
 		log.Println("admin: WARNING — ADMIN_PASSWORD or ADMIN_SESSION_SECRET unset; login will not work")
 	}
 
+	// 5. Background work. Jobs live in this process, so they must start after the
+	// services they call exist, and stop when the process is asked to exit
+	// (defer Stop). A job that fails should be logged, not fatal — the HTTP
+	// server is still useful. With more than one replica, a job inside the API
+	// runs once per replica; move it out if that would double-charge or double-send.
 	cronScheduler := cron.New()
 	_, err = cronScheduler.AddFunc("0 3 * * *", func() {
 		n, sweepErr := billSvc.SweepOverdue(context.Background())
@@ -193,6 +228,8 @@ func main() {
 		defer sermonCron.Stop()
 	}
 
+	// Record which build is running. /health reports this so you can tell a
+	// deploy finished and which commit is answering requests.
 	commit := os.Getenv("RAILWAY_GIT_COMMIT_SHA")
 	if commit == "" {
 		commit = "unknown"
@@ -202,6 +239,8 @@ func main() {
 	adminHub := adminlog.NewHub()
 	adminRec := adminlog.NewRecorder(pool, adminHub)
 
+	// 6. One HTTP handler. Routes are registered in the router, not here. main
+	// only hands the router the dependencies it needs.
 	handler := router.New(router.Config{
 		AllowedOrigin:        cfg.AllowedOrigin,
 		Commit:               commit,
@@ -221,12 +260,20 @@ func main() {
 		AdminHub:             adminHub,
 	})
 
+	// 7. http.Server, not http.ListenAndServe. The Server value is what you shut
+	// down later, and it is where timeouts live. ReadHeaderTimeout stops a
+	// client that connects and never sends headers from holding a goroutine
+	// open (Slowloris). Read, write, and idle timeouts are the next ones to add
+	// when handlers should not run forever.
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	// Listen in a goroutine so main can stay on the next step and wait for a
+	// shutdown signal. http.ErrServerClosed is the normal error from Shutdown,
+	// so only any other error is fatal.
 	go func() {
 		log.Printf("Pag-Asa Centre API listening on %s", srv.Addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -234,6 +281,11 @@ func main() {
 		}
 	}()
 
+	// 8. Graceful shutdown. Kubernetes, Railway, and a Ctrl-C all deliver
+	// SIGTERM or SIGINT. Stop accepting new connections, let in-flight requests
+	// finish, then return so the defers above close the pool and stop the jobs.
+	// The timeout is the deadline: after it, remaining requests are dropped
+	// rather than hanging the deploy.
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
