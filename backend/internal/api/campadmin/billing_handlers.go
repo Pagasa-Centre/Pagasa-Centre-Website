@@ -9,6 +9,9 @@ import (
 
 	"pagasacentre/backend/internal/admin"
 	"pagasacentre/backend/internal/billing"
+	"pagasacentre/backend/internal/billing/allocation"
+	"pagasacentre/backend/internal/billing/camperedit"
+	"pagasacentre/backend/internal/billing/invoicing"
 	usecase "pagasacentre/backend/internal/campadmin"
 	"pagasacentre/backend/internal/registration/domain"
 	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
@@ -18,7 +21,7 @@ import (
 
 func putAllocation(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var body billing.AllocateRequest
+		var body allocation.AllocateRequest
 		if err := request.Decode(r, &body); err != nil {
 			commonerrors.WriteError(w, err)
 			return
@@ -182,7 +185,7 @@ func deleteCamper(svc *usecase.Service) http.HandlerFunc {
 
 func postConvertDayVisitor(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var body billing.ConvertToDayVisitorRequest
+		var body camperedit.ConvertToDayVisitorRequest
 		if err := request.Decode(r, &body); err != nil {
 			commonerrors.WriteError(w, err)
 			return
@@ -201,7 +204,7 @@ func postConvertDayVisitor(svc *usecase.Service) http.HandlerFunc {
 
 func patchDayPassCamper(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var body billing.UpdateDayPassCamperRequest
+		var body camperedit.UpdateDayPassCamperRequest
 		if err := request.Decode(r, &body); err != nil {
 			commonerrors.WriteError(w, err)
 			return
@@ -220,7 +223,7 @@ func patchDayPassCamper(svc *usecase.Service) http.HandlerFunc {
 
 func patchCamperCoach(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var body billing.UpdateCamperCoachRequest
+		var body camperedit.UpdateCamperCoachRequest
 		if err := request.Decode(r, &body); err != nil {
 			commonerrors.WriteError(w, err)
 			return
@@ -239,7 +242,7 @@ func patchCamperCoach(svc *usecase.Service) http.HandlerFunc {
 
 func patchCamper(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var body billing.EditCamperRequest
+		var body camperedit.EditCamperRequest
 		if err := request.Decode(r, &body); err != nil {
 			commonerrors.WriteError(w, err)
 			return
@@ -259,7 +262,7 @@ func patchCamper(svc *usecase.Service) http.HandlerFunc {
 
 func postAddCamper(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var body billing.AddCamperRequest
+		var body camperedit.AddCamperRequest
 		if err := request.Decode(r, &body); err != nil {
 			commonerrors.WriteError(w, err)
 			return
@@ -350,7 +353,7 @@ func postResyncAllSheets(svc *usecase.Service) http.HandlerFunc {
 
 func patchInvoiceDue(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var body billing.ExtendDueRequest
+		var body invoicing.ExtendDueRequest
 		if err := request.Decode(r, &body); err != nil {
 			commonerrors.WriteError(w, err)
 			return

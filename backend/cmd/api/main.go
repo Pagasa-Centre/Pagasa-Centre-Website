@@ -24,6 +24,18 @@ import (
 	regapi "pagasacentre/backend/internal/api/registration"
 	sermonapi "pagasacentre/backend/internal/api/sermon"
 	"pagasacentre/backend/internal/billing"
+	"pagasacentre/backend/internal/billing/allocation"
+	allocstorage "pagasacentre/backend/internal/billing/allocation/storage"
+	"pagasacentre/backend/internal/billing/camperedit"
+	camperstorage "pagasacentre/backend/internal/billing/camperedit/storage"
+	"pagasacentre/backend/internal/billing/invoicing"
+	invstorage "pagasacentre/backend/internal/billing/invoicing/storage"
+	"pagasacentre/backend/internal/billing/reconcile"
+	reconcilestorage "pagasacentre/backend/internal/billing/reconcile/storage"
+	"pagasacentre/backend/internal/billing/sheetsync"
+	sheetstorage "pagasacentre/backend/internal/billing/sheetsync/storage"
+	"pagasacentre/backend/internal/billing/sweep"
+	sweepstorage "pagasacentre/backend/internal/billing/sweep/storage"
 	"pagasacentre/backend/internal/camp"
 	campstorage "pagasacentre/backend/internal/camp/storage"
 	"pagasacentre/backend/internal/campadmin"
@@ -182,8 +194,21 @@ func main() {
 		InvoiceDueDays:         cfg.InvoiceDueDays,
 		WhiteTeamEmail:         cfg.WhiteTeamEmail,
 	}
-	billSvc := billing.NewService(regRepo, billing.NewStripeBilling(), mailer, sheetSync, billCfg).
-		WithPriceLookup(campPriceAdapter{repo: campRepo})
+	pricer := billing.NewPricer(regRepo, billCfg, campPriceAdapter{repo: campRepo})
+	stripeBill := billing.NewStripeBilling()
+	allocRepo := allocstorage.NewRepository(pool)
+	invRepo := invstorage.NewRepository(pool)
+	camperRepo := camperstorage.NewRepository(pool)
+	reconRepo := reconcilestorage.NewRepository(pool)
+	sweepRepo := sweepstorage.NewRepository(pool)
+	sheetRepo := sheetstorage.NewRepository(pool)
+
+	allocSvc := allocation.NewService(regRepo, allocRepo, stripeBill, mailer, pricer, billCfg)
+	invSvc := invoicing.NewService(regRepo, invRepo, stripeBill, mailer, sheetSync, pricer, billCfg)
+	camperSvc := camperedit.NewService(regRepo, camperRepo, stripeBill, mailer, sheetSync, pricer, billCfg)
+	reconSvc := reconcile.NewService(regRepo, reconRepo, mailer, pricer, billCfg)
+	sweepSvc := sweep.NewService(sweepRepo, allocSvc)
+	sheetSvc := sheetsync.NewService(regRepo, sheetRepo, sheetSync)
 
 	adminAuth := middleware.AuthConfig{
 		Password:         cfg.AdminPassword,
@@ -202,7 +227,7 @@ func main() {
 	// runs once per replica; move it out if that would double-charge or double-send.
 	cronScheduler := cron.New()
 	_, err = cronScheduler.AddFunc("0 3 * * *", func() {
-		n, sweepErr := billSvc.SweepOverdue(jobCtx)
+		n, sweepErr := sweepSvc.SweepOverdue(jobCtx)
 		if sweepErr != nil {
 			log.Printf("billing sweep: %v", sweepErr)
 			return
@@ -261,7 +286,13 @@ func main() {
 
 	adminHub := adminlog.NewHub()
 	adminRec := adminlog.NewRecorder(adminstorage.NewRepository(pool), adminHub)
-	adminSvc := campadmin.NewService(billSvc, regSvc, campSvc, paySvc, adminRec)
+	adminSvc := campadmin.NewService(campadmin.BillingServices{
+		Allocation: allocSvc,
+		Invoicing:  invSvc,
+		Campers:    camperSvc,
+		Sweep:      sweepSvc,
+		Sheets:     sheetSvc,
+	}, regSvc, campSvc, paySvc, adminRec)
 
 	// 6. One HTTP handler. Routes are registered in the router, not here. main
 	// only hands the router the dependencies it needs.
@@ -273,7 +304,7 @@ func main() {
 		CampHandler:          campapi.NewHandler(campSvc),
 		AccommodationHandler: accomapi.NewHandler(accSvc),
 		RegistrationHandler:  regapi.NewHandler(regSvc),
-		PaymentHandler:       paymentapi.NewHandler(paySvc, billSvc, stripeCli),
+		PaymentHandler:       paymentapi.NewHandler(paySvc, reconSvc, stripeCli),
 		ConsentHandler:       consentapi.NewHandler(),
 		SermonHandler:        sermonapi.NewHandler(sermonSvc),
 		CampSvc:              campSvc,

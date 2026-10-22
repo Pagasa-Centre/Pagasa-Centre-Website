@@ -42,10 +42,15 @@ backend/
     email/, sheets/, adminlog/    infra collaborators (no api/ layer)
     campadmin/                    admin use cases (domain calls + audit)
     admin/                        shared admin helpers (actor, csv)
-    billing/, payment/            cross-cutting services (no separate api/ yet)
+    billing/                        shared kernel (config, stripe, pricing, line items)
+      allocation/, invoicing/, camperedit/, reconcile/, sweep/, sheetsync/
+        service.go + repo.go + storage/repository.go (each use-case group)
+      billingtest/                  exported integration-test fixtures (pgx allowed)
+    registration/storage/groupsql/  shared group SQL (scan, lock, stamp, cross-group writes)
+    payment/                        deposit checkout (no separate api/ yet)
 ```
 
-Existing domains: `camp`, `accommodation`, `registration`, `consent` (api only), `payment`, `admin`, `campadmin` (application layer for admin actions).
+Existing domains: `camp`, `accommodation`, `registration`, `consent` (api only), `payment`, `admin`, `campadmin`, and billing use-case groups under `internal/billing/`.
 
 ## Hard guardrails
 
@@ -73,6 +78,8 @@ Existing domains: `camp`, `accommodation`, `registration`, `consent` (api only),
 
 10. **Admin actions go through use cases.** `internal/campadmin` owns each camp-admin write: call the billing / registration / camp / payment service, then record the audit line (best-effort). Handlers in `internal/api/campadmin` decode, pass `admin.ActorFrom`, call one use-case method, and render. Domain services never record admin audit events. `internal/archtest` (`TestOnlyUseCasesRecordAudit`) forbids audit recording in `internal/api/` and `internal/middleware/`.
 
+11. **Billing is split by use case.** Six groups under `internal/billing/{allocation,invoicing,camperedit,reconcile,sweep,sheetsync}` each own `service.go`, narrow interfaces, and `storage/`. The root `internal/billing` package is the shared kernel only. Sibling billing groups must not import each other; wire in `cmd/api/main.go`. Shared SQL lives in `registration/storage/groupsql`; shared reads use `*regstorage.Repository`. `internal/archtest` (`TestBillingGroupsDoNotImportSiblings`) enforces sibling isolation. New billing behaviour belongs in the group that owns it unless the plan justifies a new group.
+
 ## Model types (no entity layer)
 
 We use **two** model layers (not three — there is no sqlboiler `entity` package):
@@ -92,6 +99,8 @@ type SubmitRequest = domain.SubmitRequest
 ```
 
 ## Adding a new endpoint (existing domain)
+
+For camp-admin billing actions, add the method to the owning group under `internal/billing/` (guardrail 11), expose it through `internal/campadmin`, then the handler.
 
 1. Add or extend domain types in `internal/{domain}/domain/`. Lifecycle rules go on the entity (`domain.Group` methods — guardrail 9).
 2. Add service method in `internal/{domain}/service.go` (return domain types and domain errors — guardrail 8).

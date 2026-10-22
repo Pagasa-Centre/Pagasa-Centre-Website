@@ -1,57 +1,11 @@
 package billing
 
-// AllocateCamper is one camper placement from the admin dashboard.
-type AllocateCamper struct {
-	CamperID                   string `json:"camper_id"`
-	AllocatedAccommodationCode string `json:"allocated_accommodation_code"`
-	// Optional physical unit within the tier (e.g. caravan_5).
-	AllocatedUnitCode string `json:"allocated_unit_code,omitempty"`
-	// Optional override; if empty, resolved from tier + age.
-	BilledStripePriceID string `json:"billed_stripe_price_id,omitempty"`
-}
-
-// AllocateRequest is PUT /camp-admin/registrations/{groupID}/allocation.
-type AllocateRequest struct {
-	Campers          []AllocateCamper `json:"campers"`
-	ExpectedVersion  *int             `json:"expected_version,omitempty"`
-}
-
 // BulkInvoiceRequest is POST /camp-admin/registrations/invoice-bulk.
 type BulkInvoiceRequest struct {
 	GroupIDs []string `json:"group_ids"`
 }
 
-// ExtendDueRequest is PATCH /camp-admin/registrations/{groupID}/invoice-due.
-type ExtendDueRequest struct {
-	DueAt           string `json:"due_at"` // RFC3339
-	ExpectedVersion *int   `json:"expected_version,omitempty"`
-}
-
 // VersionedBody is embedded by POST handlers that accept optional optimistic concurrency.
 type VersionedBody struct {
 	ExpectedVersion *int `json:"expected_version,omitempty"`
-}
-
-// ConvertToDayVisitorRequest is POST .../campers/{camperID}/convert-day-visitor.
-type ConvertToDayVisitorRequest struct {
-	ExpectedVersion *int     `json:"expected_version,omitempty"`
-	Days            []string `json:"days"`
-	TshirtOption    string   `json:"tshirt_option"`
-	ShirtSize       string   `json:"shirt_size"`
-	NeedsCatering   *bool    `json:"needs_catering"`
-}
-
-// UpdateDayPassCamperRequest is PATCH .../campers/{camperID}/day-pass.
-type UpdateDayPassCamperRequest struct {
-	ExpectedVersion *int    `json:"expected_version,omitempty"`
-	TshirtOption    string  `json:"tshirt_option"`
-	ShirtSize       string  `json:"shirt_size"`
-	NeedsCatering   *bool   `json:"needs_catering"`
-	Dietary         *string `json:"dietary_requirements"`
-}
-
-// UpdateCamperCoachRequest is PATCH .../campers/{camperID}/coach.
-type UpdateCamperCoachRequest struct {
-	ExpectedVersion *int `json:"expected_version,omitempty"`
-	NeedsCoach      bool `json:"needs_coach"`
 }

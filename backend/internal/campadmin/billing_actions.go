@@ -7,15 +7,17 @@ import (
 	"time"
 
 	"pagasacentre/backend/internal/adminlog"
-	"pagasacentre/backend/internal/billing"
+	"pagasacentre/backend/internal/billing/allocation"
+	"pagasacentre/backend/internal/billing/camperedit"
+	"pagasacentre/backend/internal/billing/invoicing"
 )
 
-func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedVersion int, req billing.AllocateRequest) error {
+func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedVersion int, req allocation.AllocateRequest) error {
 	prior, _ := s.reg.FindGroup(ctx, groupID)
 	campers, _ := s.reg.CampersForGroup(ctx, groupID)
 	isEdit := prior != nil && prior.AllocationIsEdit(campers)
 
-	if err := s.bill.Allocate(ctx, groupID, actor, expectedVersion, req); err != nil {
+	if err := s.bill.Allocation.Allocate(ctx, groupID, actor, expectedVersion, req); err != nil {
 		return err
 	}
 	g, _ := s.reg.FindGroup(ctx, groupID)
@@ -31,7 +33,7 @@ func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedV
 }
 
 func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expectedVersion int) error {
-	if err := s.bill.SendInvoice(ctx, groupID, actor, expectedVersion); err != nil {
+	if err := s.bill.Invoicing.SendInvoice(ctx, groupID, actor, expectedVersion); err != nil {
 		return err
 	}
 	g, _ := s.reg.FindGroup(ctx, groupID)
@@ -42,7 +44,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 }
 
 func (s *Service) SendInvoicesBulk(ctx context.Context, actor string, groupIDs []string) map[string]error {
-	errs := s.bill.SendInvoicesBulk(ctx, actor, groupIDs)
+	errs := s.bill.Invoicing.SendInvoicesBulk(ctx, actor, groupIDs)
 	for _, id := range groupIDs {
 		if _, failed := errs[id]; failed {
 			continue
@@ -56,7 +58,7 @@ func (s *Service) SendInvoicesBulk(ctx context.Context, actor string, groupIDs [
 }
 
 func (s *Service) SendCoachInvoice(ctx context.Context, groupID, actor string, expectedVersion int) error {
-	if err := s.bill.SendCoachInvoice(ctx, groupID, actor, expectedVersion); err != nil {
+	if err := s.bill.Invoicing.SendCoachInvoice(ctx, groupID, actor, expectedVersion); err != nil {
 		return err
 	}
 	g, _ := s.reg.FindGroup(ctx, groupID)
@@ -67,7 +69,7 @@ func (s *Service) SendCoachInvoice(ctx context.Context, groupID, actor string, e
 }
 
 func (s *Service) SendCoachInvoicesBulk(ctx context.Context, actor string, groupIDs []string) map[string]error {
-	errs := s.bill.SendCoachInvoicesBulk(ctx, actor, groupIDs)
+	errs := s.bill.Invoicing.SendCoachInvoicesBulk(ctx, actor, groupIDs)
 	for _, id := range groupIDs {
 		if _, failed := errs[id]; failed {
 			continue
@@ -81,7 +83,7 @@ func (s *Service) SendCoachInvoicesBulk(ctx context.Context, actor string, group
 }
 
 func (s *Service) WaiveCoachFee(ctx context.Context, groupID, actor string, expectedVersion int) error {
-	if err := s.bill.WaiveCoachFee(ctx, groupID, actor, expectedVersion); err != nil {
+	if err := s.bill.Invoicing.WaiveCoachFee(ctx, groupID, actor, expectedVersion); err != nil {
 		return err
 	}
 	g, _ := s.reg.FindGroup(ctx, groupID)
@@ -92,7 +94,7 @@ func (s *Service) WaiveCoachFee(ctx context.Context, groupID, actor string, expe
 }
 
 func (s *Service) UnwaiveCoachFee(ctx context.Context, groupID, actor string, expectedVersion int) error {
-	if err := s.bill.UnwaiveCoachFee(ctx, groupID, actor, expectedVersion); err != nil {
+	if err := s.bill.Invoicing.UnwaiveCoachFee(ctx, groupID, actor, expectedVersion); err != nil {
 		return err
 	}
 	g, _ := s.reg.FindGroup(ctx, groupID)
@@ -103,7 +105,7 @@ func (s *Service) UnwaiveCoachFee(ctx context.Context, groupID, actor string, ex
 }
 
 func (s *Service) Unallocate(ctx context.Context, groupID, actor string, expectedVersion int) error {
-	if err := s.bill.Unallocate(ctx, groupID, actor, expectedVersion); err != nil {
+	if err := s.bill.Allocation.Unallocate(ctx, groupID, actor, expectedVersion); err != nil {
 		return err
 	}
 	g, _ := s.reg.FindGroup(ctx, groupID)
@@ -118,7 +120,7 @@ func (s *Service) Release(ctx context.Context, groupID, actor string, expectedVe
 	if cancelled {
 		reason, verb, action = "cancelled by White Team", "Cancelled", adminlog.ActionCancel
 	}
-	if err := s.bill.VoidAndRelease(ctx, groupID, reason, actor, expectedVersion, cancelled); err != nil {
+	if err := s.bill.Allocation.VoidAndRelease(ctx, groupID, reason, actor, expectedVersion, cancelled); err != nil {
 		return err
 	}
 	g, _ := s.reg.FindGroup(ctx, groupID)
@@ -128,7 +130,7 @@ func (s *Service) Release(ctx context.Context, groupID, actor string, expectedVe
 }
 
 func (s *Service) MarkBalancePaidManually(ctx context.Context, groupID, actor string, expectedVersion int) error {
-	if err := s.bill.MarkBalancePaidManually(ctx, groupID, actor, expectedVersion); err != nil {
+	if err := s.bill.Invoicing.MarkBalancePaidManually(ctx, groupID, actor, expectedVersion); err != nil {
 		return err
 	}
 	g, _ := s.reg.FindGroup(ctx, groupID)
@@ -138,8 +140,8 @@ func (s *Service) MarkBalancePaidManually(ctx context.Context, groupID, actor st
 	return nil
 }
 
-func (s *Service) RemoveCamper(ctx context.Context, groupID, camperID, actor string, expectedVersion int) (billing.RemoveCamperSummary, error) {
-	sum, err := s.bill.RemoveCamper(ctx, groupID, camperID, actor, expectedVersion)
+func (s *Service) RemoveCamper(ctx context.Context, groupID, camperID, actor string, expectedVersion int) (camperedit.RemoveCamperSummary, error) {
+	sum, err := s.bill.Campers.RemoveCamper(ctx, groupID, camperID, actor, expectedVersion)
 	if err != nil {
 		return sum, err
 	}
@@ -153,8 +155,8 @@ func (s *Service) RemoveCamper(ctx context.Context, groupID, camperID, actor str
 	return sum, nil
 }
 
-func (s *Service) ConvertCamperToDayVisitor(ctx context.Context, groupID, camperID, actor string, expectedVersion int, req billing.ConvertToDayVisitorRequest) (billing.ConvertSummary, error) {
-	sum, err := s.bill.ConvertCamperToDayVisitor(ctx, groupID, camperID, actor, expectedVersion, req)
+func (s *Service) ConvertCamperToDayVisitor(ctx context.Context, groupID, camperID, actor string, expectedVersion int, req camperedit.ConvertToDayVisitorRequest) (camperedit.ConvertSummary, error) {
+	sum, err := s.bill.Campers.ConvertCamperToDayVisitor(ctx, groupID, camperID, actor, expectedVersion, req)
 	if err != nil {
 		return sum, err
 	}
@@ -167,8 +169,8 @@ func (s *Service) ConvertCamperToDayVisitor(ctx context.Context, groupID, camper
 	return sum, nil
 }
 
-func (s *Service) UpdateDayPassCamper(ctx context.Context, groupID, camperID, actor string, expectedVersion int, req billing.UpdateDayPassCamperRequest) (billing.UpdateDayPassSummary, error) {
-	sum, err := s.bill.UpdateDayPassCamper(ctx, groupID, camperID, actor, expectedVersion, req)
+func (s *Service) UpdateDayPassCamper(ctx context.Context, groupID, camperID, actor string, expectedVersion int, req camperedit.UpdateDayPassCamperRequest) (camperedit.UpdateDayPassSummary, error) {
+	sum, err := s.bill.Campers.UpdateDayPassCamper(ctx, groupID, camperID, actor, expectedVersion, req)
 	if err != nil {
 		return sum, err
 	}
@@ -178,8 +180,8 @@ func (s *Service) UpdateDayPassCamper(ctx context.Context, groupID, camperID, ac
 	return sum, nil
 }
 
-func (s *Service) UpdateCamperCoach(ctx context.Context, groupID, camperID, actor string, expectedVersion int, req billing.UpdateCamperCoachRequest) (billing.UpdateCamperCoachSummary, error) {
-	sum, err := s.bill.UpdateCamperCoach(ctx, groupID, camperID, actor, expectedVersion, req)
+func (s *Service) UpdateCamperCoach(ctx context.Context, groupID, camperID, actor string, expectedVersion int, req camperedit.UpdateCamperCoachRequest) (camperedit.UpdateCamperCoachSummary, error) {
+	sum, err := s.bill.Campers.UpdateCamperCoach(ctx, groupID, camperID, actor, expectedVersion, req)
 	if err != nil {
 		return sum, err
 	}
@@ -199,8 +201,8 @@ func (s *Service) UpdateCamperCoach(ctx context.Context, groupID, camperID, acto
 	return sum, nil
 }
 
-func (s *Service) EditCamper(ctx context.Context, groupID, camperID, actor string, expectedVersion int, req billing.EditCamperRequest) (billing.EditCamperSummary, error) {
-	sum, err := s.bill.EditCamper(ctx, groupID, camperID, actor, expectedVersion, req)
+func (s *Service) EditCamper(ctx context.Context, groupID, camperID, actor string, expectedVersion int, req camperedit.EditCamperRequest) (camperedit.EditCamperSummary, error) {
+	sum, err := s.bill.Campers.EditCamper(ctx, groupID, camperID, actor, expectedVersion, req)
 	if err != nil {
 		return sum, err
 	}
@@ -216,8 +218,8 @@ func (s *Service) EditCamper(ctx context.Context, groupID, camperID, actor strin
 	return sum, nil
 }
 
-func (s *Service) AddCamper(ctx context.Context, groupID, actor string, expectedVersion int, req billing.AddCamperRequest) (billing.AddCamperSummary, error) {
-	sum, err := s.bill.AddCamper(ctx, groupID, actor, expectedVersion, req)
+func (s *Service) AddCamper(ctx context.Context, groupID, actor string, expectedVersion int, req camperedit.AddCamperRequest) (camperedit.AddCamperSummary, error) {
+	sum, err := s.bill.Campers.AddCamper(ctx, groupID, actor, expectedVersion, req)
 	if err != nil {
 		return sum, err
 	}
@@ -234,7 +236,7 @@ func (s *Service) AddCamper(ctx context.Context, groupID, actor string, expected
 }
 
 func (s *Service) MakeMainContact(ctx context.Context, groupID, camperID, actor string, expectedVersion int) error {
-	name, err := s.bill.MakeMainContact(ctx, groupID, camperID, actor, expectedVersion)
+	name, err := s.bill.Campers.MakeMainContact(ctx, groupID, camperID, actor, expectedVersion)
 	if err != nil {
 		return err
 	}
@@ -245,7 +247,7 @@ func (s *Service) MakeMainContact(ctx context.Context, groupID, camperID, actor 
 }
 
 func (s *Service) WaiveCamperDeposit(ctx context.Context, groupID, camperID, actor string, expectedVersion int) error {
-	name, err := s.bill.WaiveCamperDeposit(ctx, groupID, camperID, actor, expectedVersion)
+	name, err := s.bill.Campers.WaiveCamperDeposit(ctx, groupID, camperID, actor, expectedVersion)
 	if err != nil {
 		return err
 	}
@@ -255,8 +257,8 @@ func (s *Service) WaiveCamperDeposit(ctx context.Context, groupID, camperID, act
 	return nil
 }
 
-func (s *Service) DeleteRegistration(ctx context.Context, groupID, actor string, expectedVersion int) (billing.DeleteSummary, error) {
-	sum, err := s.bill.DeleteRegistration(ctx, groupID, actor, expectedVersion)
+func (s *Service) DeleteRegistration(ctx context.Context, groupID, actor string, expectedVersion int) (invoicing.DeleteSummary, error) {
+	sum, err := s.bill.Invoicing.DeleteRegistration(ctx, groupID, actor, expectedVersion)
 	if err != nil {
 		return sum, err
 	}
@@ -266,7 +268,7 @@ func (s *Service) DeleteRegistration(ctx context.Context, groupID, actor string,
 }
 
 func (s *Service) ResendInvoice(ctx context.Context, groupID, actor string, expectedVersion int) error {
-	if err := s.bill.ResendInvoice(ctx, groupID, actor, expectedVersion); err != nil {
+	if err := s.bill.Invoicing.ResendInvoice(ctx, groupID, actor, expectedVersion); err != nil {
 		return err
 	}
 	g, _ := s.reg.FindGroup(ctx, groupID)
@@ -277,7 +279,7 @@ func (s *Service) ResendInvoice(ctx context.Context, groupID, actor string, expe
 }
 
 func (s *Service) ResyncAllSheets(ctx context.Context, actor string) (int, map[string]error) {
-	synced, errs := s.bill.ResyncAllSheets(ctx, actor)
+	synced, errs := s.bill.Sheets.ResyncAllSheets(ctx, actor)
 	summary := strings.TrimSpace(actor) + " re-synced " + strconv.Itoa(synced) + " group(s) to Google Sheet"
 	s.record(ctx, actor, adminlog.ActionSheetResynced, nil, summary, map[string]any{
 		"synced": synced,
@@ -287,7 +289,7 @@ func (s *Service) ResyncAllSheets(ctx context.Context, actor string) (int, map[s
 }
 
 func (s *Service) ExtendDueAt(ctx context.Context, groupID, actor string, expectedVersion int, dueAt time.Time) error {
-	if err := s.bill.ExtendDueAt(ctx, groupID, actor, expectedVersion, dueAt); err != nil {
+	if err := s.bill.Invoicing.ExtendDueAt(ctx, groupID, actor, expectedVersion, dueAt); err != nil {
 		return err
 	}
 	g, _ := s.reg.FindGroup(ctx, groupID)
@@ -298,7 +300,7 @@ func (s *Service) ExtendDueAt(ctx context.Context, groupID, actor string, expect
 }
 
 func (s *Service) SweepOverdue(ctx context.Context, actor string) (int, error) {
-	n, err := s.bill.SweepOverdue(ctx)
+	n, err := s.bill.Sweep.SweepOverdue(ctx)
 	if err != nil {
 		return n, err
 	}
@@ -308,7 +310,7 @@ func (s *Service) SweepOverdue(ctx context.Context, actor string) (int, error) {
 }
 
 func (s *Service) ConfirmFree(ctx context.Context, groupID, actor string, expectedVersion int) error {
-	if err := s.bill.ConfirmFree(ctx, groupID, actor, expectedVersion); err != nil {
+	if err := s.bill.Allocation.ConfirmFree(ctx, groupID, actor, expectedVersion); err != nil {
 		return err
 	}
 	g, _ := s.reg.FindGroup(ctx, groupID)

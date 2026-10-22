@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"pagasacentre/backend/internal/adminlog"
-	"pagasacentre/backend/internal/billing"
+	"pagasacentre/backend/internal/billing/allocation"
+	"pagasacentre/backend/internal/billing/camperedit"
+	"pagasacentre/backend/internal/billing/invoicing"
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
@@ -67,12 +69,16 @@ func (f *fakeReg) ValidateFullPaymentPricing(context.Context) error             
 
 type fakeBill struct {
 	allocateErr error
-	coachSum    billing.UpdateCamperCoachSummary
+	coachSum    camperedit.UpdateCamperCoachSummary
 	coachErr    error
 	bulkErrs    map[string]error
 }
 
-func (f *fakeBill) Allocate(context.Context, string, string, int, billing.AllocateRequest) error {
+func billAll(f *fakeBill) BillingServices {
+	return BillingServices{Allocation: f, Invoicing: f, Campers: f, Sweep: f, Sheets: f}
+}
+
+func (f *fakeBill) Allocate(context.Context, string, string, int, allocation.AllocateRequest) error {
 	return f.allocateErr
 }
 func (f *fakeBill) Unallocate(context.Context, string, string, int) error  { return nil }
@@ -95,26 +101,26 @@ func (f *fakeBill) MarkBalancePaidManually(context.Context, string, string, int)
 func (f *fakeBill) VoidAndRelease(context.Context, string, string, string, int, bool) error {
 	return nil
 }
-func (f *fakeBill) DeleteRegistration(context.Context, string, string, int) (billing.DeleteSummary, error) {
-	return billing.DeleteSummary{}, nil
+func (f *fakeBill) DeleteRegistration(context.Context, string, string, int) (invoicing.DeleteSummary, error) {
+	return invoicing.DeleteSummary{}, nil
 }
-func (f *fakeBill) RemoveCamper(context.Context, string, string, string, int) (billing.RemoveCamperSummary, error) {
-	return billing.RemoveCamperSummary{}, nil
+func (f *fakeBill) RemoveCamper(context.Context, string, string, string, int) (camperedit.RemoveCamperSummary, error) {
+	return camperedit.RemoveCamperSummary{}, nil
 }
-func (f *fakeBill) ConvertCamperToDayVisitor(context.Context, string, string, string, int, billing.ConvertToDayVisitorRequest) (billing.ConvertSummary, error) {
-	return billing.ConvertSummary{}, nil
+func (f *fakeBill) ConvertCamperToDayVisitor(context.Context, string, string, string, int, camperedit.ConvertToDayVisitorRequest) (camperedit.ConvertSummary, error) {
+	return camperedit.ConvertSummary{}, nil
 }
-func (f *fakeBill) UpdateDayPassCamper(context.Context, string, string, string, int, billing.UpdateDayPassCamperRequest) (billing.UpdateDayPassSummary, error) {
-	return billing.UpdateDayPassSummary{}, nil
+func (f *fakeBill) UpdateDayPassCamper(context.Context, string, string, string, int, camperedit.UpdateDayPassCamperRequest) (camperedit.UpdateDayPassSummary, error) {
+	return camperedit.UpdateDayPassSummary{}, nil
 }
-func (f *fakeBill) UpdateCamperCoach(context.Context, string, string, string, int, billing.UpdateCamperCoachRequest) (billing.UpdateCamperCoachSummary, error) {
+func (f *fakeBill) UpdateCamperCoach(context.Context, string, string, string, int, camperedit.UpdateCamperCoachRequest) (camperedit.UpdateCamperCoachSummary, error) {
 	return f.coachSum, f.coachErr
 }
-func (f *fakeBill) EditCamper(context.Context, string, string, string, int, billing.EditCamperRequest) (billing.EditCamperSummary, error) {
-	return billing.EditCamperSummary{}, nil
+func (f *fakeBill) EditCamper(context.Context, string, string, string, int, camperedit.EditCamperRequest) (camperedit.EditCamperSummary, error) {
+	return camperedit.EditCamperSummary{}, nil
 }
-func (f *fakeBill) AddCamper(context.Context, string, string, int, billing.AddCamperRequest) (billing.AddCamperSummary, error) {
-	return billing.AddCamperSummary{}, nil
+func (f *fakeBill) AddCamper(context.Context, string, string, int, camperedit.AddCamperRequest) (camperedit.AddCamperSummary, error) {
+	return camperedit.AddCamperSummary{}, nil
 }
 func (f *fakeBill) MakeMainContact(context.Context, string, string, string, int) (string, error) {
 	return "", nil
@@ -157,8 +163,8 @@ func TestAllocate_firstVsEdit(t *testing.T) {
 	first := &fakeReg{
 		group: &domain.Group{ID: gid, ContactFirstName: "Ann", ContactLastName: "Lee", BillingStatus: domain.BillingNone},
 	}
-	svc := NewService(&fakeBill{}, first, nil, nil, rec)
-	if err := svc.Allocate(ctx, gid, "actor", 1, billing.AllocateRequest{}); err != nil {
+	svc := NewService(billAll(&fakeBill{}), first, nil, nil, rec)
+	if err := svc.Allocate(ctx, gid, "actor", 1, allocation.AllocateRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	if c := lastCall(rec); c.action != adminlog.ActionAllocate {
@@ -170,8 +176,8 @@ func TestAllocate_firstVsEdit(t *testing.T) {
 		group:   &domain.Group{ID: gid, ContactFirstName: "Ann", ContactLastName: "Lee", BillingStatus: domain.BillingAllocated},
 		campers: []domain.Camper{{GroupID: gid}},
 	}
-	svc = NewService(&fakeBill{}, edit, nil, nil, rec)
-	if err := svc.Allocate(ctx, gid, "actor", 1, billing.AllocateRequest{}); err != nil {
+	svc = NewService(billAll(&fakeBill{}), edit, nil, nil, rec)
+	if err := svc.Allocate(ctx, gid, "actor", 1, allocation.AllocateRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	if c := lastCall(rec); c.action != adminlog.ActionAllocationEdited {
@@ -184,8 +190,8 @@ var errAllocateFailed = errors.New("allocate failed")
 func TestAllocate_serviceErrorNoAudit(t *testing.T) {
 	rec := &captureRec{}
 	reg := &fakeReg{group: &domain.Group{ID: "g1", BillingStatus: domain.BillingNone}}
-	svc := NewService(&fakeBill{allocateErr: errAllocateFailed}, reg, nil, nil, rec)
-	err := svc.Allocate(context.Background(), "g1", "actor", 1, billing.AllocateRequest{})
+	svc := NewService(billAll(&fakeBill{allocateErr: errAllocateFailed}), reg, nil, nil, rec)
+	err := svc.Allocate(context.Background(), "g1", "actor", 1, allocation.AllocateRequest{})
 	if !errors.Is(err, errAllocateFailed) {
 		t.Fatalf("expected sentinel error, got %v", err)
 	}
@@ -198,7 +204,7 @@ func TestSendInvoicesBulk_partialSuccess(t *testing.T) {
 	rec := &captureRec{}
 	reg := &fakeReg{group: &domain.Group{ID: "ok", ContactFirstName: "A", ContactLastName: "B"}}
 	bill := &fakeBill{bulkErrs: map[string]error{"bad": errors.New("fail")}}
-	svc := NewService(bill, reg, nil, nil, rec)
+	svc := NewService(billAll(bill), reg, nil, nil, rec)
 	errs := svc.SendInvoicesBulk(context.Background(), "actor", []string{"ok", "bad"})
 	if len(errs) != 1 {
 		t.Fatalf("errs = %v", errs)
@@ -210,8 +216,8 @@ func TestSendInvoicesBulk_partialSuccess(t *testing.T) {
 
 func TestUpdateCamperCoach_noOpNoAudit(t *testing.T) {
 	rec := &captureRec{}
-	svc := NewService(&fakeBill{coachSum: billing.UpdateCamperCoachSummary{NoOp: true}}, nil, nil, nil, rec)
-	_, err := svc.UpdateCamperCoach(context.Background(), "g", "c", "actor", 1, billing.UpdateCamperCoachRequest{})
+	svc := NewService(billAll(&fakeBill{coachSum: camperedit.UpdateCamperCoachSummary{NoOp: true}}), nil, nil, nil, rec)
+	_, err := svc.UpdateCamperCoach(context.Background(), "g", "c", "actor", 1, camperedit.UpdateCamperCoachRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +229,7 @@ func TestUpdateCamperCoach_noOpNoAudit(t *testing.T) {
 func TestRelease_cancelled(t *testing.T) {
 	rec := &captureRec{}
 	reg := &fakeReg{group: &domain.Group{ID: "g1", ContactFirstName: "X", ContactLastName: "Y"}}
-	svc := NewService(&fakeBill{}, reg, nil, nil, rec)
+	svc := NewService(billAll(&fakeBill{}), reg, nil, nil, rec)
 	if err := svc.Release(context.Background(), "g1", "actor", 1, true); err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +244,7 @@ func TestSetRegistrationPaymentMode_pricingFirst(t *testing.T) {
 	priceErr := apperr.Invalid("missing full price")
 	reg := &fakeReg{priceErr: priceErr}
 	camp := &fakeCamp{}
-	svc := NewService(nil, reg, camp, nil, rec)
+	svc := NewService(BillingServices{}, reg, camp, nil, rec)
 	err := svc.SetRegistrationPaymentMode(context.Background(), "actor", domain.PaymentModeFull)
 	if !errors.Is(err, priceErr) {
 		t.Fatalf("got %v", err)
@@ -251,7 +257,7 @@ func TestSetRegistrationPaymentMode_pricingFirst(t *testing.T) {
 func TestSetRegistrationPaymentMode_setModeFailsNoAudit(t *testing.T) {
 	rec := &captureRec{}
 	camp := &fakeCamp{modeErr: errors.New("db")}
-	svc := NewService(nil, &fakeReg{}, camp, nil, rec)
+	svc := NewService(BillingServices{}, &fakeReg{}, camp, nil, rec)
 	err := svc.SetRegistrationPaymentMode(context.Background(), "actor", domain.PaymentModeDeposit)
 	if err == nil {
 		t.Fatal("expected error")
@@ -267,7 +273,7 @@ func TestSetPaymentStatus_recordsTransition(t *testing.T) {
 		group: &domain.Group{ID: "g1", ContactFirstName: "Sam", ContactLastName: "Kay"},
 		setTr: domain.PaymentTransition{From: domain.PaymentPending, To: domain.PaymentPaid},
 	}
-	svc := NewService(nil, reg, nil, nil, rec)
+	svc := NewService(BillingServices{}, reg, nil, nil, rec)
 	if err := svc.SetPaymentStatus(context.Background(), "g1", "actor", string(domain.PaymentPaid)); err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +289,7 @@ func TestSetPaymentStatus_unchangedNoAudit(t *testing.T) {
 		group: &domain.Group{ID: "g1"},
 		setTr: domain.PaymentTransition{From: domain.PaymentPaid, To: domain.PaymentPaid},
 	}
-	svc := NewService(nil, reg, nil, nil, rec)
+	svc := NewService(BillingServices{}, reg, nil, nil, rec)
 	if err := svc.SetPaymentStatus(context.Background(), "g1", "actor", string(domain.PaymentPaid)); err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +301,7 @@ func TestSetPaymentStatus_unchangedNoAudit(t *testing.T) {
 func TestSetPaymentStatus_errorNoAudit(t *testing.T) {
 	rec := &captureRec{}
 	reg := &fakeReg{setErr: domain.ErrGroupNotFound}
-	svc := NewService(nil, reg, nil, nil, rec)
+	svc := NewService(BillingServices{}, reg, nil, nil, rec)
 	err := svc.SetPaymentStatus(context.Background(), "g1", "actor", string(domain.PaymentPaid))
 	if !errors.Is(err, domain.ErrGroupNotFound) {
 		t.Fatalf("got %v", err)
@@ -309,7 +315,7 @@ func TestSetPaymentStatus_staleErrorNoAudit(t *testing.T) {
 	rec := &captureRec{}
 	stale := apperr.Conflict("stale_state", "stale")
 	reg := &fakeReg{setErr: stale}
-	svc := NewService(nil, reg, nil, nil, rec)
+	svc := NewService(BillingServices{}, reg, nil, nil, rec)
 	var ae *apperr.Error
 	err := svc.SetPaymentStatus(context.Background(), "g1", "actor", string(domain.PaymentPaid))
 	if !errors.As(err, &ae) || ae.Code != "stale_state" {
@@ -323,8 +329,8 @@ func TestSetPaymentStatus_staleErrorNoAudit(t *testing.T) {
 func TestRecorderErrorDoesNotFailAction(t *testing.T) {
 	rec := &captureRec{err: errors.New("db down")}
 	reg := &fakeReg{group: &domain.Group{ID: "g1", ContactFirstName: "A", ContactLastName: "B", BillingStatus: domain.BillingNone}}
-	svc := NewService(&fakeBill{}, reg, nil, nil, rec)
-	if err := svc.Allocate(context.Background(), "g1", "actor", 1, billing.AllocateRequest{}); err != nil {
+	svc := NewService(billAll(&fakeBill{}), reg, nil, nil, rec)
+	if err := svc.Allocate(context.Background(), "g1", "actor", 1, allocation.AllocateRequest{}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -332,7 +338,7 @@ func TestRecorderErrorDoesNotFailAction(t *testing.T) {
 func TestRecordLogin_nilSafe(t *testing.T) {
 	var svc *Service
 	svc.RecordLogin(context.Background(), "Pat")
-	svc = NewService(nil, nil, nil, nil, nil)
+	svc = NewService(BillingServices{}, nil, nil, nil, nil)
 	svc.RecordLogin(context.Background(), "Pat")
 
 	var lr interface {

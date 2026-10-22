@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -32,125 +30,6 @@ func (r *Repository) ListWithBilling(ctx context.Context, f domain.ListFilterBil
 	rows, err := r.db(ctx).Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list groups: %w", err)
-	}
-	defer rows.Close()
-
-	var out []domain.Group
-	for rows.Next() {
-		g, err := scanGroup(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, g)
-	}
-	return out, rows.Err()
-}
-
-// getGroupByIDForUpdate locks a group row for billing mutations.
-func (r *Repository) getGroupByIDForUpdate(ctx context.Context, tx pgx.Tx, groupID string) (*domain.Group, error) {
-	const q = `SELECT ` + groupSelectCols + `
-		  FROM registration_groups
-		 WHERE id = $1
-		   FOR UPDATE`
-	g, err := scanGroup(tx.QueryRow(ctx, q, groupID))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get group for update: %w", err)
-	}
-	return &g, nil
-}
-
-// FindGroupByStripeInvoiceID looks up a group by its balance invoice id.
-func (r *Repository) FindGroupByStripeInvoiceID(ctx context.Context, invoiceID string) (*domain.Group, error) {
-	const q = `SELECT ` + groupSelectCols + `
-		  FROM registration_groups
-		 WHERE stripe_invoice_id = $1`
-	g, err := scanGroup(r.db(ctx).QueryRow(ctx, q, invoiceID))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("find group by invoice: %w", err)
-	}
-	return &g, nil
-}
-
-// FindGroupByStripeCoachInvoiceID looks up a group by its coach invoice id.
-func (r *Repository) FindGroupByStripeCoachInvoiceID(ctx context.Context, invoiceID string) (*domain.Group, error) {
-	const q = `SELECT ` + groupSelectCols + `
-		  FROM registration_groups
-		 WHERE stripe_coach_invoice_id = $1`
-	g, err := scanGroup(r.db(ctx).QueryRow(ctx, q, invoiceID))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("find group by coach invoice: %w", err)
-	}
-	return &g, nil
-}
-
-// SetCamperAllocations updates allocation fields for campers in a group.
-func (r *Repository) SetCamperAllocations(ctx context.Context, groupID string, allocs []domain.CamperAllocation) error {
-	for _, a := range allocs {
-		var unitCode any
-		if strings.TrimSpace(a.AllocatedUnitCode) != "" {
-			unitCode = strings.TrimSpace(a.AllocatedUnitCode)
-		}
-		tag, err := r.db(ctx).Exec(ctx,
-			`UPDATE registrations
-			    SET allocated_accommodation_code = $1,
-			        allocated_unit_code = $2,
-			        billed_stripe_price_id = $3
-			  WHERE id = $4 AND group_id = $5`,
-			a.AllocatedAccommodationCode, unitCode, a.BilledStripePriceID, a.CamperID, groupID)
-		if err != nil {
-			return fmt.Errorf("set allocation for camper %s: %w", a.CamperID, err)
-		}
-		if tag.RowsAffected() == 0 {
-			return fmt.Errorf("camper %s not in group %s", a.CamperID, groupID)
-		}
-	}
-	return nil
-}
-
-// ClearCamperAllocations wipes allocation fields for all campers in a group.
-func (r *Repository) ClearCamperAllocations(ctx context.Context, groupID string) error {
-	_, err := r.db(ctx).Exec(ctx,
-		`UPDATE registrations
-		    SET allocated_accommodation_code = NULL,
-		        allocated_unit_code = NULL,
-		        billed_stripe_price_id = NULL
-		  WHERE group_id = $1`, groupID)
-	if err != nil {
-		return fmt.Errorf("clear allocations: %w", err)
-	}
-	return nil
-}
-
-// SetStripeCustomerID stores the Stripe Customer id for balance invoicing.
-func (r *Repository) SetStripeCustomerID(ctx context.Context, groupID, customerID string) error {
-	_, err := r.db(ctx).Exec(ctx,
-		`UPDATE registration_groups SET stripe_customer_id = $1 WHERE id = $2`,
-		customerID, groupID)
-	if err != nil {
-		return fmt.Errorf("set stripe_customer_id: %w", err)
-	}
-	return nil
-}
-
-// ListOverdueInvoiced returns groups past invoice_due_at still in invoiced status.
-func (r *Repository) ListOverdueInvoiced(ctx context.Context, now time.Time) ([]domain.Group, error) {
-	const q = `SELECT ` + groupSelectCols + `
-		  FROM registration_groups
-		 WHERE billing_status = $2
-		   AND invoice_due_at IS NOT NULL
-		   AND invoice_due_at < $1`
-	rows, err := r.db(ctx).Query(ctx, q, now.UTC(), domain.BillingInvoiced)
-	if err != nil {
-		return nil, fmt.Errorf("list overdue invoiced: %w", err)
 	}
 	defer rows.Close()
 

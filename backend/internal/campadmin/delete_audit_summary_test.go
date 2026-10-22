@@ -4,17 +4,17 @@ import (
 	"strings"
 	"testing"
 
-	"pagasacentre/backend/internal/billing"
+	"pagasacentre/backend/internal/billing/invoicing"
 )
 
 func TestFormatDeleteAuditSummary(t *testing.T) {
 	cases := map[string]struct {
-		sum         billing.DeleteSummary
+		sum         invoicing.DeleteSummary
 		wantParts   []string
 		unwantParts []string
 	}{
 		"deposit kept and balance refunded": {
-			sum: billing.DeleteSummary{
+			sum: invoicing.DeleteSummary{
 				ContactName:   "Hilda Mensah",
 				ContactEmail:  "hilda@example.com",
 				RetainedPence: 15000,
@@ -29,7 +29,7 @@ func TestFormatDeleteAuditSummary(t *testing.T) {
 			unwantParts: []string{"£270.00"},
 		},
 		"deposit kept with nothing to refund": {
-			sum: billing.DeleteSummary{
+			sum: invoicing.DeleteSummary{
 				ContactName:   "Paid Deposit",
 				ContactEmail:  "paid@example.com",
 				RetainedPence: 5000,
@@ -38,7 +38,7 @@ func TestFormatDeleteAuditSummary(t *testing.T) {
 			unwantParts: []string{"refunded"},
 		},
 		"nothing paid, nothing kept": {
-			sum: billing.DeleteSummary{
+			sum: invoicing.DeleteSummary{
 				ContactName:  "Never Paid",
 				ContactEmail: "never@example.com",
 			},
@@ -46,7 +46,7 @@ func TestFormatDeleteAuditSummary(t *testing.T) {
 			unwantParts: []string{"kept", "refunded"},
 		},
 		"open invoice voided": {
-			sum: billing.DeleteSummary{
+			sum: invoicing.DeleteSummary{
 				ContactName:   "Open Invoice",
 				ContactEmail:  "open@example.com",
 				RetainedPence: 5000,

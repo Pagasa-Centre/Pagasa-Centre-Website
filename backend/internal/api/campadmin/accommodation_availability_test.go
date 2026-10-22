@@ -48,7 +48,7 @@ func TestPutAccommodationAvailability_Valid(t *testing.T) {
 		_ = repo.SetAccommodationAvailableForRegistration(context.Background(), "lodge", true)
 	})
 
-	adminSvc := usecase.NewService(nil, regSvc, nil, nil, nil)
+	adminSvc := usecase.NewService(usecase.BillingServices{}, regSvc, nil, nil, nil)
 	r := availabilityRouter(adminSvc)
 	req := httptest.NewRequest(http.MethodPut,
 		"/camp-admin/accommodations/lodge/availability",

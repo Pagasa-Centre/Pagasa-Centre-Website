@@ -88,7 +88,8 @@ func exemptFromPgxRule(rel string) bool {
 	}
 	switch {
 	case rel == "internal/testhelper/db.go",
-		strings.HasPrefix(rel, "internal/testhelper/") && strings.HasSuffix(rel, "_test.go"):
+		strings.HasPrefix(rel, "internal/testhelper/") && strings.HasSuffix(rel, "_test.go"),
+		strings.HasPrefix(rel, "internal/billing/billingtest/"):
 		return true
 	case strings.HasPrefix(rel, "internal/archtest/"):
 		return true

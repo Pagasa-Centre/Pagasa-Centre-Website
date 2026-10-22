@@ -6,13 +6,20 @@ import (
 	"time"
 
 	"pagasacentre/backend/internal/adminlog"
-	"pagasacentre/backend/internal/billing"
+	"pagasacentre/backend/internal/billing/allocation"
+	"pagasacentre/backend/internal/billing/camperedit"
+	"pagasacentre/backend/internal/billing/invoicing"
 	"pagasacentre/backend/internal/registration/domain"
 )
 
-type billingActions interface {
-	Allocate(ctx context.Context, groupID, actor string, expectedVersion int, req billing.AllocateRequest) error
+type allocationActions interface {
+	Allocate(ctx context.Context, groupID, actor string, expectedVersion int, req allocation.AllocateRequest) error
 	Unallocate(ctx context.Context, groupID, actor string, expectedVersion int) error
+	VoidAndRelease(ctx context.Context, groupID, reason, actor string, expectedVersion int, cancelled bool) error
+	ConfirmFree(ctx context.Context, groupID, actor string, expectedVersion int) error
+}
+
+type invoicingActions interface {
 	SendInvoice(ctx context.Context, groupID, actor string, expectedVersion int) error
 	SendInvoicesBulk(ctx context.Context, actor string, groupIDs []string) map[string]error
 	SendCoachInvoice(ctx context.Context, groupID, actor string, expectedVersion int) error
@@ -20,21 +27,36 @@ type billingActions interface {
 	WaiveCoachFee(ctx context.Context, groupID, actor string, expectedVersion int) error
 	UnwaiveCoachFee(ctx context.Context, groupID, actor string, expectedVersion int) error
 	MarkBalancePaidManually(ctx context.Context, groupID, actor string, expectedVersion int) error
-	VoidAndRelease(ctx context.Context, groupID, reason, actor string, expectedVersion int, cancelled bool) error
-	DeleteRegistration(ctx context.Context, groupID, actor string, expectedVersion int) (billing.DeleteSummary, error)
-	RemoveCamper(ctx context.Context, groupID, camperID, actor string, expectedVersion int) (billing.RemoveCamperSummary, error)
-	ConvertCamperToDayVisitor(ctx context.Context, groupID, camperID, actor string, expectedVersion int, req billing.ConvertToDayVisitorRequest) (billing.ConvertSummary, error)
-	UpdateDayPassCamper(ctx context.Context, groupID, camperID, actor string, expectedVersion int, req billing.UpdateDayPassCamperRequest) (billing.UpdateDayPassSummary, error)
-	UpdateCamperCoach(ctx context.Context, groupID, camperID, actor string, expectedVersion int, req billing.UpdateCamperCoachRequest) (billing.UpdateCamperCoachSummary, error)
-	EditCamper(ctx context.Context, groupID, camperID, actor string, expectedVersion int, req billing.EditCamperRequest) (billing.EditCamperSummary, error)
-	AddCamper(ctx context.Context, groupID, actor string, expectedVersion int, req billing.AddCamperRequest) (billing.AddCamperSummary, error)
+	DeleteRegistration(ctx context.Context, groupID, actor string, expectedVersion int) (invoicing.DeleteSummary, error)
+	ResendInvoice(ctx context.Context, groupID, actor string, expectedVersion int) error
+	ExtendDueAt(ctx context.Context, groupID, actor string, expectedVersion int, dueAt time.Time) error
+}
+
+type camperActions interface {
+	RemoveCamper(ctx context.Context, groupID, camperID, actor string, expectedVersion int) (camperedit.RemoveCamperSummary, error)
+	ConvertCamperToDayVisitor(ctx context.Context, groupID, camperID, actor string, expectedVersion int, req camperedit.ConvertToDayVisitorRequest) (camperedit.ConvertSummary, error)
+	UpdateDayPassCamper(ctx context.Context, groupID, camperID, actor string, expectedVersion int, req camperedit.UpdateDayPassCamperRequest) (camperedit.UpdateDayPassSummary, error)
+	UpdateCamperCoach(ctx context.Context, groupID, camperID, actor string, expectedVersion int, req camperedit.UpdateCamperCoachRequest) (camperedit.UpdateCamperCoachSummary, error)
+	EditCamper(ctx context.Context, groupID, camperID, actor string, expectedVersion int, req camperedit.EditCamperRequest) (camperedit.EditCamperSummary, error)
+	AddCamper(ctx context.Context, groupID, actor string, expectedVersion int, req camperedit.AddCamperRequest) (camperedit.AddCamperSummary, error)
 	MakeMainContact(ctx context.Context, groupID, camperID, actor string, expectedVersion int) (string, error)
 	WaiveCamperDeposit(ctx context.Context, groupID, camperID, actor string, expectedVersion int) (string, error)
-	ResendInvoice(ctx context.Context, groupID, actor string, expectedVersion int) error
-	ResyncAllSheets(ctx context.Context, actor string) (int, map[string]error)
-	ExtendDueAt(ctx context.Context, groupID, actor string, expectedVersion int, dueAt time.Time) error
+}
+
+type sweeper interface {
 	SweepOverdue(ctx context.Context) (int, error)
-	ConfirmFree(ctx context.Context, groupID, actor string, expectedVersion int) error
+}
+
+type sheetResyncer interface {
+	ResyncAllSheets(ctx context.Context, actor string) (int, map[string]error)
+}
+
+type BillingServices struct {
+	Allocation allocationActions
+	Invoicing  invoicingActions
+	Campers    camperActions
+	Sweep      sweeper
+	Sheets     sheetResyncer
 }
 
 type registrationActions interface {
@@ -62,15 +84,14 @@ type auditRecorder interface {
 	List(ctx context.Context, limit int, beforeID int64) ([]adminlog.Event, error)
 }
 
-// Service coordinates admin actions and audit logging.
 type Service struct {
-	bill    billingActions
+	bill    BillingServices
 	reg     registrationActions
 	camp    campConfig
 	contact contactUpdater
 	rec     auditRecorder
 }
 
-func NewService(bill billingActions, reg registrationActions, camp campConfig, contact contactUpdater, rec auditRecorder) *Service {
+func NewService(bill BillingServices, reg registrationActions, camp campConfig, contact contactUpdater, rec auditRecorder) *Service {
 	return &Service{bill: bill, reg: reg, camp: camp, contact: contact, rec: rec}
 }

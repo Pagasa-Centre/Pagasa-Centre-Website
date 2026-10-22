@@ -1,6 +1,7 @@
 package payment
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -8,7 +9,6 @@ import (
 
 	stripe "github.com/stripe/stripe-go/v85"
 
-	"pagasacentre/backend/internal/billing"
 	paysvc "pagasacentre/backend/internal/payment"
 	"pagasacentre/backend/pkg/commonlibrary/render"
 )
@@ -17,14 +17,21 @@ type WebhookVerifier interface {
 	VerifyWebhook(body []byte, signature string) (stripe.Event, error)
 }
 
+type invoiceReconciler interface {
+	HandleInvoicePaid(ctx context.Context, stripeInvoiceID, groupID string, amountPaidPence int64, currency string) error
+	HandleCoachInvoicePaid(ctx context.Context, stripeInvoiceID, groupID string) error
+	HandleInvoiceFailed(ctx context.Context, groupID string)
+	HandleInvoiceUncollectible(ctx context.Context, groupID string)
+}
+
 type Handler struct {
 	service   *paysvc.Service
-	billSvc   *billing.Service
+	reconcile invoiceReconciler
 	verifier  WebhookVerifier
 }
 
-func NewHandler(service *paysvc.Service, billSvc *billing.Service, verifier WebhookVerifier) *Handler {
-	return &Handler{service: service, billSvc: billSvc, verifier: verifier}
+func NewHandler(service *paysvc.Service, reconcile invoiceReconciler, verifier WebhookVerifier) *Handler {
+	return &Handler{service: service, reconcile: reconcile, verifier: verifier}
 }
 
 func (h *Handler) Webhook() http.HandlerFunc {
@@ -75,7 +82,7 @@ func (h *Handler) Webhook() http.HandlerFunc {
 				return
 			}
 		case "invoice.paid":
-			if h.billSvc == nil {
+			if h.reconcile == nil {
 				break
 			}
 			var inv stripe.Invoice
@@ -86,30 +93,30 @@ func (h *Handler) Webhook() http.HandlerFunc {
 			}
 			groupID := inv.Metadata["group_id"]
 			if inv.Metadata["invoice_type"] == "coach" {
-				if err := h.billSvc.HandleCoachInvoicePaid(ctx, inv.ID, groupID); err != nil {
+				if err := h.reconcile.HandleCoachInvoicePaid(ctx, inv.ID, groupID); err != nil {
 					log.Printf("handle coach invoice.paid: %v", err)
 					http.Error(w, "internal", http.StatusInternalServerError)
 					return
 				}
 				break
 			}
-			if err := h.billSvc.HandleInvoicePaid(ctx, inv.ID, groupID, inv.AmountPaid, string(inv.Currency)); err != nil {
+			if err := h.reconcile.HandleInvoicePaid(ctx, inv.ID, groupID, inv.AmountPaid, string(inv.Currency)); err != nil {
 				log.Printf("handle invoice.paid: %v", err)
 				http.Error(w, "internal", http.StatusInternalServerError)
 				return
 			}
 		case "invoice.payment_failed":
-			if h.billSvc != nil {
+			if h.reconcile != nil {
 				var inv stripe.Invoice
 				if err := json.Unmarshal(event.Data.Raw, &inv); err == nil {
-					h.billSvc.HandleInvoiceFailed(ctx, inv.Metadata["group_id"])
+					h.reconcile.HandleInvoiceFailed(ctx, inv.Metadata["group_id"])
 				}
 			}
 		case "invoice.marked_uncollectible":
-			if h.billSvc != nil {
+			if h.reconcile != nil {
 				var inv stripe.Invoice
 				if err := json.Unmarshal(event.Data.Raw, &inv); err == nil {
-					h.billSvc.HandleInvoiceUncollectible(ctx, inv.Metadata["group_id"])
+					h.reconcile.HandleInvoiceUncollectible(ctx, inv.Metadata["group_id"])
 				}
 			}
 		default:

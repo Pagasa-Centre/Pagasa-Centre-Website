@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"pagasacentre/backend/internal/billing"
+	"pagasacentre/backend/internal/billing/invoicing"
 	"pagasacentre/backend/internal/registration/domain"
 )
 
@@ -30,7 +30,7 @@ func formatPence(pence int) string {
 }
 
 // formatDeleteAuditSummary writes the one line that outlives a deleted registration.
-func formatDeleteAuditSummary(sum billing.DeleteSummary) string {
+func formatDeleteAuditSummary(sum invoicing.DeleteSummary) string {
 	text := "Deleted registration for " + sum.ContactName + " (" + sum.ContactEmail + ")"
 	if sum.RetainedPence > 0 {
 		text += fmt.Sprintf("; kept the %s non-refundable deposit",
