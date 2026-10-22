@@ -80,6 +80,8 @@ Existing domains: `camp`, `accommodation`, `registration`, `consent` (api only),
 
 11. **Billing is split by use case.** Six groups under `internal/billing/{allocation,invoicing,camperedit,reconcile,sweep,sheetsync}` each own `service.go`, narrow interfaces, and `storage/`. The root `internal/billing` package is the shared kernel only. Sibling billing groups must not import each other; wire in `cmd/api/main.go`. Shared SQL lives in `registration/storage/groupsql`; shared reads use `*regstorage.Repository`. `internal/archtest` (`TestBillingGroupsDoNotImportSiblings`) enforces sibling isolation. New billing behaviour belongs in the group that owns it unless the plan justifies a new group.
 
+12. **JSON lives in `internal/api`.** Domain, service, and use-case types carry **no** `json` tags. Every HTTP contract is a separate DTO struct under `internal/api/{domain}/dto/` with explicit mappers in `dto/mapper/` — never type aliases. Stored audit metadata uses explicit structs in `internal/campadmin/audit_meta.go`. The only other non-API `json` tags are the allowlist in `internal/archtest/json_tags_test.go` (admin session cookie, Resend/YouTube clients). Mappers preserve nil vs empty slices: nil stays `null` on the wire unless a handler already substitutes `[]`. Reference: `internal/api/sermon`. Enforced by `TestJSONTagsOnlyInAPILayer`.
+
 ## Model types (no entity layer)
 
 We use **two** model layers (not three — there is no sqlboiler `entity` package):
@@ -91,12 +93,7 @@ We use **two** model layers (not three — there is no sqlboiler `entity` packag
 
 Repositories scan SQL rows into **domain** types. Handlers decode **DTOs**, map to domain, call the service, map results back to DTOs.
 
-Type aliases are fine when DTO and domain are identical:
-
-```go
-// internal/api/registration/dto/request.go
-type SubmitRequest = domain.SubmitRequest
-```
+DTOs are always separate structs from domain types, with field-by-field mappers (see guardrail 12). **`sermon`** is the reference implementation.
 
 ## Adding a new endpoint (existing domain)
 
@@ -159,8 +156,8 @@ type txRunner interface {
 }
 
 type groupRepo interface {
-	InsertGroup(ctx context.Context, req domain.SubmitRequest, total int, currency string, isFree, paidInFull bool) (string, error)
-	InsertCamper(ctx context.Context, groupID string, c domain.CamperDTO) error
+	InsertGroup(ctx context.Context, req domain.Submission, total int, currency string, isFree, paidInFull bool) (string, error)
+	InsertCamper(ctx context.Context, groupID string, c domain.NewCamper) error
 }
 
 type Service struct {
@@ -168,11 +165,11 @@ type Service struct {
 	tx   txRunner
 }
 
-func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain.SubmitResponse, error) {
+func (s *Service) Submit(ctx context.Context, req domain.Submission) (*domain.SubmitResult, error) {
 	if err := Validate(req); err != nil {
 		return nil, err
 	}
-	var resp *domain.SubmitResponse
+	var resp *domain.SubmitResult
 	err := s.tx.WithTx(ctx, func(ctx context.Context) error {
 		groupID, err := s.repo.InsertGroup(ctx, req, total, currency, false, false)
 		if err != nil {

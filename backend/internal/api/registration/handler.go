@@ -43,11 +43,7 @@ func (h *Handler) ListShirtSizes() http.HandlerFunc {
 		for _, s := range sizes {
 			grouped[s.Category] = append(grouped[s.Category], s)
 		}
-		render.Json(w, http.StatusOK, dto.ShirtSizesResponse{
-			Sizes:         sizes,
-			ByCategory:    grouped,
-			NotApplicable: domain.ShirtSizeNotApplicable,
-		})
+		render.Json(w, http.StatusOK, mapper.ShirtSizesToResponse(sizes, grouped, domain.ShirtSizeNotApplicable))
 	}
 }
 

@@ -72,14 +72,14 @@ func (m *recordingMailer) callCount() int {
 // session id. Returns the group id.
 func seedPendingGroup(t *testing.T, ctx context.Context, repo *storage.Repository, sessID, emailAddr string) string {
 	t.Helper()
-	req := domain.SubmitRequest{
-		Contact: domain.ContactDTO{
+	req := domain.Submission{
+		Contact: domain.Contact{
 			FirstName: "Web", LastName: "Hook", Email: emailAddr, Phone: "+44 0",
 		},
-		Campers: []domain.CamperDTO{{
+		Campers: []domain.NewCamper{{
 			FirstName: "Web", LastName: "Hook", Gender: "female", Age: 25,
 			CellLeaderName: "Pastor", IsMainContact: true,
-			Attendance: domain.AttendanceDTO{
+			Attendance: domain.Attendance{
 				Type:                      domain.AttendanceFullWeek,
 				ShirtSize:                 "adult_m",
 				AccommodationFirstChoice:  "lodge",
@@ -103,14 +103,14 @@ func seedPendingGroup(t *testing.T, ctx context.Context, repo *storage.Repositor
 func seedPendingPrepaidGroup(t *testing.T, ctx context.Context, repo *storage.Repository, sessID, emailAddr string, withCoach bool) string {
 	t.Helper()
 	needsCoach := withCoach
-	req := domain.SubmitRequest{
-		Contact: domain.ContactDTO{
+	req := domain.Submission{
+		Contact: domain.Contact{
 			FirstName: "Pre", LastName: "Paid", Email: emailAddr, Phone: "+44 0",
 		},
-		Campers: []domain.CamperDTO{{
+		Campers: []domain.NewCamper{{
 			FirstName: "Pre", LastName: "Paid", Gender: "female", Age: 25,
 			CellLeaderName: "Pastor", IsMainContact: true,
-			Attendance: domain.AttendanceDTO{
+			Attendance: domain.Attendance{
 				Type:                      domain.AttendanceFullWeek,
 				ShirtSize:                 "adult_m",
 				AccommodationFirstChoice:  "lodge",

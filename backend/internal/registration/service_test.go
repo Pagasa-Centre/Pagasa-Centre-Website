@@ -13,8 +13,8 @@ import (
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/testhelper"
-	commondb "pagasacentre/backend/pkg/commonlibrary/db"
 	"pagasacentre/backend/pkg/commonlibrary/apperr"
+	commondb "pagasacentre/backend/pkg/commonlibrary/db"
 )
 
 type fakePriceLookup struct{ amount int }
@@ -27,12 +27,12 @@ func (f fakePriceLookup) GetPrice(_ context.Context, code string) (PriceRow, err
 }
 
 func TestDepositPayingCount(t *testing.T) {
-	req := domain.SubmitRequest{Campers: []domain.CamperDTO{
-		{Age: 30, Attendance: domain.AttendanceDTO{Type: domain.AttendanceFullWeek}}, // pays
-		{Age: 25, Attendance: domain.AttendanceDTO{Type: domain.AttendanceDayPass}},  // free (day pass)
-		{Age: 10, Attendance: domain.AttendanceDTO{Type: domain.AttendanceFullWeek}}, // pays
-		{Age: 3, Attendance: domain.AttendanceDTO{Type: domain.AttendanceFullWeek}},  // free (under 4)
-		{Age: 4, Attendance: domain.AttendanceDTO{Type: domain.AttendanceFullWeek}},  // pays (4 == threshold)
+	req := domain.Submission{Campers: []domain.NewCamper{
+		{Age: 30, Attendance: domain.Attendance{Type: domain.AttendanceFullWeek}}, // pays
+		{Age: 25, Attendance: domain.Attendance{Type: domain.AttendanceDayPass}},  // free (day pass)
+		{Age: 10, Attendance: domain.Attendance{Type: domain.AttendanceFullWeek}}, // pays
+		{Age: 3, Attendance: domain.Attendance{Type: domain.AttendanceFullWeek}},  // free (under 4)
+		{Age: 4, Attendance: domain.Attendance{Type: domain.AttendanceFullWeek}},  // pays (4 == threshold)
 	}}
 	if got := depositPayingCount(req); got != 3 {
 		t.Errorf("depositPayingCount = %d, want 3", got)
@@ -41,10 +41,10 @@ func TestDepositPayingCount(t *testing.T) {
 
 func TestComputeTotal_DepositPerPayingCamper(t *testing.T) {
 	svc := &Service{prices: fakePriceLookup{amount: 5000}}
-	req := domain.SubmitRequest{Campers: []domain.CamperDTO{
-		{Age: 30, Attendance: domain.AttendanceDTO{Type: domain.AttendanceFullWeek}}, // £50
-		{Age: 30, Attendance: domain.AttendanceDTO{Type: domain.AttendanceFullWeek}}, // £50
-		{Age: 25, Attendance: domain.AttendanceDTO{Type: domain.AttendanceDayPass}},  // free
+	req := domain.Submission{Campers: []domain.NewCamper{
+		{Age: 30, Attendance: domain.Attendance{Type: domain.AttendanceFullWeek}}, // £50
+		{Age: 30, Attendance: domain.Attendance{Type: domain.AttendanceFullWeek}}, // £50
+		{Age: 25, Attendance: domain.Attendance{Type: domain.AttendanceDayPass}},  // free
 	}}
 	total, currency, err := svc.computeTotal(context.Background(), req)
 	if err != nil {
@@ -60,10 +60,10 @@ func TestComputeTotal_DepositPerPayingCamper(t *testing.T) {
 
 func TestComputeTotal_UnderThreesAreFree(t *testing.T) {
 	svc := &Service{prices: fakePriceLookup{amount: 5000}}
-	req := domain.SubmitRequest{Campers: []domain.CamperDTO{
-		{Age: 30, Attendance: domain.AttendanceDTO{Type: domain.AttendanceFullWeek}}, // £50
-		{Age: 3, Attendance: domain.AttendanceDTO{Type: domain.AttendanceFullWeek}},  // free (under 4)
-		{Age: 1, Attendance: domain.AttendanceDTO{Type: domain.AttendanceFullWeek}},  // free
+	req := domain.Submission{Campers: []domain.NewCamper{
+		{Age: 30, Attendance: domain.Attendance{Type: domain.AttendanceFullWeek}}, // £50
+		{Age: 3, Attendance: domain.Attendance{Type: domain.AttendanceFullWeek}},  // free (under 4)
+		{Age: 1, Attendance: domain.Attendance{Type: domain.AttendanceFullWeek}},  // free
 	}}
 	total, _, err := svc.computeTotal(context.Background(), req)
 	if err != nil {
@@ -76,9 +76,9 @@ func TestComputeTotal_UnderThreesAreFree(t *testing.T) {
 
 func TestComputeTotal_DayPassOnlyIsZero(t *testing.T) {
 	svc := &Service{prices: fakePriceLookup{amount: 5000}}
-	req := domain.SubmitRequest{Campers: []domain.CamperDTO{
-		{Age: 25, Attendance: domain.AttendanceDTO{Type: domain.AttendanceDayPass}},
-		{Age: 25, Attendance: domain.AttendanceDTO{Type: domain.AttendanceDayPass}},
+	req := domain.Submission{Campers: []domain.NewCamper{
+		{Age: 25, Attendance: domain.Attendance{Type: domain.AttendanceDayPass}},
+		{Age: 25, Attendance: domain.Attendance{Type: domain.AttendanceDayPass}},
 	}}
 	total, _, err := svc.computeTotal(context.Background(), req)
 	if err != nil {
@@ -94,9 +94,9 @@ func TestComputeTotal_AllUnderThreesIsZero(t *testing.T) {
 	// toddlers full-week. Total should be £0 and the Submit path should
 	// skip Stripe.
 	svc := &Service{prices: fakePriceLookup{amount: 5000}}
-	req := domain.SubmitRequest{Campers: []domain.CamperDTO{
-		{Age: 1, Attendance: domain.AttendanceDTO{Type: domain.AttendanceFullWeek}},
-		{Age: 2, Attendance: domain.AttendanceDTO{Type: domain.AttendanceFullWeek}},
+	req := domain.Submission{Campers: []domain.NewCamper{
+		{Age: 1, Attendance: domain.Attendance{Type: domain.AttendanceFullWeek}},
+		{Age: 2, Attendance: domain.Attendance{Type: domain.AttendanceFullWeek}},
 	}}
 	total, _, err := svc.computeTotal(context.Background(), req)
 	if err != nil {
@@ -163,7 +163,7 @@ func seedRevokedFreeCode(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 	}
 }
 
-func sponsoredRequest(code, email string) domain.SubmitRequest {
+func sponsoredRequest(code, email string) domain.Submission {
 	req := validRequest()
 	req.FreeCode = code
 	req.Contact.Email = email
@@ -396,7 +396,7 @@ func TestSubmit_dayPassBlankAccommodationSkipsGuard(t *testing.T) {
 	t.Cleanup(func() { setAccommodationAvailability(t, context.Background(), pool, "lodge", true) })
 
 	req := sponsoredRequest("SPON-DAYPASS1", "daypass@example.com")
-	req.Campers[0].Attendance = domain.AttendanceDTO{
+	req.Campers[0].Attendance = domain.Attendance{
 		Type:          domain.AttendanceDayPass,
 		Days:          []string{"mon"},
 		TshirtOption:  domain.TshirtOptionNone,
@@ -435,17 +435,17 @@ func TestRevokeFreeCode_rejectsUsedCode(t *testing.T) {
 }
 
 func TestRowsFromRequest_dayPassIncludesShirtSize(t *testing.T) {
-	req := domain.SubmitRequest{
-		Contact: domain.ContactDTO{
+	req := domain.Submission{
+		Contact: domain.Contact{
 			FirstName: "Day",
 			LastName:  "Passer",
 			Email:     "day@example.com",
 			Phone:     "07000000000",
 		},
-		Campers: []domain.CamperDTO{{
+		Campers: []domain.NewCamper{{
 			FirstName: "Day",
 			LastName:  "Passer",
-			Attendance: domain.AttendanceDTO{
+			Attendance: domain.Attendance{
 				Type:         domain.AttendanceDayPass,
 				Days:         []string{"mon", "tue"},
 				TshirtOption: domain.TshirtOptionTshirtOnly,
@@ -498,9 +498,9 @@ func (f fakeStripeAmounts) Amount(_ context.Context, priceID string) (int64, str
 
 func TestComputeCharge_depositModeSingleLine(t *testing.T) {
 	svc := &Service{prices: fakePriceLookup{amount: 5000}}
-	req := domain.SubmitRequest{Campers: []domain.CamperDTO{
-		{Age: 30, Attendance: domain.AttendanceDTO{Type: domain.AttendanceFullWeek}},
-		{Age: 30, Attendance: domain.AttendanceDTO{Type: domain.AttendanceFullWeek}},
+	req := domain.Submission{Campers: []domain.NewCamper{
+		{Age: 30, Attendance: domain.Attendance{Type: domain.AttendanceFullWeek}},
+		{Age: 30, Attendance: domain.Attendance{Type: domain.AttendanceFullWeek}},
 	}}
 	ch, err := svc.computeCharge(context.Background(), req, domain.PaymentModeDeposit)
 	if err != nil {
@@ -532,10 +532,10 @@ func TestComputeCharge_fullModeMixedGroup(t *testing.T) {
 		pence    int64
 		currency string
 	}{
-		"price_lodge":       {25000, "GBP"},
+		"price_lodge":        {25000, "GBP"},
 		"price_child_under3": {0, "GBP"},
-		"price_daypass":     {1500, "GBP"},
-		"price_coach":       {2000, "GBP"},
+		"price_daypass":      {1500, "GBP"},
+		"price_coach":        {2000, "GBP"},
 	}}
 	svc := &Service{
 		repo:          repo,
@@ -549,17 +549,17 @@ func TestComputeCharge_fullModeMixedGroup(t *testing.T) {
 	}
 
 	yes := true
-	req := domain.SubmitRequest{Campers: []domain.CamperDTO{
-		{Age: 30, Attendance: domain.AttendanceDTO{
+	req := domain.Submission{Campers: []domain.NewCamper{
+		{Age: 30, Attendance: domain.Attendance{
 			Type: domain.AttendanceFullWeek, AccommodationFirstChoice: "lodge",
 		}},
-		{Age: 2, Attendance: domain.AttendanceDTO{
+		{Age: 2, Attendance: domain.Attendance{
 			Type: domain.AttendanceFullWeek, AccommodationFirstChoice: "child",
 		}},
-		{Age: 25, Attendance: domain.AttendanceDTO{
+		{Age: 25, Attendance: domain.Attendance{
 			Type: domain.AttendanceDayPass, Days: []string{"mon", "tue", "wed"},
 		}},
-		{Age: 30, Attendance: domain.AttendanceDTO{
+		{Age: 30, Attendance: domain.Attendance{
 			Type: domain.AttendanceFullWeek, AccommodationFirstChoice: "lodge",
 			NeedsCoach: &yes,
 		}},
@@ -593,9 +593,9 @@ func TestComputeCharge_tierCollapse(t *testing.T) {
 		stripeAmounts: amounts,
 		cfg:           Config{},
 	}
-	req := domain.SubmitRequest{Campers: []domain.CamperDTO{
-		{Age: 30, Attendance: domain.AttendanceDTO{Type: domain.AttendanceFullWeek, AccommodationFirstChoice: "lodge"}},
-		{Age: 28, Attendance: domain.AttendanceDTO{Type: domain.AttendanceFullWeek, AccommodationFirstChoice: "lodge"}},
+	req := domain.Submission{Campers: []domain.NewCamper{
+		{Age: 30, Attendance: domain.Attendance{Type: domain.AttendanceFullWeek, AccommodationFirstChoice: "lodge"}},
+		{Age: 28, Attendance: domain.Attendance{Type: domain.AttendanceFullWeek, AccommodationFirstChoice: "lodge"}},
 	}}
 	ch, err := svc.computeCharge(ctx, req, domain.PaymentModeFull)
 	if err != nil {
@@ -632,8 +632,8 @@ func TestComputeCharge_zeroUnitOmitted(t *testing.T) {
 		stripeAmounts: amounts,
 		cfg:           Config{StripePriceChildUnder3: "price_child_under3"},
 	}
-	req := domain.SubmitRequest{Campers: []domain.CamperDTO{
-		{Age: 2, Attendance: domain.AttendanceDTO{Type: domain.AttendanceFullWeek, AccommodationFirstChoice: "child"}},
+	req := domain.Submission{Campers: []domain.NewCamper{
+		{Age: 2, Attendance: domain.Attendance{Type: domain.AttendanceFullWeek, AccommodationFirstChoice: "child"}},
 	}}
 	ch, err := svc.computeCharge(ctx, req, domain.PaymentModeFull)
 	if err != nil {
@@ -660,8 +660,8 @@ func TestComputeCharge_dayPassOnlyNonZeroInFullMode(t *testing.T) {
 		stripeAmounts: amounts,
 		cfg:           Config{StripePriceDayPass: "price_daypass"},
 	}
-	req := domain.SubmitRequest{Campers: []domain.CamperDTO{
-		{Age: 25, Attendance: domain.AttendanceDTO{Type: domain.AttendanceDayPass, Days: []string{"mon", "tue"}}},
+	req := domain.Submission{Campers: []domain.NewCamper{
+		{Age: 25, Attendance: domain.Attendance{Type: domain.AttendanceDayPass, Days: []string{"mon", "tue"}}},
 	}}
 	ch, err := svc.computeCharge(ctx, req, domain.PaymentModeFull)
 	if err != nil {
@@ -677,16 +677,16 @@ func TestComputeCharge_missingDayPassPrice(t *testing.T) {
 	ctx := context.Background()
 	repo := storage.NewRepository(pool)
 	svc := &Service{
-		repo:          repo,
-		prices:        fakePriceLookup{amount: 5000},
+		repo:   repo,
+		prices: fakePriceLookup{amount: 5000},
 		stripeAmounts: fakeStripeAmounts{amounts: map[string]struct {
 			pence    int64
 			currency string
 		}{}},
 		cfg: Config{},
 	}
-	req := domain.SubmitRequest{Campers: []domain.CamperDTO{
-		{Age: 25, Attendance: domain.AttendanceDTO{Type: domain.AttendanceDayPass, Days: []string{"mon"}}},
+	req := domain.Submission{Campers: []domain.NewCamper{
+		{Age: 25, Attendance: domain.Attendance{Type: domain.AttendanceDayPass, Days: []string{"mon"}}},
 	}}
 	_, err := svc.computeCharge(ctx, req, domain.PaymentModeFull)
 	if err == nil || !strings.Contains(err.Error(), "STRIPE_PRICE_DAY_PASS") {
@@ -705,9 +705,9 @@ func TestValidateFullPaymentPricing_missingCoach(t *testing.T) {
 		pence    int64
 		currency string
 	}{
-		"price_lodge":         {25000, "GBP"},
-		"price_child_under3":  {5000, "GBP"},
-		"price_daypass":       {1500, "GBP"},
+		"price_lodge":        {25000, "GBP"},
+		"price_child_under3": {5000, "GBP"},
+		"price_daypass":      {1500, "GBP"},
 	}}
 	svc := NewService(repo, commondb.NewTxRunner(pool), fakePriceLookup{amount: 5000}, nil, amounts, fakeCampOpen{}, nil, nil, "", Config{
 		StripePriceChildUnder3: "price_child_under3",

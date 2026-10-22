@@ -45,25 +45,25 @@ func (s *submitRepo) AccommodationAvailability(context.Context) (map[string]bool
 	return map[string]bool{"lodge": true, "cabin": true}, nil
 }
 
-func (s *submitRepo) InsertGroup(_ context.Context, _ domain.SubmitRequest, _ int, _ string, _, _ bool) (string, error) {
+func (s *submitRepo) InsertGroup(_ context.Context, _ domain.Submission, _ int, _ string, _, _ bool) (string, error) {
 	s.inserted = true
 	return "g-new", nil
 }
 
-func (s *submitRepo) InsertCamper(context.Context, string, domain.CamperDTO) error { return nil }
+func (s *submitRepo) InsertCamper(context.Context, string, domain.NewCamper) error { return nil }
 
 func TestSubmit_StripeFailureRollsBackViaWithTx(t *testing.T) {
 	tx := &recordingTx{}
 	repo := &submitRepo{}
 	svc := NewService(repo, tx, submitPrices{}, failStripe{}, nil, submitCamp{}, nil, nil, "", Config{})
-	req := domain.SubmitRequest{
-		Contact: domain.ContactDTO{
+	req := domain.Submission{
+		Contact: domain.Contact{
 			FirstName: "Test", LastName: "User", Email: "t@example.com", Phone: "+44",
 		},
-		Campers: []domain.CamperDTO{{
+		Campers: []domain.NewCamper{{
 			FirstName: "Test", LastName: "User", Gender: "female", Age: 25,
 			CellLeaderName: "Leader", IsMainContact: true,
-			Attendance: domain.AttendanceDTO{
+			Attendance: domain.Attendance{
 				Type:                      domain.AttendanceFullWeek,
 				ShirtSize:                 "adult_m",
 				AccommodationFirstChoice:  "lodge",

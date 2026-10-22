@@ -7,47 +7,44 @@ import (
 
 // Event is broadcast over SSE when something changes in the admin dashboard.
 type Event struct {
-	ID        int64           `json:"id"`
-	CreatedAt time.Time       `json:"created_at"`
-	ActorName string          `json:"actor_name"`
-	Action    string          `json:"action"`
-	GroupID   *string         `json:"group_id,omitempty"`
-	Summary   string          `json:"summary"`
-	Metadata  json.RawMessage `json:"metadata,omitempty"`
+	ID        int64
+	CreatedAt time.Time
+	ActorName string
+	Action    string
+	GroupID   *string
+	Summary   string
+	Metadata  json.RawMessage
 }
 
 // Action constants for admin_events.action.
 const (
-	ActionLogin               = "login"
-	ActionAllocate            = "allocate"
-	ActionAllocationEdited    = "allocation_edited"
-	ActionUnallocate          = "unallocate"
-	ActionInvoiceSent         = "invoice_sent"
-	ActionInvoiceResent       = "invoice_resent"
-	ActionRelease             = "release"
-	ActionCancel              = "cancel"
-	ActionExtendDue           = "extend_due"
-	ActionContactUpdated         = "contact_updated"
+	ActionLogin                = "login"
+	ActionAllocate             = "allocate"
+	ActionAllocationEdited     = "allocation_edited"
+	ActionUnallocate           = "unallocate"
+	ActionInvoiceSent          = "invoice_sent"
+	ActionInvoiceResent        = "invoice_resent"
+	ActionRelease              = "release"
+	ActionCancel               = "cancel"
+	ActionExtendDue            = "extend_due"
+	ActionContactUpdated       = "contact_updated"
 	ActionPaymentStatusUpdated = "payment_status_updated"
-	ActionRegistrationsToggle = "registrations_toggle"
-	ActionPriceUpdated        = "price_updated"
-	ActionSweep               = "sweep"
-	ActionBalancePaid         = "balance_paid"
-	ActionFreeCodeGenerated   = "free_code_generated"
-	ActionFreeCodeRevoked     = "free_code_revoked"
-	ActionFreeConfirmed       = "free_confirmed"
-	ActionRegistrationDeleted = "registration_deleted"
-	ActionCamperRemoved       = "camper_removed"
-	ActionCamperConverted     = "camper_converted"
-	ActionCamperUpdated       = "camper_updated"
-	ActionCamperCoachUpdated  = "camper_coach_updated"
-	// ActionCamperUpdated above belongs to the day-pass editor. General camper
-	// edits get their own action so the audit trail can tell "we changed their
-	// t-shirt" apart from "we swapped who is going".
-	ActionCamperEdited        = "camper_edited"
-	ActionCamperAdded         = "camper_added"
-	ActionMainContactMoved    = "main_contact_moved"
-	ActionCamperDepositWaived = "camper_deposit_waived"
+	ActionRegistrationsToggle  = "registrations_toggle"
+	ActionPriceUpdated         = "price_updated"
+	ActionSweep                = "sweep"
+	ActionBalancePaid          = "balance_paid"
+	ActionFreeCodeGenerated    = "free_code_generated"
+	ActionFreeCodeRevoked      = "free_code_revoked"
+	ActionFreeConfirmed        = "free_confirmed"
+	ActionRegistrationDeleted  = "registration_deleted"
+	ActionCamperRemoved        = "camper_removed"
+	ActionCamperConverted      = "camper_converted"
+	ActionCamperUpdated        = "camper_updated"
+	ActionCamperCoachUpdated   = "camper_coach_updated"
+	ActionCamperEdited         = "camper_edited"
+	ActionCamperAdded          = "camper_added"
+	ActionMainContactMoved     = "main_contact_moved"
+	ActionCamperDepositWaived  = "camper_deposit_waived"
 
 	ActionCoachInvoiceSent = "coach_invoice_sent"
 	ActionCoachFeeWaived   = "coach_fee_waived"

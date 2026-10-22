@@ -3,19 +3,19 @@ package domain
 import "time"
 
 type Config struct {
-	Name              string    `json:"name"`
-	LocationName      string    `json:"location_name"`
-	LocationAddr      string    `json:"location_addr"`
-	WebsiteURL        string    `json:"website_url"`
-	StartDate         time.Time `json:"start_date"`
-	EndDate           time.Time `json:"end_date"`
-	RegistrationsOpen       bool      `json:"registrations_open"`
-	RegistrationPaymentMode string    `json:"registration_payment_mode"`
+	Name                    string
+	LocationName            string
+	LocationAddr            string
+	WebsiteURL              string
+	StartDate               time.Time
+	EndDate                 time.Time
+	RegistrationsOpen       bool
+	RegistrationPaymentMode string
 }
 
 type Price struct {
-	Code        string `json:"code"`
-	DisplayName string `json:"display_name"`
-	AmountPence int    `json:"amount_pence"`
-	Currency    string `json:"currency"`
+	Code        string
+	DisplayName string
+	AmountPence int
+	Currency    string
 }

@@ -18,7 +18,7 @@ func (f *fakeTx) WithTx(_ context.Context, fn func(context.Context) error) error
 
 type expiredRegRepo struct {
 	regRepo
-	group       *domain.Group
+	group           *domain.Group
 	setPaymentCalls int
 }
 

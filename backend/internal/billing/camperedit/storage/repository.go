@@ -98,7 +98,7 @@ func (r *Repository) UpdateCamperDetailsMeta(
 func (r *Repository) AddCamperMeta(
 	ctx context.Context,
 	groupID string,
-	c domain.CamperDTO,
+	c domain.NewCamper,
 	depositOwedPence int,
 	meta domain.ActionMeta,
 	tr domain.BillingTransition,

@@ -16,7 +16,7 @@ type groupReader interface {
 
 type camperEditRepo interface {
 	UpdateCamperDetailsMeta(ctx context.Context, groupID, camperID string, d domain.CamperDetails, meta domain.ActionMeta, tr domain.BillingTransition) error
-	AddCamperMeta(ctx context.Context, groupID string, c domain.CamperDTO, depositOwedPence int, meta domain.ActionMeta, tr domain.BillingTransition) (string, error)
+	AddCamperMeta(ctx context.Context, groupID string, c domain.NewCamper, depositOwedPence int, meta domain.ActionMeta, tr domain.BillingTransition) (string, error)
 	SetMainContactMeta(ctx context.Context, groupID, camperID string, meta domain.ActionMeta) error
 	WaiveCamperDepositMeta(ctx context.Context, groupID, camperID string, meta domain.ActionMeta) error
 	DeleteCamperMeta(ctx context.Context, groupID, camperID string, meta domain.ActionMeta, tr domain.BillingTransition) error

@@ -10,8 +10,8 @@ import (
 
 func boolPtr(b bool) *bool { return &b }
 
-func validFullWeekCamper(main bool) domain.CamperDTO {
-	return domain.CamperDTO{
+func validFullWeekCamper(main bool) domain.NewCamper {
+	return domain.NewCamper{
 		FirstName:      "Jane",
 		LastName:       "Doe",
 		Gender:         "female",
@@ -19,7 +19,7 @@ func validFullWeekCamper(main bool) domain.CamperDTO {
 		CellLeaderName: "Pastor Bob",
 		IsCellLeader:   false,
 		IsMainContact:  main,
-		Attendance: domain.AttendanceDTO{
+		Attendance: domain.Attendance{
 			Type:                      domain.AttendanceFullWeek,
 			ShirtSize:                 "adult_m",
 			AccommodationFirstChoice:  "lodge",
@@ -28,13 +28,13 @@ func validFullWeekCamper(main bool) domain.CamperDTO {
 	}
 }
 
-func validRequest() domain.SubmitRequest {
-	return domain.SubmitRequest{
-		Contact: domain.ContactDTO{
+func validRequest() domain.Submission {
+	return domain.Submission{
+		Contact: domain.Contact{
 			FirstName: "Jane", LastName: "Doe",
 			Email: "jane@example.com", Phone: "+44 1234 567890",
 		},
-		Campers: []domain.CamperDTO{validFullWeekCamper(true)},
+		Campers: []domain.NewCamper{validFullWeekCamper(true)},
 	}
 }
 
@@ -156,7 +156,7 @@ func TestValidate_RoommateRequestsTooLong(t *testing.T) {
 
 func TestValidate_DayPassEmptyDays(t *testing.T) {
 	req := validRequest()
-	req.Campers[0].Attendance = domain.AttendanceDTO{
+	req.Campers[0].Attendance = domain.Attendance{
 		Type:          domain.AttendanceDayPass,
 		Days:          nil,
 		TshirtOption:  domain.TshirtOptionNone,
@@ -167,7 +167,7 @@ func TestValidate_DayPassEmptyDays(t *testing.T) {
 
 func TestValidate_DayPassTeamActivitiesRequiresShirtSize(t *testing.T) {
 	req := validRequest()
-	req.Campers[0].Attendance = domain.AttendanceDTO{
+	req.Campers[0].Attendance = domain.Attendance{
 		Type:          domain.AttendanceDayPass,
 		Days:          []string{"mon", "tue"},
 		TshirtOption:  domain.TshirtOptionTeamActivities,
@@ -191,7 +191,7 @@ func TestValidate_FullWeekRejectsNotApplicable(t *testing.T) {
 
 func TestValidate_DayPassNoneAcceptsNotApplicable(t *testing.T) {
 	req := validRequest()
-	req.Campers[0].Attendance = domain.AttendanceDTO{
+	req.Campers[0].Attendance = domain.Attendance{
 		Type:          domain.AttendanceDayPass,
 		Days:          []string{"mon"},
 		TshirtOption:  domain.TshirtOptionNone,
@@ -205,7 +205,7 @@ func TestValidate_DayPassNoneAcceptsNotApplicable(t *testing.T) {
 
 func TestValidate_DayPassNoneAcceptsEmptyShirt(t *testing.T) {
 	req := validRequest()
-	req.Campers[0].Attendance = domain.AttendanceDTO{
+	req.Campers[0].Attendance = domain.Attendance{
 		Type:          domain.AttendanceDayPass,
 		Days:          []string{"mon"},
 		TshirtOption:  domain.TshirtOptionNone,
@@ -219,7 +219,7 @@ func TestValidate_DayPassNoneAcceptsEmptyShirt(t *testing.T) {
 
 func TestValidate_DayPassNoneRejectsRealSize(t *testing.T) {
 	req := validRequest()
-	req.Campers[0].Attendance = domain.AttendanceDTO{
+	req.Campers[0].Attendance = domain.Attendance{
 		Type:          domain.AttendanceDayPass,
 		Days:          []string{"mon"},
 		TshirtOption:  domain.TshirtOptionNone,
@@ -231,7 +231,7 @@ func TestValidate_DayPassNoneRejectsRealSize(t *testing.T) {
 
 func TestValidate_DayPassTeamActivitiesRejectsNotApplicable(t *testing.T) {
 	req := validRequest()
-	req.Campers[0].Attendance = domain.AttendanceDTO{
+	req.Campers[0].Attendance = domain.Attendance{
 		Type:          domain.AttendanceDayPass,
 		Days:          []string{"mon"},
 		TshirtOption:  domain.TshirtOptionTeamActivities,
@@ -243,13 +243,13 @@ func TestValidate_DayPassTeamActivitiesRejectsNotApplicable(t *testing.T) {
 
 func TestIsRealShirtSize(t *testing.T) {
 	cases := map[string]bool{
-		"adult_m":         true,
-		"ADULT_M":         true, // case-insensitive
-		"child_3_4y":      true,
-		"child_12_18m":    true,
+		"adult_m":                     true,
+		"ADULT_M":                     true, // case-insensitive
+		"child_3_4y":                  true,
+		"child_12_18m":                true,
 		domain.ShirtSizeNotApplicable: false, // n/a is not a "real" size
-		"potato":          false,
-		"":                false,
+		"potato":                      false,
+		"":                            false,
 	}
 	for in, want := range cases {
 		if got := domain.IsRealShirtSize(in); got != want {
@@ -260,7 +260,7 @@ func TestIsRealShirtSize(t *testing.T) {
 
 func TestValidate_DayPassInvalidDay(t *testing.T) {
 	req := validRequest()
-	req.Campers[0].Attendance = domain.AttendanceDTO{
+	req.Campers[0].Attendance = domain.Attendance{
 		Type:          domain.AttendanceDayPass,
 		Days:          []string{"sat"},
 		TshirtOption:  domain.TshirtOptionNone,

@@ -15,7 +15,7 @@ func ValidEmail(s string) bool {
 	return emailRE.MatchString(strings.TrimSpace(s))
 }
 
-func Validate(req domain.SubmitRequest) error {
+func Validate(req domain.Submission) error {
 	fields := map[string]string{}
 
 	if strings.TrimSpace(req.Contact.FirstName) == "" {
@@ -64,7 +64,7 @@ const MaxChildAccommodationAge = 12
 // creating them. The public form runs it per camper in a submission; admin edits
 // and admin-added campers run it on a single person, so both paths enforce the
 // same thing and cannot drift apart.
-func ValidateCamper(prefix string, c domain.CamperDTO, fields map[string]string) {
+func ValidateCamper(prefix string, c domain.NewCamper, fields map[string]string) {
 	if strings.TrimSpace(c.FirstName) == "" {
 		fields[prefix+".first_name"] = "is required"
 	}
@@ -104,7 +104,7 @@ func ValidateAllocatedAccommodation(prefix, code string, age int, fields map[str
 	}
 }
 
-func validateFullWeek(prefix string, a domain.AttendanceDTO, age int, fields map[string]string) {
+func validateFullWeek(prefix string, a domain.Attendance, age int, fields map[string]string) {
 	first := strings.TrimSpace(a.AccommodationFirstChoice)
 	second := strings.TrimSpace(a.AccommodationSecondChoice)
 	if first == "" {
@@ -135,7 +135,7 @@ func validateFullWeek(prefix string, a domain.AttendanceDTO, age int, fields map
 	}
 }
 
-func ValidateDayPass(prefix string, a domain.AttendanceDTO, fields map[string]string) {
+func ValidateDayPass(prefix string, a domain.Attendance, fields map[string]string) {
 	if len(a.Days) == 0 {
 		fields[prefix+".days"] = "select at least one day"
 	}
@@ -165,7 +165,7 @@ func ValidateDayPass(prefix string, a domain.AttendanceDTO, fields map[string]st
 	}
 }
 
-func HasMinor(req domain.SubmitRequest) bool {
+func HasMinor(req domain.Submission) bool {
 	for _, c := range req.Campers {
 		if c.Age < 18 {
 			return true

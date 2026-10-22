@@ -6,11 +6,12 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"pagasacentre/backend/internal/admin"
+	admindto "pagasacentre/backend/internal/api/campadmin/dto"
+	"pagasacentre/backend/internal/api/campadmin/dto/mapper"
 	"pagasacentre/backend/internal/billing"
 	usecase "pagasacentre/backend/internal/campadmin"
 	"pagasacentre/backend/internal/middleware"
 	"pagasacentre/backend/internal/registration"
-	"pagasacentre/backend/internal/registration/domain"
 	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 	"pagasacentre/backend/pkg/commonlibrary/render"
 	"pagasacentre/backend/pkg/commonlibrary/request"
@@ -55,10 +56,7 @@ func getFreeCodes(svc *registration.Service) http.HandlerFunc {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		if codes == nil {
-			codes = []domain.FreeCode{}
-		}
-		render.Json(w, http.StatusOK, map[string]any{"codes": codes})
+		render.Json(w, http.StatusOK, map[string]any{"codes": mapper.FreeCodesToResponse(codes)})
 	}
 }
 
@@ -75,7 +73,7 @@ func postRevokeFreeCode(svc *usecase.Service) http.HandlerFunc {
 
 func postConfirmFree(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var body billing.VersionedBody
+		var body admindto.VersionedBody
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
 		actor := admin.ActorFrom(r.Context())

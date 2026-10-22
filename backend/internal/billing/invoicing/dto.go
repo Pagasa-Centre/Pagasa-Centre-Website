@@ -1,12 +1,9 @@
 package invoicing
 
-// ExtendDueRequest is PATCH /camp-admin/registrations/{groupID}/invoice-due.
 type ExtendDueRequest struct {
-	DueAt           string `json:"due_at"`
-	ExpectedVersion *int   `json:"expected_version,omitempty"`
+	DueAt string
 }
 
-// DeleteSummary captures Stripe cleanup performed when a registration is deleted.
 type DeleteSummary struct {
 	ContactName     string
 	ContactEmail    string

@@ -1,7 +1,12 @@
 package dto
 
-import "pagasacentre/backend/internal/accommodation/domain"
+type OptionResponse struct {
+	Code                     string `json:"code"`
+	DisplayName              string `json:"display_name"`
+	Notes                    string `json:"notes,omitempty"`
+	AvailableForRegistration bool   `json:"available_for_registration"`
+}
 
 type OptionsResponse struct {
-	Accommodations []domain.Option `json:"accommodations"`
+	Accommodations []OptionResponse `json:"accommodations"`
 }

@@ -151,7 +151,7 @@ func (s *Service) RemoveCamper(ctx context.Context, groupID, camperID, actor str
 	if sum.InvoiceVoided {
 		summary += "; voided open invoice"
 	}
-	s.record(ctx, actor, adminlog.ActionCamperRemoved, &gid, summary, sum)
+	s.record(ctx, actor, adminlog.ActionCamperRemoved, &gid, summary, metaRemoveCamper(sum))
 	return sum, nil
 }
 
@@ -165,7 +165,7 @@ func (s *Service) ConvertCamperToDayVisitor(ctx context.Context, groupID, camper
 	if sum.InvoiceVoided {
 		summary += "; voided open invoice"
 	}
-	s.record(ctx, actor, adminlog.ActionCamperConverted, &gid, summary, sum)
+	s.record(ctx, actor, adminlog.ActionCamperConverted, &gid, summary, metaConvertCamper(sum))
 	return sum, nil
 }
 
@@ -176,7 +176,7 @@ func (s *Service) UpdateDayPassCamper(ctx context.Context, groupID, camperID, ac
 	}
 	gid := groupID
 	summary := "Updated day-pass details for " + sum.CamperName
-	s.record(ctx, actor, adminlog.ActionCamperUpdated, &gid, summary, sum)
+	s.record(ctx, actor, adminlog.ActionCamperUpdated, &gid, summary, metaDayPassUpdated(sum))
 	return sum, nil
 }
 
@@ -197,7 +197,7 @@ func (s *Service) UpdateCamperCoach(ctx context.Context, groupID, camperID, acto
 	if sum.InvoiceVoided {
 		summary += "; voided open coach invoice"
 	}
-	s.record(ctx, actor, adminlog.ActionCamperCoachUpdated, &gid, summary, sum)
+	s.record(ctx, actor, adminlog.ActionCamperCoachUpdated, &gid, summary, metaCamperCoach(sum))
 	return sum, nil
 }
 
@@ -214,7 +214,7 @@ func (s *Service) EditCamper(ctx context.Context, groupID, camperID, actor strin
 	if sum.InvoiceVoided {
 		summary += "; voided open invoice"
 	}
-	s.record(ctx, actor, adminlog.ActionCamperEdited, &gid, summary, sum)
+	s.record(ctx, actor, adminlog.ActionCamperEdited, &gid, summary, metaCamperEdited(sum))
 	return sum, nil
 }
 
@@ -231,7 +231,7 @@ func (s *Service) AddCamper(ctx context.Context, groupID, actor string, expected
 	if sum.InvoiceVoided {
 		summary += "; voided open invoice"
 	}
-	s.record(ctx, actor, adminlog.ActionCamperAdded, &gid, summary, sum)
+	s.record(ctx, actor, adminlog.ActionCamperAdded, &gid, summary, metaCamperAdded(sum))
 	return sum, nil
 }
 
@@ -263,7 +263,7 @@ func (s *Service) DeleteRegistration(ctx context.Context, groupID, actor string,
 		return sum, err
 	}
 	summary := formatDeleteAuditSummary(sum)
-	s.record(ctx, actor, adminlog.ActionRegistrationDeleted, nil, summary, sum)
+	s.record(ctx, actor, adminlog.ActionRegistrationDeleted, nil, summary, metaRegistrationDeleted(sum))
 	return sum, nil
 }
 

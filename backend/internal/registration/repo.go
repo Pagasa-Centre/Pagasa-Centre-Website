@@ -13,8 +13,8 @@ type txRunner interface {
 type groupRepo interface {
 	AccommodationAvailability(ctx context.Context) (map[string]bool, error)
 	ReserveFreeCode(ctx context.Context, code string) (string, error)
-	InsertGroup(ctx context.Context, req domain.SubmitRequest, totalPence int, currency string, isFree, paidInFull bool) (string, error)
-	InsertCamper(ctx context.Context, groupID string, c domain.CamperDTO) error
+	InsertGroup(ctx context.Context, req domain.Submission, totalPence int, currency string, isFree, paidInFull bool) (string, error)
+	InsertCamper(ctx context.Context, groupID string, c domain.NewCamper) error
 	MarkFreeCodeUsed(ctx context.Context, codeID, groupID string) error
 	ApplySettlement(ctx context.Context, groupID, paymentIntentID string, coachIncluded bool, s domain.Settlement) error
 	SetPaymentStatus(ctx context.Context, groupID string, tr domain.PaymentTransition) error

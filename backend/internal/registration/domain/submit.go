@@ -1,62 +1,62 @@
 package domain
 
-type SubmitRequest struct {
-	Contact  ContactDTO  `json:"contact"`
-	Campers  []CamperDTO `json:"campers"`
-	FreeCode string      `json:"free_code,omitempty"`
+type Submission struct {
+	Contact  Contact
+	Campers  []NewCamper
+	FreeCode string
 }
 
-type ContactDTO struct {
-	FirstName string `json:"first_name"`
-	LastName  string `json:"last_name"`
-	Email     string `json:"email"`
-	Phone     string `json:"phone"`
+type Contact struct {
+	FirstName string
+	LastName  string
+	Email     string
+	Phone     string
 }
 
-type CamperDTO struct {
-	FirstName      string        `json:"first_name"`
-	LastName       string        `json:"last_name"`
-	Gender         string        `json:"gender"`
-	Age            int           `json:"age"`
-	CellLeaderName string        `json:"cell_leader_name"`
-	IsCellLeader   bool          `json:"is_cell_leader"`
-	IsMainContact  bool          `json:"is_main_contact"`
-	Attendance     AttendanceDTO `json:"attendance"`
+type NewCamper struct {
+	FirstName      string
+	LastName       string
+	Gender         string
+	Age            int
+	CellLeaderName string
+	IsCellLeader   bool
+	IsMainContact  bool
+	Attendance     Attendance
 }
 
-type AttendanceDTO struct {
-	Type string `json:"type"`
+type Attendance struct {
+	Type string
 
-	ShirtSize                 string `json:"shirt_size,omitempty"`
-	DietaryRequirements       string `json:"dietary_requirements,omitempty"`
-	NeedsCoach                *bool  `json:"needs_coach,omitempty"`
-	AccommodationFirstChoice  string `json:"accommodation_first_choice,omitempty"`
-	AccommodationSecondChoice string `json:"accommodation_second_choice,omitempty"`
-	RoommateRequests          string `json:"roommate_requests,omitempty"`
+	ShirtSize                 string
+	DietaryRequirements       string
+	NeedsCoach                *bool
+	AccommodationFirstChoice  string
+	AccommodationSecondChoice string
+	RoommateRequests          string
 
-	Days          []string `json:"days,omitempty"`
-	TshirtOption  string   `json:"tshirt_option,omitempty"`
-	NeedsCatering *bool    `json:"needs_catering,omitempty"`
+	Days          []string
+	TshirtOption  string
+	NeedsCatering *bool
 }
 
-type SubmitResponse struct {
-	GroupID          string `json:"group_id"`
-	CheckoutURL      string `json:"checkout_url"`
-	TotalAmountPence int    `json:"total_amount_pence"`
-	HasMinor         bool   `json:"has_minor"`
-	ConsentFormURL   string `json:"consent_form_url,omitempty"`
+type SubmitResult struct {
+	GroupID          string
+	CheckoutURL      string
+	TotalAmountPence int
+	HasMinor         bool
+	ConsentFormURL   string
 }
 
-type SummaryResponse struct {
-	GroupID          string          `json:"group_id"`
-	PaymentStatus    PaymentStatus   `json:"payment_status"`
-	TotalAmountPence int             `json:"total_amount_pence"`
-	Currency         string          `json:"currency"`
-	ContactEmail     string          `json:"contact_email"`
-	Campers          []SummaryCamper `json:"campers"`
+type RegistrationSummary struct {
+	GroupID          string
+	PaymentStatus    PaymentStatus
+	TotalAmountPence int
+	Currency         string
+	ContactEmail     string
+	Campers          []SummaryCamper
 }
 
 type SummaryCamper struct {
-	FirstName string `json:"first_name"`
-	LastName  string `json:"last_name"`
+	FirstName string
+	LastName  string
 }

@@ -35,20 +35,20 @@ type charge struct {
 
 // PricingTier is one accommodation tier's public price.
 type PricingTier struct {
-	Code        string `json:"code"`
-	DisplayName string `json:"display_name"`
-	AmountPence int    `json:"amount_pence"`
+	Code        string
+	DisplayName string
+	AmountPence int
 }
 
 // PricingSnapshot is the public price table for the registration form.
 type PricingSnapshot struct {
-	Mode                   string        `json:"mode"`
-	Currency               string        `json:"currency"`
-	DepositAmountPence     int           `json:"deposit_amount_pence"`
-	AccommodationTiers     []PricingTier `json:"accommodation_tiers"`
-	ChildUnder3AmountPence int           `json:"child_under3_amount_pence"`
-	DayPassAmountPence     int           `json:"day_pass_amount_pence"`
-	CoachAmountPence       int           `json:"coach_amount_pence"`
+	Mode                   string
+	Currency               string
+	DepositAmountPence     int
+	AccommodationTiers     []PricingTier
+	ChildUnder3AmountPence int
+	DayPassAmountPence     int
+	CoachAmountPence       int
 }
 
 // AccommodationPriceID mirrors the billing resolver so both modes price a
@@ -69,7 +69,7 @@ func AccommodationPriceID(code string, age int, tier *domain.AccommodationType, 
 	return strings.TrimSpace(*tier.StripePriceID), nil
 }
 
-func (s *Service) computeCharge(ctx context.Context, req domain.SubmitRequest, mode string) (charge, error) {
+func (s *Service) computeCharge(ctx context.Context, req domain.Submission, mode string) (charge, error) {
 	deposit, err := s.prices.GetPrice(ctx, domain.PriceDeposit)
 	if err != nil {
 		return charge{}, fmt.Errorf("lookup deposit price: %w", err)
@@ -216,7 +216,7 @@ func (s *Service) computeCharge(ctx context.Context, req domain.SubmitRequest, m
 	return charge{totalPence: totalPence, currency: currency, lines: lines}, nil
 }
 
-func coachEligibleCountFromRequest(req domain.SubmitRequest) int64 {
+func coachEligibleCountFromRequest(req domain.Submission) int64 {
 	var n int64
 	for _, c := range req.Campers {
 		if c.Attendance.Type != domain.AttendanceFullWeek {

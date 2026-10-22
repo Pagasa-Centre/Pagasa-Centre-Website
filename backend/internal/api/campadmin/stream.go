@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"pagasacentre/backend/internal/adminlog"
+	"pagasacentre/backend/internal/api/campadmin/dto/mapper"
 	"pagasacentre/backend/internal/middleware"
 	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 	"pagasacentre/backend/pkg/commonlibrary/render"
@@ -42,7 +43,7 @@ func HandleStream(auth middleware.AuthConfig, hub *adminlog.Hub) http.HandlerFun
 			case <-r.Context().Done():
 				return
 			case ev := <-events:
-				data, err := json.Marshal(ev)
+				data, err := json.Marshal(mapper.EventToResponse(ev))
 				if err != nil {
 					continue
 				}
@@ -81,9 +82,6 @@ func listEvents(lister eventLister) http.HandlerFunc {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		if events == nil {
-			events = []adminlog.Event{}
-		}
-		render.Json(w, http.StatusOK, map[string]any{"events": events})
+		render.Json(w, http.StatusOK, map[string]any{"events": mapper.EventsToResponse(events)})
 	}
 }

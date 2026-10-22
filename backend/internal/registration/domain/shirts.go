@@ -2,19 +2,14 @@ package domain
 
 import "strings"
 
-// ShirtSizeNotApplicable is the wire value day-pass holders submit when they're
-// not buying a t-shirt. Per the form PDF, they should type "N/A".
 const ShirtSizeNotApplicable = "n/a"
 
-// ShirtSize is one selectable option in the camp t-shirt dropdown.
 type ShirtSize struct {
-	Code        string `json:"code"`
-	DisplayName string `json:"display_name"`
-	Category    string `json:"category"` // "adult" | "child"
+	Code        string
+	DisplayName string
+	Category    string
 }
 
-// shirtSizes is the canonical list pulled from the camp leader's spec. Codes
-// are stable; display names can change without breaking submitted data.
 var shirtSizes = []ShirtSize{
 	{Code: "adult_s", DisplayName: "Small", Category: "adult"},
 	{Code: "adult_m", DisplayName: "Medium", Category: "adult"},
@@ -42,19 +37,13 @@ var shirtSizeSet = func() map[string]struct{} {
 	return m
 }()
 
-// ListShirtSizes returns the canonical t-shirt size options (does NOT include
-// the "n/a" sentinel — that's a submit-time value, not a UI choice).
 func ListShirtSizes() []ShirtSize { return shirtSizes }
 
-// IsRealShirtSize reports whether code is one of the catalogued sizes
-// (excluding the "n/a" sentinel). Comparison is case-insensitive.
 func IsRealShirtSize(code string) bool {
 	_, ok := shirtSizeSet[strings.ToLower(strings.TrimSpace(code))]
 	return ok
 }
 
-// IsAcceptableShirtSize reports whether code is either a real size or the
-// "n/a" sentinel.
 func IsAcceptableShirtSize(code string) bool {
 	c := strings.ToLower(strings.TrimSpace(code))
 	if c == ShirtSizeNotApplicable {

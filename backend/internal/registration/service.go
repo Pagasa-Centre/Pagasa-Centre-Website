@@ -86,7 +86,7 @@ func NewService(
 	}
 }
 
-func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain.SubmitResponse, error) {
+func (s *Service) Submit(ctx context.Context, req domain.Submission) (*domain.SubmitResult, error) {
 	if err := Validate(req); err != nil {
 		return nil, err
 	}
@@ -122,7 +122,7 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 	isFree := false
 	var reservedCodeID string
 	hasMinor := HasMinor(req)
-	var resp *domain.SubmitResponse
+	var resp *domain.SubmitResult
 
 	err = s.tx.WithTx(ctx, func(txCtx context.Context) error {
 		freeCode := strings.ToUpper(strings.TrimSpace(req.FreeCode))
@@ -156,7 +156,7 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 			}
 		}
 
-		resp = &domain.SubmitResponse{
+		resp = &domain.SubmitResult{
 			GroupID:          groupID,
 			TotalAmountPence: total,
 			HasMinor:         hasMinor,
@@ -215,7 +215,7 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 	return resp, nil
 }
 
-func rowsFromRequest(groupID string, req domain.SubmitRequest, status domain.PaymentStatus, totalPence int, currency string, submittedAt time.Time, paidAt *time.Time) []sheets.Row {
+func rowsFromRequest(groupID string, req domain.Submission, status domain.PaymentStatus, totalPence int, currency string, submittedAt time.Time, paidAt *time.Time) []sheets.Row {
 	rows := make([]sheets.Row, 0, len(req.Campers))
 	for _, c := range req.Campers {
 		row := sheets.Row{
@@ -269,7 +269,7 @@ func ptrIfNotEmpty(s string) *string {
 // choice points at a tier the White Team has disabled for registration. Only
 // codes explicitly disabled are rejected; blank choices (day-pass campers) and
 // unknown codes pass through unchanged.
-func (s *Service) ensureAccommodationAvailable(ctx context.Context, req domain.SubmitRequest) error {
+func (s *Service) ensureAccommodationAvailable(ctx context.Context, req domain.Submission) error {
 	avail, err := s.repo.AccommodationAvailability(ctx)
 	if err != nil {
 		return fmt.Errorf("accommodation availability: %w", err)
@@ -291,7 +291,7 @@ func (s *Service) ensureAccommodationAvailable(ctx context.Context, req domain.S
 	return nil
 }
 
-func (s *Service) computeTotal(ctx context.Context, req domain.SubmitRequest) (totalPence int, currency string, err error) {
+func (s *Service) computeTotal(ctx context.Context, req domain.Submission) (totalPence int, currency string, err error) {
 	deposit, err := s.prices.GetPrice(ctx, domain.PriceDeposit)
 	if err != nil {
 		return 0, "", fmt.Errorf("lookup deposit price: %w", err)
@@ -304,7 +304,7 @@ func (s *Service) computeTotal(ctx context.Context, req domain.SubmitRequest) (t
 	return totalPence, currency, nil
 }
 
-func (s *Service) sendConfirmationEmail(ctx context.Context, req domain.SubmitRequest, totalPence int, currency string, hasMinor, isFree, paidInFull bool) {
+func (s *Service) sendConfirmationEmail(ctx context.Context, req domain.Submission, totalPence int, currency string, hasMinor, isFree, paidInFull bool) {
 	if s.mailer == nil {
 		return
 	}
@@ -330,7 +330,7 @@ func (s *Service) sendConfirmationEmail(ctx context.Context, req domain.SubmitRe
 
 const MinDepositAge = 4
 
-func (s *Service) Summary(ctx context.Context, sessionID, groupID string) (*domain.SummaryResponse, error) {
+func (s *Service) Summary(ctx context.Context, sessionID, groupID string) (*domain.RegistrationSummary, error) {
 	if sessionID == "" && groupID == "" {
 		return nil, ErrMissingIdentifier
 	}
@@ -353,7 +353,7 @@ func (s *Service) Summary(ctx context.Context, sessionID, groupID string) (*doma
 	if err != nil {
 		return nil, fmt.Errorf("operation: %w", err)
 	}
-	out := &domain.SummaryResponse{
+	out := &domain.RegistrationSummary{
 		GroupID:          group.ID,
 		PaymentStatus:    group.PaymentStatus,
 		TotalAmountPence: group.TotalAmountPence,
@@ -370,7 +370,7 @@ func (s *Service) Summary(ctx context.Context, sessionID, groupID string) (*doma
 	return out, nil
 }
 
-func depositPayingCount(req domain.SubmitRequest) int {
+func depositPayingCount(req domain.Submission) int {
 	n := 0
 	for _, c := range req.Campers {
 		if c.Attendance.Type == domain.AttendanceFullWeek && c.Age >= MinDepositAge {

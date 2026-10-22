@@ -81,10 +81,10 @@ func (p *mutablePrices) GetPrice(_ context.Context, code string) (registration.P
 
 func newFullWeekCamper() camperedit.AddCamperRequest {
 	return camperedit.AddCamperRequest{
-		Camper: domain.CamperDTO{
+		Camper: domain.NewCamper{
 			FirstName: "Ruth", LastName: "Adeyemi", Gender: "female", Age: 24,
 			CellLeaderName: "Leader",
-			Attendance: domain.AttendanceDTO{
+			Attendance: domain.Attendance{
 				Type:                      domain.AttendanceFullWeek,
 				ShirtSize:                 "adult_m",
 				AccommodationFirstChoice:  "lodge",
@@ -1624,10 +1624,10 @@ func TestAddCamper_recordsDepositAtLivePrice(t *testing.T) {
 	groupID, _, _ := billingtest.InsertEditableGroup(ctx, t, pool, domain.BillingAllocated)
 
 	sum, err := env.Campers.AddCamper(ctx, groupID, "Diane", domain.SkipVersionCheck, camperedit.AddCamperRequest{
-		Camper: domain.CamperDTO{
+		Camper: domain.NewCamper{
 			FirstName: "Ruth", LastName: "Adeyemi", Gender: "female", Age: 24,
 			CellLeaderName: "Leader",
-			Attendance: domain.AttendanceDTO{
+			Attendance: domain.Attendance{
 				Type:                      domain.AttendanceFullWeek,
 				ShirtSize:                 "adult_m",
 				AccommodationFirstChoice:  "lodge",
@@ -1678,11 +1678,11 @@ func TestAddCamper_childUnderDepositAgeOwesNothing(t *testing.T) {
 	groupID, _, _ := billingtest.InsertEditableGroup(ctx, t, pool, domain.BillingAllocated)
 
 	sum, err := env.Campers.AddCamper(ctx, groupID, "Diane", domain.SkipVersionCheck, camperedit.AddCamperRequest{
-		Camper: domain.CamperDTO{
+		Camper: domain.NewCamper{
 			FirstName: "Baby", LastName: "Fundi", Gender: "male",
 			Age:            registration.MinDepositAge - 1,
 			CellLeaderName: "Leader",
-			Attendance: domain.AttendanceDTO{
+			Attendance: domain.Attendance{
 				Type:                     domain.AttendanceFullWeek,
 				ShirtSize:                "adult_s",
 				AccommodationFirstChoice: "child",
@@ -1705,10 +1705,10 @@ func TestAddCamper_guards(t *testing.T) {
 	env := billingtest.NewEnvWithPrices(t, pool, &billingtest.StubStripe{}, &billingtest.RecordingMailer{}, nil, cfg, fakePrices{depositPence: 5000})
 
 	newcomer := camperedit.AddCamperRequest{
-		Camper: domain.CamperDTO{
+		Camper: domain.NewCamper{
 			FirstName: "Ruth", LastName: "Adeyemi", Gender: "female", Age: 24,
 			CellLeaderName: "Leader",
-			Attendance: domain.AttendanceDTO{
+			Attendance: domain.Attendance{
 				Type:                      domain.AttendanceFullWeek,
 				ShirtSize:                 "adult_m",
 				AccommodationFirstChoice:  "lodge",
@@ -1937,10 +1937,10 @@ func TestAddCamper_dayPassOwesNoDeposit(t *testing.T) {
 
 	needsCatering := false
 	sum, err := env.Campers.AddCamper(ctx, groupID, "Diane", domain.SkipVersionCheck, camperedit.AddCamperRequest{
-		Camper: domain.CamperDTO{
+		Camper: domain.NewCamper{
 			FirstName: "Sam", LastName: "Okafor", Gender: "male", Age: 30,
 			CellLeaderName: "Leader",
-			Attendance: domain.AttendanceDTO{
+			Attendance: domain.Attendance{
 				Type:          domain.AttendanceDayPass,
 				Days:          []string{"mon", "tue"},
 				TshirtOption:  domain.TshirtOptionNone,

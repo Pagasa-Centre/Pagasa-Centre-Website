@@ -11,7 +11,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-regapi "pagasacentre/backend/internal/api/registration"
+	regapi "pagasacentre/backend/internal/api/registration"
+	regdto "pagasacentre/backend/internal/api/registration/dto"
 	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/registration"
 	"pagasacentre/backend/internal/registration/domain"
@@ -33,8 +34,8 @@ func (fakePrices) GetPrice(_ context.Context, code string) (registration.PriceRo
 }
 
 type fakeCheckout struct {
-	id, url string
-	calls   int
+	id, url   string
+	calls     int
 	lastLines int
 }
 
@@ -136,11 +137,11 @@ func fullWeekBody() []byte {
 			"cell_leader_name": "Pastor", "is_cell_leader": false,
 			"is_main_contact": true,
 			"attendance": map[string]any{
-				"type":                         "full_week",
-				"shirt_size":                   "adult_m",
-				"accommodation_first_choice":   "lodge",
-				"accommodation_second_choice":  "cabin",
-				"roommate_requests":            "Sharing with my friend Mary",
+				"type":                        "full_week",
+				"shirt_size":                  "adult_m",
+				"accommodation_first_choice":  "lodge",
+				"accommodation_second_choice": "cabin",
+				"roommate_requests":           "Sharing with my friend Mary",
 			},
 		}},
 	})
@@ -187,7 +188,7 @@ func TestPostRegistrations_FullWeek_CreatesStripeCheckout(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
-	var resp domain.SubmitResponse
+	var resp regdto.SubmitResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +215,7 @@ func TestPostRegistrations_DayPassOnly_SkipsStripeAndEmailsImmediately(t *testin
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
-	var resp domain.SubmitResponse
+	var resp regdto.SubmitResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}

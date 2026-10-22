@@ -165,7 +165,7 @@ func (s *Service) ConvertCamperToDayVisitor(
 	}
 
 	fields := map[string]string{}
-	registration.ValidateDayPass("attendance", domain.AttendanceDTO{
+	registration.ValidateDayPass("attendance", domain.Attendance{
 		Type:          domain.AttendanceDayPass,
 		Days:          req.Days,
 		TshirtOption:  req.TshirtOption,
@@ -320,7 +320,7 @@ func (s *Service) UpdateDayPassCamper(
 	}
 
 	fields := map[string]string{}
-	registration.ValidateDayPass("attendance", domain.AttendanceDTO{
+	registration.ValidateDayPass("attendance", domain.Attendance{
 		Type:          domain.AttendanceDayPass,
 		Days:          target.DayPassDays,
 		TshirtOption:  req.TshirtOption,
@@ -754,7 +754,7 @@ func (s *Service) WaiveCamperDeposit(
 }
 
 func validateEdit(target domain.Camper, req EditCamperRequest, fullWeek bool) error {
-	c := domain.CamperDTO{
+	c := domain.NewCamper{
 		FirstName:      req.FirstName,
 		LastName:       req.LastName,
 		Gender:         req.Gender,
@@ -763,7 +763,7 @@ func validateEdit(target domain.Camper, req EditCamperRequest, fullWeek bool) er
 		IsCellLeader:   req.IsCellLeader,
 	}
 	if fullWeek {
-		c.Attendance = domain.AttendanceDTO{
+		c.Attendance = domain.Attendance{
 			Type:                      domain.AttendanceFullWeek,
 			ShirtSize:                 req.ShirtSize,
 			DietaryRequirements:       req.DietaryRequirements,
@@ -775,7 +775,7 @@ func validateEdit(target domain.Camper, req EditCamperRequest, fullWeek bool) er
 	} else {
 		// The day-pass fields are not editable here, so they are carried over
 		// from the stored row to be validated as a whole with the new age.
-		c.Attendance = domain.AttendanceDTO{
+		c.Attendance = domain.Attendance{
 			Type:                domain.AttendanceDayPass,
 			Days:                target.DayPassDays,
 			TshirtOption:        billing.StrVal(target.DayPassTshirtOption),

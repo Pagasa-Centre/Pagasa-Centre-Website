@@ -35,29 +35,29 @@ type Config struct {
 
 	// Google Sheets live sync. All three required to enable; if any is
 	// empty the app boots with a NoopSync (no rows written).
-	GoogleServiceAccountJSON string
+	GoogleServiceAccountJSON  string
 	GoogleSheetsSpreadsheetID string
 	GoogleSheetsPendingTab    string // defaults to "Pending"
 	GoogleSheetsPaidTab       string // defaults to "Paid"
 
 	// Admin dashboard (shared password + HMAC session cookie).
-	AdminPassword       string
-	AdminSessionSecret  string
-	AdminSecureCookie   bool // ADMIN_SECURE_COOKIE=1 behind HTTPS
-	AdminFreeCodePassword string
-	WhiteTeamEmail      string
+	AdminPassword          string
+	AdminSessionSecret     string
+	AdminSecureCookie      bool // ADMIN_SECURE_COOKIE=1 behind HTTPS
+	AdminFreeCodePassword  string
+	WhiteTeamEmail         string
 	StripePriceChildUnder3 string // Stripe Price for full-week under-3 balance (£0)
-	StripePriceDayPass  string // Stripe Price for a day pass (per day; quantity = days)
-	StripePriceCoach    string // Stripe Price for the coach fee (per head; quantity = passengers)
-	InvoiceDueDays      int    // defaults to 15
+	StripePriceDayPass     string // Stripe Price for a day pass (per day; quantity = days)
+	StripePriceCoach       string // Stripe Price for the coach fee (per head; quantity = passengers)
+	InvoiceDueDays         int    // defaults to 15
 
 	// Optional overrides for accommodation_types.stripe_price_id at boot.
-	StripePriceLodge          string
-	StripePriceCabin          string
-	StripePriceStaticCaravan  string
-	StripePricePod            string
-	StripePriceTent           string
-	StripePriceChild312       string // 3-12 child with parent
+	StripePriceLodge         string
+	StripePriceCabin         string
+	StripePriceStaticCaravan string
+	StripePricePod           string
+	StripePriceTent          string
+	StripePriceChild312      string // 3-12 child with parent
 
 	// YouTube Data API — optional; enables latest completed livestream sync.
 	YouTubeAPIKey    string
@@ -68,14 +68,14 @@ func Load() (Config, error) {
 	_ = godotenv.Load()
 
 	cfg := Config{
-		Port:                getEnv("PORT", "8080"),
-		DatabaseURL:         os.Getenv("DATABASE_URL"),
-		StripeSecretKey:     os.Getenv("STRIPE_SECRET_KEY"),
-		StripeWebhookSecret: os.Getenv("STRIPE_WEBHOOK_SECRET"),
-		StripeSuccessURL:    os.Getenv("STRIPE_SUCCESS_URL"),
-		StripeCancelURL:     os.Getenv("STRIPE_CANCEL_URL"),
-		AllowedOrigin:       getEnv("CORS_ALLOWED_ORIGIN", "http://localhost:3000"),
-		PublicBaseURL:       getEnv("PUBLIC_BASE_URL", "http://localhost:8080"),
+		Port:                      getEnv("PORT", "8080"),
+		DatabaseURL:               os.Getenv("DATABASE_URL"),
+		StripeSecretKey:           os.Getenv("STRIPE_SECRET_KEY"),
+		StripeWebhookSecret:       os.Getenv("STRIPE_WEBHOOK_SECRET"),
+		StripeSuccessURL:          os.Getenv("STRIPE_SUCCESS_URL"),
+		StripeCancelURL:           os.Getenv("STRIPE_CANCEL_URL"),
+		AllowedOrigin:             getEnv("CORS_ALLOWED_ORIGIN", "http://localhost:3000"),
+		PublicBaseURL:             getEnv("PUBLIC_BASE_URL", "http://localhost:8080"),
 		ResendAPIKey:              os.Getenv("RESEND_API_KEY"),
 		EmailFrom:                 os.Getenv("EMAIL_FROM"),
 		SMTPHost:                  os.Getenv("SMTP_HOST"),

@@ -27,6 +27,7 @@ Before editing Go under `backend/`, read [backend/AGENTS.md](backend/AGENTS.md).
 - Entities own lifecycle rules: billing/payment status transitions are decided by `domain.Group` methods; storage only persists them with compare-and-set, never status literals or `CASE` (see AGENTS.md guardrail 9)
 - Camp-admin writes go through `internal/campadmin` use cases that own audit recording; handlers and middleware must not call `adminlog.Recorder` (see AGENTS.md guardrail 10)
 - Billing use cases live in `internal/billing/{allocation,invoicing,camperedit,reconcile,sweep,sheetsync}`; sibling groups must not import each other (see AGENTS.md guardrail 11)
+- Domain and use-case types have no JSON tags; HTTP contracts are separate DTOs with explicit mappers, never aliases (see AGENTS.md guardrail 12)
 - No sqlboiler/goose/viper/zap unless explicitly requested
 - `/camp-admin/stream` stays outside request-timeout middleware
 
@@ -40,4 +41,4 @@ Before editing Go under `backend/`, read [backend/AGENTS.md](backend/AGENTS.md).
 6. Route → `internal/http/router/router.go`
 7. `go build ./... && go test ./...`
 
-Reference implementations: `registration` (full), `camp` (minimal reads).
+Reference implementations: `registration` (full service flow), `sermon` (DTO + mapper pattern), `camp` (minimal reads).

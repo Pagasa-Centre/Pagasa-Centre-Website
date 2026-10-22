@@ -38,7 +38,7 @@ func (r *Repository) db(ctx context.Context) commondb.Querier {
 }
 
 // InsertGroup inserts a registration_groups row and returns its UUID.
-func (r *Repository) InsertGroup(ctx context.Context, req domain.SubmitRequest, totalPence int, currency string, isFree, paidInFull bool) (string, error) {
+func (r *Repository) InsertGroup(ctx context.Context, req domain.Submission, totalPence int, currency string, isFree, paidInFull bool) (string, error) {
 	const q = `
 		INSERT INTO registration_groups (
 			contact_first_name, contact_last_name, contact_email, contact_phone,
@@ -56,7 +56,7 @@ func (r *Repository) InsertGroup(ctx context.Context, req domain.SubmitRequest, 
 }
 
 // InsertCamper inserts a registrations row inside tx.
-func (r *Repository) InsertCamper(ctx context.Context, groupID string, c domain.CamperDTO) error {
+func (r *Repository) InsertCamper(ctx context.Context, groupID string, c domain.NewCamper) error {
 	const q = `
 		INSERT INTO registrations (
 			group_id, is_main_contact, first_name, last_name, gender, age,

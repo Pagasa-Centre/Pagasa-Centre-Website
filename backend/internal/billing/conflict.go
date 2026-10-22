@@ -16,8 +16,6 @@ func ExpectedVersion(v *int) int {
 	return *v
 }
 
-func expectedVersion(v *int) int { return ExpectedVersion(v) }
-
 // VersionReader loads a group for stale-state conflict messages.
 type VersionReader interface {
 	FindGroupByID(ctx context.Context, groupID string) (*domain.Group, error)

@@ -32,7 +32,7 @@ type noopCamperRepo struct{}
 func (noopCamperRepo) UpdateCamperDetailsMeta(context.Context, string, string, domain.CamperDetails, domain.ActionMeta, domain.BillingTransition) error {
 	return nil
 }
-func (noopCamperRepo) AddCamperMeta(context.Context, string, domain.CamperDTO, int, domain.ActionMeta, domain.BillingTransition) (string, error) {
+func (noopCamperRepo) AddCamperMeta(context.Context, string, domain.NewCamper, int, domain.ActionMeta, domain.BillingTransition) (string, error) {
 	return "", nil
 }
 func (noopCamperRepo) SetMainContactMeta(context.Context, string, string, domain.ActionMeta) error {

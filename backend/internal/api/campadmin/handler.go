@@ -10,6 +10,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"pagasacentre/backend/internal/admin"
+	admindto "pagasacentre/backend/internal/api/campadmin/dto"
+	"pagasacentre/backend/internal/api/campadmin/dto/mapper"
 	"pagasacentre/backend/internal/camp"
 	campdomain "pagasacentre/backend/internal/camp/domain"
 	usecase "pagasacentre/backend/internal/campadmin"
@@ -93,11 +95,6 @@ func Mount(
 	})
 }
 
-type groupView struct {
-	domain.Group
-	Campers []domain.Camper `json:"campers"`
-}
-
 func listRegistrationsJSON(svc registrationLister) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -111,12 +108,12 @@ func listRegistrationsJSON(svc registrationLister) http.HandlerFunc {
 			return
 		}
 		if len(groups) == 0 {
-			render.Json(w, http.StatusOK, map[string]any{"groups": []groupView{}})
+			render.Json(w, http.StatusOK, map[string]any{"groups": []admindto.GroupResponse{}})
 			return
 		}
-		views := make([]groupView, len(groups))
+		views := make([]admindto.GroupResponse, len(groups))
 		for i, g := range groups {
-			views[i] = groupView{Group: g, Campers: byGroup[g.ID]}
+			views[i] = mapper.GroupToResponse(g, byGroup[g.ID])
 		}
 		render.Json(w, http.StatusOK, map[string]any{"groups": views})
 	}
@@ -214,7 +211,7 @@ func getCampConfig(svc campConfigReader) http.HandlerFunc {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		render.Json(w, http.StatusOK, cfg)
+		render.Json(w, http.StatusOK, mapper.CampConfigToResponse(cfg))
 	}
 }
 
