@@ -6,17 +6,17 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"pagasacentre/backend/internal/admin"
-	"pagasacentre/backend/internal/adminlog"
 	"pagasacentre/backend/internal/billing"
+	usecase "pagasacentre/backend/internal/campadmin"
 	"pagasacentre/backend/internal/middleware"
 	"pagasacentre/backend/internal/registration"
 	"pagasacentre/backend/internal/registration/domain"
-		commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
+	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 	"pagasacentre/backend/pkg/commonlibrary/render"
 	"pagasacentre/backend/pkg/commonlibrary/request"
 )
 
-func postGenerateFreeCode(auth middleware.AuthConfig, svc *registration.Service, rec *adminlog.Recorder) http.HandlerFunc {
+func postGenerateFreeCode(auth middleware.AuthConfig, svc *usecase.Service) http.HandlerFunc {
 	type body struct {
 		Password string `json:"password"`
 		Note     string `json:"note"`
@@ -44,9 +44,6 @@ func postGenerateFreeCode(auth middleware.AuthConfig, svc *registration.Service,
 			commonerrors.WriteError(w, err)
 			return
 		}
-		masked := registration.MaskFreeCode(code)
-		admin.Audit(rec, r, adminlog.ActionFreeCodeGenerated, nil,
-			actor+" generated sponsorship code "+masked, map[string]string{"code": masked})
 		render.Json(w, http.StatusOK, map[string]string{"code": code})
 	}
 }
@@ -65,33 +62,27 @@ func getFreeCodes(svc *registration.Service) http.HandlerFunc {
 	}
 }
 
-func postRevokeFreeCode(svc *registration.Service, rec *adminlog.Recorder) http.HandlerFunc {
+func postRevokeFreeCode(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		if err := svc.RevokeFreeCode(r.Context(), id); err != nil {
+		if err := svc.RevokeFreeCode(r.Context(), admin.ActorFrom(r.Context()), id); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		admin.Audit(rec, r, adminlog.ActionFreeCodeRevoked, nil,
-			admin.ActorFrom(r.Context())+" revoked sponsorship code "+id, map[string]string{"code_id": id})
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func postConfirmFree(billSvc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
+func postConfirmFree(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
 		actor := admin.ActorFrom(r.Context())
-		if err := billSvc.ConfirmFree(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
+		if err := svc.ConfirmFree(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regSvc.FindGroup(r.Context(), groupID)
-		gid := groupID
-		admin.Audit(rec, r, adminlog.ActionFreeConfirmed, &gid,
-			"Confirmed sponsorship for "+admin.GroupSummary(g), nil)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

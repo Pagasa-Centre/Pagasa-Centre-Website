@@ -10,42 +10,23 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"pagasacentre/backend/internal/admin"
-	"pagasacentre/backend/internal/adminlog"
-	"pagasacentre/backend/internal/billing"
-	campdomain "pagasacentre/backend/internal/camp/domain"
 	"pagasacentre/backend/internal/camp"
+	campdomain "pagasacentre/backend/internal/camp/domain"
+	usecase "pagasacentre/backend/internal/campadmin"
 	"pagasacentre/backend/internal/middleware"
 	"pagasacentre/backend/internal/registration"
 	"pagasacentre/backend/internal/registration/domain"
-		commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
+	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 	"pagasacentre/backend/pkg/commonlibrary/render"
 	"pagasacentre/backend/pkg/commonlibrary/request"
 )
-
-// contactService corrects a group's contact details (and optionally re-sends
-// the deposit confirmation). Satisfied by *payment.Service.
-type contactService interface {
-	UpdateGroupContact(ctx context.Context, groupID, firstName, lastName, email, phone string, resendConfirmation bool) error
-}
-
-type groupFinder interface {
-	FindGroup(ctx context.Context, groupID string) (*domain.Group, error)
-	CampersForGroup(ctx context.Context, groupID string) ([]domain.Camper, error)
-}
 
 type registrationLister interface {
 	ListGroupsWithCampers(ctx context.Context, f domain.ListFilterBilling) ([]domain.Group, map[string][]domain.Camper, error)
 }
 
-type paymentStatusSetter interface {
-	SetPaymentStatus(ctx context.Context, groupID, status string) error
-}
-
-type campConfigService interface {
+type campConfigReader interface {
 	GetConfig(ctx context.Context) (campdomain.Config, error)
-	SetRegistrationsOpen(ctx context.Context, open bool) error
-	SetRegistrationPaymentMode(ctx context.Context, mode string) error
-	UpdatePrice(ctx context.Context, code string, amountPence int) error
 }
 
 // Mount wires admin routes onto r. Public login routes are outside the auth
@@ -55,11 +36,9 @@ func Mount(
 	auth middleware.AuthConfig,
 	regSvc *registration.Service,
 	campSvc *camp.Service,
-	billSvc *billing.Service,
-	contactSvc contactService,
-	rec *adminlog.Recorder,
+	adminSvc *usecase.Service,
 ) {
-	r.Post("/login", middleware.HandleLogin(auth, rec))
+	r.Post("/login", middleware.HandleLogin(auth, adminSvc))
 	r.Post("/logout", middleware.HandleLogout(auth))
 	r.Get("/session", middleware.HandleSession(auth))
 
@@ -70,47 +49,47 @@ func Mount(
 
 		r.Get("/registrations", listRegistrationsJSON(regSvc))
 		r.Get("/registrations.csv", listRegistrationsCSV(regSvc))
-		r.Patch("/registrations/{groupID}", patchRegistration(regSvc))
-		r.Patch("/registrations/{groupID}/contact", patchContact(contactSvc, rec))
-		r.Put("/prices/{code}", putPrice(campSvc, rec))
+		r.Patch("/registrations/{groupID}", patchRegistration(adminSvc))
+		r.Patch("/registrations/{groupID}/contact", patchContact(adminSvc))
+		r.Put("/prices/{code}", putPrice(adminSvc))
 
 		r.Get("/camp-config", getCampConfig(campSvc))
-		r.Put("/registrations-open", putRegistrationsOpen(campSvc, rec))
-		r.Put("/registration-payment-mode", putRegistrationPaymentMode(campSvc, regSvc, rec))
+		r.Put("/registrations-open", putRegistrationsOpen(adminSvc))
+		r.Put("/registration-payment-mode", putRegistrationPaymentMode(adminSvc))
 
 		r.Get("/accommodations", listAccommodationTypes(regSvc))
-		r.Put("/accommodations/{code}/availability", putAccommodationAvailability(regSvc, rec))
+		r.Put("/accommodations/{code}/availability", putAccommodationAvailability(adminSvc))
 		r.Get("/accommodation-units", listAccommodationUnits(regSvc))
-		r.Get("/events", listEvents(rec))
-		r.Put("/registrations/{groupID}/allocation", putAllocation(billSvc, rec, regSvc))
-		r.Post("/registrations/{groupID}/unallocate", postUnallocate(billSvc, rec, regSvc))
-		r.Post("/registrations/{groupID}/invoice", postInvoice(billSvc, rec, regSvc))
-		r.Post("/registrations/invoice-bulk", postInvoiceBulk(billSvc, rec, regSvc))
-		r.Post("/registrations/{groupID}/coach-invoice", postCoachInvoice(billSvc, rec, regSvc))
-		r.Post("/registrations/coach-invoice-bulk", postCoachInvoiceBulk(billSvc, rec, regSvc))
-		r.Post("/registrations/{groupID}/coach-invoice/waive", postWaiveCoachFee(billSvc, rec, regSvc))
-		r.Post("/registrations/{groupID}/coach-invoice/unwaive", postUnwaiveCoachFee(billSvc, rec, regSvc))
-		r.Post("/registrations/{groupID}/mark-paid", postMarkPaid(billSvc, rec, regSvc))
-		r.Post("/registrations/{groupID}/release", postRelease(billSvc, rec, regSvc, false))
-		r.Post("/registrations/{groupID}/cancel", postRelease(billSvc, rec, regSvc, true))
-		r.Post("/registrations/{groupID}/delete", deleteRegistration(billSvc, rec))
-		r.Post("/registrations/{groupID}/campers/{camperID}/delete", deleteCamper(billSvc, rec, regSvc))
-		r.Post("/registrations/{groupID}/campers/{camperID}/convert-day-visitor", postConvertDayVisitor(billSvc, rec, regSvc))
-		r.Patch("/registrations/{groupID}/campers/{camperID}/day-pass", patchDayPassCamper(billSvc, rec))
-		r.Patch("/registrations/{groupID}/campers/{camperID}/coach", patchCamperCoach(billSvc, rec))
-		r.Patch("/registrations/{groupID}/campers/{camperID}", patchCamper(billSvc, rec))
-		r.Post("/registrations/{groupID}/campers", postAddCamper(billSvc, rec))
-		r.Post("/registrations/{groupID}/campers/{camperID}/make-main-contact", postMakeMainContact(billSvc, rec))
-		r.Post("/registrations/{groupID}/campers/{camperID}/waive-deposit", postWaiveCamperDeposit(billSvc, rec))
-		r.Post("/registrations/{groupID}/invoice/resend", postResendInvoice(billSvc, rec, regSvc))
-		r.Post("/registrations/sheet-resync-all", postResyncAllSheets(billSvc, rec))
-		r.Patch("/registrations/{groupID}/invoice-due", patchInvoiceDue(billSvc, rec, regSvc))
-		r.Post("/billing/sweep", postBillingSweep(billSvc, rec))
+		r.Get("/events", listEvents(adminSvc))
+		r.Put("/registrations/{groupID}/allocation", putAllocation(adminSvc))
+		r.Post("/registrations/{groupID}/unallocate", postUnallocate(adminSvc))
+		r.Post("/registrations/{groupID}/invoice", postInvoice(adminSvc))
+		r.Post("/registrations/invoice-bulk", postInvoiceBulk(adminSvc))
+		r.Post("/registrations/{groupID}/coach-invoice", postCoachInvoice(adminSvc))
+		r.Post("/registrations/coach-invoice-bulk", postCoachInvoiceBulk(adminSvc))
+		r.Post("/registrations/{groupID}/coach-invoice/waive", postWaiveCoachFee(adminSvc))
+		r.Post("/registrations/{groupID}/coach-invoice/unwaive", postUnwaiveCoachFee(adminSvc))
+		r.Post("/registrations/{groupID}/mark-paid", postMarkPaid(adminSvc))
+		r.Post("/registrations/{groupID}/release", postRelease(adminSvc, false))
+		r.Post("/registrations/{groupID}/cancel", postRelease(adminSvc, true))
+		r.Post("/registrations/{groupID}/delete", deleteRegistration(adminSvc))
+		r.Post("/registrations/{groupID}/campers/{camperID}/delete", deleteCamper(adminSvc))
+		r.Post("/registrations/{groupID}/campers/{camperID}/convert-day-visitor", postConvertDayVisitor(adminSvc))
+		r.Patch("/registrations/{groupID}/campers/{camperID}/day-pass", patchDayPassCamper(adminSvc))
+		r.Patch("/registrations/{groupID}/campers/{camperID}/coach", patchCamperCoach(adminSvc))
+		r.Patch("/registrations/{groupID}/campers/{camperID}", patchCamper(adminSvc))
+		r.Post("/registrations/{groupID}/campers", postAddCamper(adminSvc))
+		r.Post("/registrations/{groupID}/campers/{camperID}/make-main-contact", postMakeMainContact(adminSvc))
+		r.Post("/registrations/{groupID}/campers/{camperID}/waive-deposit", postWaiveCamperDeposit(adminSvc))
+		r.Post("/registrations/{groupID}/invoice/resend", postResendInvoice(adminSvc))
+		r.Post("/registrations/sheet-resync-all", postResyncAllSheets(adminSvc))
+		r.Patch("/registrations/{groupID}/invoice-due", patchInvoiceDue(adminSvc))
+		r.Post("/billing/sweep", postBillingSweep(adminSvc))
 
-		r.Post("/free-codes", postGenerateFreeCode(auth, regSvc, rec))
+		r.Post("/free-codes", postGenerateFreeCode(auth, adminSvc))
 		r.Get("/free-codes", getFreeCodes(regSvc))
-		r.Post("/free-codes/{id}/revoke", postRevokeFreeCode(regSvc, rec))
-		r.Post("/registrations/{groupID}/confirm-free", postConfirmFree(billSvc, rec, regSvc))
+		r.Post("/free-codes/{id}/revoke", postRevokeFreeCode(adminSvc))
+		r.Post("/registrations/{groupID}/confirm-free", postConfirmFree(adminSvc))
 	})
 }
 
@@ -163,7 +142,7 @@ func listRegistrationsCSV(svc registrationLister) http.HandlerFunc {
 	}
 }
 
-func patchRegistration(svc paymentStatusSetter) http.HandlerFunc {
+func patchRegistration(svc *usecase.Service) http.HandlerFunc {
 	type body struct {
 		PaymentStatus string `json:"payment_status"`
 	}
@@ -173,7 +152,7 @@ func patchRegistration(svc paymentStatusSetter) http.HandlerFunc {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		if err := svc.SetPaymentStatus(r.Context(), chi.URLParam(r, "groupID"), b.PaymentStatus); err != nil {
+		if err := svc.SetPaymentStatus(r.Context(), chi.URLParam(r, "groupID"), admin.ActorFrom(r.Context()), b.PaymentStatus); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
@@ -181,10 +160,7 @@ func patchRegistration(svc paymentStatusSetter) http.HandlerFunc {
 	}
 }
 
-// patchContact corrects a group's contact details and, if requested, re-sends
-// the deposit confirmation email to the corrected address. Used when someone
-// mistypes their email at registration.
-func patchContact(svc contactService, rec *adminlog.Recorder) http.HandlerFunc {
+func patchContact(svc *usecase.Service) http.HandlerFunc {
 	type body struct {
 		FirstName          string `json:"first_name"`
 		LastName           string `json:"last_name"`
@@ -221,23 +197,17 @@ func patchContact(svc contactService, rec *adminlog.Recorder) http.HandlerFunc {
 			return
 		}
 
-		err := svc.UpdateGroupContact(r.Context(), chi.URLParam(r, "groupID"),
+		err := svc.UpdateContact(r.Context(), chi.URLParam(r, "groupID"), admin.ActorFrom(r.Context()),
 			b.FirstName, b.LastName, b.Email, b.Phone, b.ResendConfirmation)
 		if err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		gid := chi.URLParam(r, "groupID")
-		summary := "Updated contact details for " + b.FirstName + " " + b.LastName
-		if b.ResendConfirmation {
-			summary += " (confirmation email re-sent)"
-		}
-		admin.Audit(rec, r, adminlog.ActionContactUpdated, &gid, summary, nil)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func getCampConfig(svc campConfigService) http.HandlerFunc {
+func getCampConfig(svc campConfigReader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg, err := svc.GetConfig(r.Context())
 		if err != nil {
@@ -248,7 +218,7 @@ func getCampConfig(svc campConfigService) http.HandlerFunc {
 	}
 }
 
-func putRegistrationsOpen(svc campConfigService, rec *adminlog.Recorder) http.HandlerFunc {
+func putRegistrationsOpen(svc *usecase.Service) http.HandlerFunc {
 	type body struct {
 		Open *bool `json:"open"`
 	}
@@ -262,21 +232,15 @@ func putRegistrationsOpen(svc campConfigService, rec *adminlog.Recorder) http.Ha
 			commonerrors.WriteError(w, commonerrors.BadRequest("missing 'open' boolean", nil))
 			return
 		}
-		if err := svc.SetRegistrationsOpen(r.Context(), *b.Open); err != nil {
+		if err := svc.SetRegistrationsOpen(r.Context(), admin.ActorFrom(r.Context()), *b.Open); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		state := "closed"
-		if *b.Open {
-			state = "opened"
-		}
-		admin.Audit(rec, r, adminlog.ActionRegistrationsToggle, nil,
-			admin.ActorFrom(r.Context())+" "+state+" public registration", map[string]bool{"open": *b.Open})
 		render.Json(w, http.StatusOK, map[string]bool{"registrations_open": *b.Open})
 	}
 }
 
-func putRegistrationPaymentMode(campSvc campConfigService, regSvc *registration.Service, rec *adminlog.Recorder) http.HandlerFunc {
+func putRegistrationPaymentMode(svc *usecase.Service) http.HandlerFunc {
 	type body struct {
 		Mode *string `json:"mode"`
 	}
@@ -295,28 +259,15 @@ func putRegistrationPaymentMode(campSvc campConfigService, regSvc *registration.
 			commonerrors.WriteError(w, commonerrors.BadRequest("mode must be 'deposit' or 'full'", nil))
 			return
 		}
-		if mode == domain.PaymentModeFull {
-			if err := regSvc.ValidateFullPaymentPricing(r.Context()); err != nil {
-				commonerrors.WriteError(w, err)
-				return
-			}
-		}
-		if err := campSvc.SetRegistrationPaymentMode(r.Context(), mode); err != nil {
+		if err := svc.SetRegistrationPaymentMode(r.Context(), admin.ActorFrom(r.Context()), mode); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		label := "deposit mode"
-		if mode == domain.PaymentModeFull {
-			label = "full payment mode"
-		}
-		admin.Audit(rec, r, adminlog.ActionPaymentModeToggle, nil,
-			admin.ActorFrom(r.Context())+" switched registration to "+label,
-			map[string]string{"mode": mode})
 		render.Json(w, http.StatusOK, map[string]string{"registration_payment_mode": mode})
 	}
 }
 
-func putPrice(svc campConfigService, rec *adminlog.Recorder) http.HandlerFunc {
+func putPrice(svc *usecase.Service) http.HandlerFunc {
 	type body struct {
 		AmountPence int `json:"amount_pence"`
 	}
@@ -330,13 +281,11 @@ func putPrice(svc campConfigService, rec *adminlog.Recorder) http.HandlerFunc {
 			commonerrors.WriteError(w, commonerrors.BadRequest("amount_pence must be >= 0", nil))
 			return
 		}
-		if err := svc.UpdatePrice(r.Context(), chi.URLParam(r, "code"), b.AmountPence); err != nil {
+		code := chi.URLParam(r, "code")
+		if err := svc.UpdatePrice(r.Context(), admin.ActorFrom(r.Context()), code, b.AmountPence); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		code := chi.URLParam(r, "code")
-		admin.Audit(rec, r, adminlog.ActionPriceUpdated, nil,
-			admin.ActorFrom(r.Context())+" updated price "+code, map[string]any{"code": code, "amount_pence": b.AmountPence})
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

@@ -26,6 +26,7 @@ import (
 	"pagasacentre/backend/internal/billing"
 	"pagasacentre/backend/internal/camp"
 	campstorage "pagasacentre/backend/internal/camp/storage"
+	"pagasacentre/backend/internal/campadmin"
 	"pagasacentre/backend/internal/config"
 	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/http/router"
@@ -260,6 +261,7 @@ func main() {
 
 	adminHub := adminlog.NewHub()
 	adminRec := adminlog.NewRecorder(adminstorage.NewRepository(pool), adminHub)
+	adminSvc := campadmin.NewService(billSvc, regSvc, campSvc, paySvc, adminRec)
 
 	// 6. One HTTP handler. Routes are registered in the router, not here. main
 	// only hands the router the dependencies it needs.
@@ -276,9 +278,7 @@ func main() {
 		SermonHandler:        sermonapi.NewHandler(sermonSvc),
 		CampSvc:              campSvc,
 		RegSvc:               regSvc,
-		BillSvc:              billSvc,
-		PaySvc:               paySvc,
-		AdminRec:             adminRec,
+		AdminSvc:             adminSvc,
 		AdminHub:             adminHub,
 	})
 

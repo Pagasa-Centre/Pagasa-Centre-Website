@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -14,8 +15,11 @@ import (
 	"time"
 
 	"pagasacentre/backend/internal/admin"
-	"pagasacentre/backend/internal/adminlog"
 )
+
+type loginRecorder interface {
+	RecordLogin(ctx context.Context, name string)
+}
 
 const (
 	sessionCookieName = "pc_camp_admin_session"
@@ -26,10 +30,10 @@ const (
 
 // AuthConfig holds shared-password admin session settings.
 type AuthConfig struct {
-	Password          string
-	SessionSecret     []byte
-	SecureCookie      bool // true in production (HTTPS)
-	FreeCodePassword  string
+	Password         string
+	SessionSecret    []byte
+	SecureCookie     bool // true in production (HTTPS)
+	FreeCodePassword string
 }
 
 // FreeCodePasswordMatches reports whether pw matches the sponsored-code generation password.
@@ -198,7 +202,7 @@ func RequireAdmin(cfg AuthConfig, next http.Handler) http.Handler {
 	})
 }
 
-func HandleLogin(cfg AuthConfig, rec *adminlog.Recorder) http.HandlerFunc {
+func HandleLogin(cfg AuthConfig, rec loginRecorder) http.HandlerFunc {
 	return handleLogin(cfg, rec)
 }
 
@@ -210,7 +214,7 @@ func HandleSession(cfg AuthConfig) http.HandlerFunc {
 	return handleSession(cfg)
 }
 
-func handleLogin(cfg AuthConfig, rec *adminlog.Recorder) http.HandlerFunc {
+func handleLogin(cfg AuthConfig, rec loginRecorder) http.HandlerFunc {
 	type body struct {
 		Password  string `json:"password"`
 		FirstName string `json:"first_name"`
@@ -248,7 +252,7 @@ func handleLogin(cfg AuthConfig, rec *adminlog.Recorder) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]string{"token": token, "name": name})
 		if rec != nil {
-			_, _ = rec.Record(r.Context(), name, adminlog.ActionLogin, nil, name+" signed in", nil)
+			rec.RecordLogin(r.Context(), name)
 		}
 	}
 }

@@ -1,6 +1,7 @@
 package campadmin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -59,7 +60,11 @@ func HandleStream(auth middleware.AuthConfig, hub *adminlog.Hub) http.HandlerFun
 	}
 }
 
-func listEvents(rec *adminlog.Recorder) http.HandlerFunc {
+type eventLister interface {
+	ListEvents(ctx context.Context, limit int, beforeID int64) ([]adminlog.Event, error)
+}
+
+func listEvents(lister eventLister) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit := 50
 		if v := r.URL.Query().Get("limit"); v != "" {
@@ -71,7 +76,7 @@ func listEvents(rec *adminlog.Recorder) http.HandlerFunc {
 		if v := r.URL.Query().Get("before"); v != "" {
 			before, _ = strconv.ParseInt(v, 10, 64)
 		}
-		events, err := rec.List(r.Context(), limit, before)
+		events, err := lister.ListEvents(r.Context(), limit, before)
 		if err != nil {
 			commonerrors.WriteError(w, err)
 			return

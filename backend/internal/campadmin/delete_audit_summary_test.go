@@ -7,10 +7,6 @@ import (
 	"pagasacentre/backend/internal/billing"
 )
 
-// Deleting a registration is a hard delete, so this line is the only record left
-// inside the app of money the church kept. Kept and refunded have to read as two
-// separate amounts: rolled into one total, the line stops answering the question
-// it exists for.
 func TestFormatDeleteAuditSummary(t *testing.T) {
 	cases := map[string]struct {
 		sum         billing.DeleteSummary
@@ -30,7 +26,6 @@ func TestFormatDeleteAuditSummary(t *testing.T) {
 				"kept the £150.00 non-refundable deposit",
 				"refunded £120.00",
 			},
-			// The two figures must never be summed into one number.
 			unwantParts: []string{"£270.00"},
 		},
 		"deposit kept with nothing to refund": {

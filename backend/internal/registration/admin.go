@@ -40,26 +40,26 @@ func (s *Service) ListGroupsWithCampers(ctx context.Context, f domain.ListFilter
 	return groups, byGroup, nil
 }
 
-func (s *Service) SetPaymentStatus(ctx context.Context, groupID, status string) error {
+func (s *Service) SetPaymentStatus(ctx context.Context, groupID, status string) (domain.PaymentTransition, error) {
 	to, ok := domain.ParsePaymentStatus(status)
 	if !ok {
-		return apperr.Invalid("invalid payment_status")
+		return domain.PaymentTransition{}, apperr.Invalid("invalid payment_status")
 	}
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return fmt.Errorf("set payment status: %w", err)
+		return domain.PaymentTransition{}, fmt.Errorf("set payment status: %w", err)
 	}
 	if g == nil {
-		return domain.ErrGroupNotFound
+		return domain.PaymentTransition{}, domain.ErrGroupNotFound
 	}
 	tr := g.OverridePaymentStatus(to)
 	if err := s.repo.SetPaymentStatus(ctx, groupID, tr); err != nil {
 		if errors.Is(err, domain.ErrVersionConflict) {
-			return apperr.Conflict("stale_state", "This registration was just updated. Refresh and try again.")
+			return domain.PaymentTransition{}, apperr.Conflict("stale_state", "This registration was just updated. Refresh and try again.")
 		}
-		return fmt.Errorf("set payment status: %w", err)
+		return domain.PaymentTransition{}, fmt.Errorf("set payment status: %w", err)
 	}
-	return nil
+	return tr, nil
 }
 
 func (s *Service) ListAccommodationTypes(ctx context.Context) ([]domain.AccommodationType, error) {

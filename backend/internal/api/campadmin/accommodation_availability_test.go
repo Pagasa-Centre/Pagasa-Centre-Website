@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	usecase "pagasacentre/backend/internal/campadmin"
 	"pagasacentre/backend/internal/registration"
 	regstorage "pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/testhelper"
@@ -18,19 +19,16 @@ import (
 
 type noopAvailability struct{}
 
-func (noopAvailability) SetAccommodationAvailability(context.Context, string, bool) error {
+func (noopAvailability) SetAccommodationAvailability(_ context.Context, _ string, _ string, _ bool) error {
 	return nil
 }
 
 func availabilityRouter(setter availabilitySetter) *chi.Mux {
 	r := chi.NewRouter()
-	// nil recorder is fine: admin.Audit is a no-op when rec == nil.
-	r.Put("/camp-admin/accommodations/{code}/availability", putAccommodationAvailability(setter, nil))
+	r.Put("/camp-admin/accommodations/{code}/availability", putAccommodationAvailability(setter))
 	return r
 }
 
-// TestPutAccommodationAvailability_MissingAvailable checks the nil-body guard.
-// The nil-check runs before the setter is touched, so a noop fake is fine.
 func TestPutAccommodationAvailability_MissingAvailable(t *testing.T) {
 	r := availabilityRouter(noopAvailability{})
 	req := httptest.NewRequest(http.MethodPut,
@@ -42,18 +40,16 @@ func TestPutAccommodationAvailability_MissingAvailable(t *testing.T) {
 	}
 }
 
-// TestPutAccommodationAvailability_Valid checks the happy path end-to-end
-// against a real DB: 200 with echoed state, and the change is persisted.
 func TestPutAccommodationAvailability_Valid(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	repo := regstorage.NewRepository(pool)
 	regSvc := registration.NewService(repo, commondb.NewTxRunner(pool), nil, nil, nil, nil, nil, nil, "", registration.Config{})
-	// accommodation_types isn't truncated between tests; restore afterwards.
 	t.Cleanup(func() {
 		_ = repo.SetAccommodationAvailableForRegistration(context.Background(), "lodge", true)
 	})
 
-	r := availabilityRouter(regSvc)
+	adminSvc := usecase.NewService(nil, regSvc, nil, nil, nil)
+	r := availabilityRouter(adminSvc)
 	req := httptest.NewRequest(http.MethodPut,
 		"/camp-admin/accommodations/lodge/availability",
 		bytes.NewBufferString(`{"available":false}`))

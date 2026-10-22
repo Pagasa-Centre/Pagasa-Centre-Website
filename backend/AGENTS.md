@@ -14,7 +14,7 @@ Storage  (internal/{domain}/storage/) pgx SQL, returns domain models
 Postgres
 ```
 
-**Dependency rule:** handlers import services; services import domain and reach storage only through interfaces they declare (guardrail 5). Storage must not import handlers or API DTOs. Register new routes in [`internal/http/router/router.go`](internal/http/router/router.go). Wire dependencies in [`cmd/api/main.go`](cmd/api/main.go) only.
+**Dependency rule:** handlers import services (camp-admin write handlers import `internal/campadmin` use cases — guardrail 10); services import domain and reach storage only through interfaces they declare (guardrail 5). Storage must not import handlers or API DTOs. Register new routes in [`internal/http/router/router.go`](internal/http/router/router.go). Wire dependencies in [`cmd/api/main.go`](cmd/api/main.go) only.
 
 ## Directory layout
 
@@ -40,11 +40,12 @@ backend/
       storage/repository.go       Repository (exported type)
     config/                       env loading
     email/, sheets/, adminlog/    infra collaborators (no api/ layer)
-    admin/                        shared admin helpers (actor, audit, csv)
+    campadmin/                    admin use cases (domain calls + audit)
+    admin/                        shared admin helpers (actor, csv)
     billing/, payment/            cross-cutting services (no separate api/ yet)
 ```
 
-Existing domains: `camp`, `accommodation`, `registration`, `consent` (api only), `payment`, `admin`.
+Existing domains: `camp`, `accommodation`, `registration`, `consent` (api only), `payment`, `admin`, `campadmin` (application layer for admin actions).
 
 ## Hard guardrails
 
@@ -69,6 +70,8 @@ Existing domains: `camp`, `accommodation`, `registration`, `consent` (api only),
    - **Never put raw `err.Error()` in a response.** Optional per-handler overrides: `errors.Is(err, registration.ErrRegistrationsClosed)` when a route needs different copy; otherwise rely on `WriteError`.
 
 9. **Entities own lifecycle rules.** Billing and payment status changes are decided by methods on `domain.Group` that return a `BillingTransition`, `PaymentTransition`, or `Settlement`. Services call those methods and pass the result to storage. Storage persists transitions with compare-and-set (`WHERE billing_status = From` / `payment_status = From`) and never writes status literals or `CASE` logic in SQL. `internal/archtest` (`TestStorageDoesNotDecideStatus`) enforces the storage rule.
+
+10. **Admin actions go through use cases.** `internal/campadmin` owns each camp-admin write: call the billing / registration / camp / payment service, then record the audit line (best-effort). Handlers in `internal/api/campadmin` decode, pass `admin.ActorFrom`, call one use-case method, and render. Domain services never record admin audit events. `internal/archtest` (`TestOnlyUseCasesRecordAudit`) forbids audit recording in `internal/api/` and `internal/middleware/`.
 
 ## Model types (no entity layer)
 
@@ -97,6 +100,8 @@ type SubmitRequest = domain.SubmitRequest
 5. Add `Handler` method in `internal/api/{domain}/handler.go`.
 6. Register route in `internal/http/router/router.go`.
 7. Run `go build ./...`, `go vet ./...`, `go test ./...`.
+
+For **camp-admin write routes**, add a method on `internal/campadmin` (audit text lives there), call it from the handler in `internal/api/campadmin`, and wire `campadmin.Service` in `cmd/api/main.go` (guardrail 10).
 
 ## Adding a new domain
 

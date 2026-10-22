@@ -2,24 +2,21 @@ package campadmin
 
 import (
 	"context"
-	"fmt"
 	"net/http"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"pagasacentre/backend/internal/admin"
-	"pagasacentre/backend/internal/adminlog"
 	"pagasacentre/backend/internal/billing"
+	usecase "pagasacentre/backend/internal/campadmin"
 	"pagasacentre/backend/internal/registration/domain"
-		commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
+	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 	"pagasacentre/backend/pkg/commonlibrary/render"
 	"pagasacentre/backend/pkg/commonlibrary/request"
 )
 
-func putAllocation(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
+func putAllocation(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.AllocateRequest
 		if err := request.Decode(r, &body); err != nil {
@@ -28,33 +25,15 @@ func putAllocation(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFin
 		}
 		groupID := chi.URLParam(r, "groupID")
 		actor := admin.ActorFrom(r.Context())
-
-		// Capture the prior billing status so we can distinguish a first-time
-		// allocation ("none") from an edit of an existing allocation
-		// ("allocated"). This makes the activity log show who did the initial
-		// placement vs. who later changed it.
-		prior, _ := regSvc.FindGroup(r.Context(), groupID)
-		campers, _ := regSvc.CampersForGroup(r.Context(), groupID)
-		isEdit := prior != nil && prior.AllocationIsEdit(campers)
-
 		if err := svc.Allocate(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion), body); err != nil {
 			commonerrors.WriteError(w, err)
 			return
-		}
-		g, _ := regSvc.FindGroup(r.Context(), groupID)
-		gid := groupID
-		if isEdit {
-			admin.Audit(rec, r, adminlog.ActionAllocationEdited, &gid,
-				"Edited accommodation allocation for "+admin.GroupSummary(g), nil)
-		} else {
-			admin.Audit(rec, r, adminlog.ActionAllocate, &gid,
-				"Allocated accommodation for "+admin.GroupSummary(g), nil)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func postInvoice(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
+func postInvoice(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
@@ -64,15 +43,11 @@ func postInvoice(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinde
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regSvc.FindGroup(r.Context(), groupID)
-		gid := groupID
-		admin.Audit(rec, r, adminlog.ActionInvoiceSent, &gid,
-			"Sent balance invoice to "+admin.GroupSummary(g), nil)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func postInvoiceBulk(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
+func postInvoiceBulk(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.BulkInvoiceRequest
 		if err := request.Decode(r, &body); err != nil {
@@ -81,15 +56,6 @@ func postInvoiceBulk(svc *billing.Service, rec *adminlog.Recorder, regSvc groupF
 		}
 		actor := admin.ActorFrom(r.Context())
 		errs := svc.SendInvoicesBulk(r.Context(), actor, body.GroupIDs)
-		for _, id := range body.GroupIDs {
-			if _, failed := errs[id]; failed {
-				continue
-			}
-			g, _ := regSvc.FindGroup(r.Context(), id)
-			gid := id
-			admin.Audit(rec, r, adminlog.ActionInvoiceSent, &gid,
-				"Sent balance invoice to "+admin.GroupSummary(g), nil)
-		}
 		if len(errs) > 0 {
 			render.Json(w, http.StatusMultiStatus, map[string]any{"errors": publicErrors(r, errs)})
 			return
@@ -98,7 +64,7 @@ func postInvoiceBulk(svc *billing.Service, rec *adminlog.Recorder, regSvc groupF
 	}
 }
 
-func postCoachInvoice(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
+func postCoachInvoice(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
@@ -108,15 +74,11 @@ func postCoachInvoice(svc *billing.Service, rec *adminlog.Recorder, regSvc group
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regSvc.FindGroup(r.Context(), groupID)
-		gid := groupID
-		admin.Audit(rec, r, adminlog.ActionCoachInvoiceSent, &gid,
-			"Sent coach invoice to "+admin.GroupSummary(g), nil)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func postCoachInvoiceBulk(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
+func postCoachInvoiceBulk(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.BulkInvoiceRequest
 		if err := request.Decode(r, &body); err != nil {
@@ -125,15 +87,6 @@ func postCoachInvoiceBulk(svc *billing.Service, rec *adminlog.Recorder, regSvc g
 		}
 		actor := admin.ActorFrom(r.Context())
 		errs := svc.SendCoachInvoicesBulk(r.Context(), actor, body.GroupIDs)
-		for _, id := range body.GroupIDs {
-			if _, failed := errs[id]; failed {
-				continue
-			}
-			g, _ := regSvc.FindGroup(r.Context(), id)
-			gid := id
-			admin.Audit(rec, r, adminlog.ActionCoachInvoiceSent, &gid,
-				"Sent coach invoice to "+admin.GroupSummary(g), nil)
-		}
 		if len(errs) > 0 {
 			render.Json(w, http.StatusMultiStatus, map[string]any{"errors": publicErrors(r, errs)})
 			return
@@ -142,7 +95,7 @@ func postCoachInvoiceBulk(svc *billing.Service, rec *adminlog.Recorder, regSvc g
 	}
 }
 
-func postWaiveCoachFee(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
+func postWaiveCoachFee(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
@@ -152,15 +105,11 @@ func postWaiveCoachFee(svc *billing.Service, rec *adminlog.Recorder, regSvc grou
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regSvc.FindGroup(r.Context(), groupID)
-		gid := groupID
-		admin.Audit(rec, r, adminlog.ActionCoachFeeWaived, &gid,
-			"Waived coach fee for "+admin.GroupSummary(g), nil)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func postUnwaiveCoachFee(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
+func postUnwaiveCoachFee(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
@@ -170,15 +119,11 @@ func postUnwaiveCoachFee(svc *billing.Service, rec *adminlog.Recorder, regSvc gr
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regSvc.FindGroup(r.Context(), groupID)
-		gid := groupID
-		admin.Audit(rec, r, adminlog.ActionCoachFeeUnwaived, &gid,
-			"Restored coach fee for "+admin.GroupSummary(g), nil)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func postUnallocate(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
+func postUnallocate(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
@@ -188,79 +133,54 @@ func postUnallocate(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFi
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regSvc.FindGroup(r.Context(), groupID)
-		gid := groupID
-		admin.Audit(rec, r, adminlog.ActionUnallocate, &gid,
-			"Reset allocation for "+admin.GroupSummary(g), nil)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func postRelease(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder, cancelled bool) http.HandlerFunc {
+func postRelease(svc *usecase.Service, cancelled bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
 		actor := admin.ActorFrom(r.Context())
-		reason, verb, action := "released by White Team", "Released", adminlog.ActionRelease
-		if cancelled {
-			reason, verb, action = "cancelled by White Team", "Cancelled", adminlog.ActionCancel
-		}
-		if err := svc.VoidAndRelease(r.Context(), groupID, reason, actor,
-			billing.ExpectedVersion(body.ExpectedVersion), cancelled); err != nil {
+		if err := svc.Release(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion), cancelled); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regSvc.FindGroup(r.Context(), groupID)
-		gid := groupID
-		admin.Audit(rec, r, action, &gid, verb+" allocation for "+admin.GroupSummary(g), nil)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func postMarkPaid(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
+func postMarkPaid(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
 		actor := admin.ActorFrom(r.Context())
-		if err := svc.MarkBalancePaidManually(
-			r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
+		if err := svc.MarkBalancePaidManually(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regSvc.FindGroup(r.Context(), groupID)
-		gid := groupID
-		admin.Audit(rec, r, adminlog.ActionBalancePaid, &gid,
-			"Marked balance paid outside Stripe for "+admin.GroupSummary(g), nil)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func deleteCamper(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
+func deleteCamper(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
 		camperID := chi.URLParam(r, "camperID")
 		actor := admin.ActorFrom(r.Context())
-		sum, err := svc.RemoveCamper(r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion))
-		if err != nil {
+		if _, err := svc.RemoveCamper(r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regSvc.FindGroup(r.Context(), groupID)
-		gid := groupID
-		summary := "Removed " + sum.CamperName + " from " + admin.GroupSummary(g)
-		if sum.InvoiceVoided {
-			summary += "; voided open invoice"
-		}
-		admin.Audit(rec, r, adminlog.ActionCamperRemoved, &gid, summary, sum)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func postConvertDayVisitor(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
+func postConvertDayVisitor(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.ConvertToDayVisitorRequest
 		if err := request.Decode(r, &body); err != nil {
@@ -270,23 +190,16 @@ func postConvertDayVisitor(svc *billing.Service, rec *adminlog.Recorder, regSvc 
 		groupID := chi.URLParam(r, "groupID")
 		camperID := chi.URLParam(r, "camperID")
 		actor := admin.ActorFrom(r.Context())
-		sum, err := svc.ConvertCamperToDayVisitor(
-			r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion), body)
-		if err != nil {
+		if _, err := svc.ConvertCamperToDayVisitor(
+			r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion), body); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		gid := groupID
-		summary := "Converted " + sum.CamperName + " to day visitor"
-		if sum.InvoiceVoided {
-			summary += "; voided open invoice"
-		}
-		admin.Audit(rec, r, adminlog.ActionCamperConverted, &gid, summary, sum)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func patchDayPassCamper(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
+func patchDayPassCamper(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.UpdateDayPassCamperRequest
 		if err := request.Decode(r, &body); err != nil {
@@ -296,20 +209,16 @@ func patchDayPassCamper(svc *billing.Service, rec *adminlog.Recorder) http.Handl
 		groupID := chi.URLParam(r, "groupID")
 		camperID := chi.URLParam(r, "camperID")
 		actor := admin.ActorFrom(r.Context())
-		sum, err := svc.UpdateDayPassCamper(
-			r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion), body)
-		if err != nil {
+		if _, err := svc.UpdateDayPassCamper(
+			r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion), body); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		gid := groupID
-		summary := "Updated day-pass details for " + sum.CamperName
-		admin.Audit(rec, r, adminlog.ActionCamperUpdated, &gid, summary, sum)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func patchCamperCoach(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
+func patchCamperCoach(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.UpdateCamperCoachRequest
 		if err := request.Decode(r, &body); err != nil {
@@ -319,31 +228,16 @@ func patchCamperCoach(svc *billing.Service, rec *adminlog.Recorder) http.Handler
 		groupID := chi.URLParam(r, "groupID")
 		camperID := chi.URLParam(r, "camperID")
 		actor := admin.ActorFrom(r.Context())
-		sum, err := svc.UpdateCamperCoach(
-			r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion), body)
-		if err != nil {
+		if _, err := svc.UpdateCamperCoach(
+			r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion), body); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		if sum.NoOp {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		gid := groupID
-		verb := "off"
-		if sum.NeedsCoach {
-			verb = "on"
-		}
-		summary := sum.CamperName + " coach seat turned " + verb
-		if sum.InvoiceVoided {
-			summary += "; voided open coach invoice"
-		}
-		admin.Audit(rec, r, adminlog.ActionCamperCoachUpdated, &gid, summary, sum)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func patchCamper(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
+func patchCamper(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.EditCamperRequest
 		if err := request.Decode(r, &body); err != nil {
@@ -359,20 +253,11 @@ func patchCamper(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc 
 			commonerrors.WriteError(w, err)
 			return
 		}
-		gid := groupID
-		summary := "Edited " + sum.PreviousName
-		if sum.CamperName != sum.PreviousName {
-			summary = "Replaced " + sum.PreviousName + " with " + sum.CamperName
-		}
-		if sum.InvoiceVoided {
-			summary += "; voided open invoice"
-		}
-		admin.Audit(rec, r, adminlog.ActionCamperEdited, &gid, summary, sum)
 		render.Json(w, http.StatusOK, sum)
 	}
 }
 
-func postAddCamper(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
+func postAddCamper(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.AddCamperRequest
 		if err := request.Decode(r, &body); err != nil {
@@ -381,106 +266,60 @@ func postAddCamper(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFun
 		}
 		groupID := chi.URLParam(r, "groupID")
 		actor := admin.ActorFrom(r.Context())
-		sum, err := svc.AddCamper(
-			r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion), body)
+		sum, err := svc.AddCamper(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion), body)
 		if err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		gid := groupID
-		summary := "Added " + sum.CamperName + " to the booking"
-		if sum.DepositOwedPence > 0 {
-			summary += fmt.Sprintf("; owes a %s deposit", formatPence(sum.DepositOwedPence))
-		}
-		if sum.InvoiceVoided {
-			summary += "; voided open invoice"
-		}
-		admin.Audit(rec, r, adminlog.ActionCamperAdded, &gid, summary, sum)
 		render.Json(w, http.StatusCreated, sum)
 	}
 }
 
-func postMakeMainContact(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
+func postMakeMainContact(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
 		camperID := chi.URLParam(r, "camperID")
 		actor := admin.ActorFrom(r.Context())
-		name, err := svc.MakeMainContact(
-			r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion))
-		if err != nil {
+		if err := svc.MakeMainContact(r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		gid := groupID
-		admin.Audit(rec, r, adminlog.ActionMainContactMoved, &gid,
-			"Made "+name+" the main contact", nil)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func postWaiveCamperDeposit(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
+func postWaiveCamperDeposit(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
 		camperID := chi.URLParam(r, "camperID")
 		actor := admin.ActorFrom(r.Context())
-		name, err := svc.WaiveCamperDeposit(
-			r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion))
-		if err != nil {
+		if err := svc.WaiveCamperDeposit(r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		gid := groupID
-		admin.Audit(rec, r, adminlog.ActionCamperDepositWaived, &gid,
-			"Waived the outstanding deposit for "+name, nil)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func formatPence(pence int) string {
-	return fmt.Sprintf("£%d.%02d", pence/100, pence%100)
-}
-
-func deleteRegistration(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
+func deleteRegistration(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
 		actor := admin.ActorFrom(r.Context())
-		sum, err := svc.DeleteRegistration(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion))
-		if err != nil {
+		if _, err := svc.DeleteRegistration(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		summary := formatDeleteAuditSummary(sum)
-		admin.Audit(rec, r, adminlog.ActionRegistrationDeleted, nil, summary, sum)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-// formatDeleteAuditSummary writes the one line that outlives a deleted
-// registration. Deleting is a hard delete, so once the row is gone this is the
-// only record inside the app of money the church kept — which is why the kept and
-// refunded figures are stated separately and never rolled into one total.
-func formatDeleteAuditSummary(sum billing.DeleteSummary) string {
-	text := "Deleted registration for " + sum.ContactName + " (" + sum.ContactEmail + ")"
-	if sum.RetainedPence > 0 {
-		text += fmt.Sprintf("; kept the %s non-refundable deposit",
-			formatPence(int(sum.RetainedPence)))
-	}
-	if sum.AmountPence > 0 {
-		text += fmt.Sprintf("; refunded %s", formatPence(int(sum.AmountPence)))
-	}
-	if sum.InvoiceVoided {
-		text += "; voided open invoice"
-	}
-	return text
-}
-
-func postResendInvoice(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
+func postResendInvoice(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
@@ -490,23 +329,14 @@ func postResendInvoice(svc *billing.Service, rec *adminlog.Recorder, regSvc grou
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regSvc.FindGroup(r.Context(), groupID)
-		gid := groupID
-		admin.Audit(rec, r, adminlog.ActionInvoiceResent, &gid,
-			"Re-sent invoice reminder to "+admin.GroupSummary(g), nil)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func postResyncAllSheets(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
+func postResyncAllSheets(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor := admin.ActorFrom(r.Context())
 		synced, errs := svc.ResyncAllSheets(r.Context(), actor)
-		summary := strings.TrimSpace(actor) + " re-synced " + strconv.Itoa(synced) + " group(s) to Google Sheet"
-		admin.Audit(rec, r, adminlog.ActionSheetResynced, nil, summary, map[string]any{
-			"synced": synced,
-			"errors": len(errs),
-		})
 		if len(errs) > 0 {
 			render.Json(w, http.StatusMultiStatus, map[string]any{
 				"synced": synced,
@@ -518,7 +348,7 @@ func postResyncAllSheets(svc *billing.Service, rec *adminlog.Recorder) http.Hand
 	}
 }
 
-func patchInvoiceDue(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
+func patchInvoiceDue(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.ExtendDueRequest
 		if err := request.Decode(r, &body); err != nil {
@@ -536,23 +366,17 @@ func patchInvoiceDue(svc *billing.Service, rec *adminlog.Recorder, regSvc groupF
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regSvc.FindGroup(r.Context(), groupID)
-		gid := groupID
-		admin.Audit(rec, r, adminlog.ActionExtendDue, &gid,
-			"Extended invoice due date for "+admin.GroupSummary(g), nil)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func postBillingSweep(svc *billing.Service, rec *adminlog.Recorder) http.HandlerFunc {
+func postBillingSweep(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		n, err := svc.SweepOverdue(r.Context())
+		n, err := svc.SweepOverdue(r.Context(), admin.ActorFrom(r.Context()))
 		if err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		admin.Audit(rec, r, adminlog.ActionSweep, nil,
-			strings.TrimSpace(admin.ActorFrom(r.Context()))+" released "+strconv.Itoa(n)+" overdue group(s)", map[string]int{"released": n})
 		render.Json(w, http.StatusOK, map[string]any{"released": n})
 	}
 }
@@ -579,14 +403,11 @@ func listAccommodationUnits(repo unitsLister) http.HandlerFunc {
 	}
 }
 
-// putAccommodationAvailability toggles whether a tier is offered on the public
-// registration form. Disabling greys the tile out and rejects submissions that
-// pick it; admin allocation to the tier is unaffected.
 type availabilitySetter interface {
-	SetAccommodationAvailability(ctx context.Context, code string, available bool) error
+	SetAccommodationAvailability(ctx context.Context, actor, code string, available bool) error
 }
 
-func putAccommodationAvailability(regSvc availabilitySetter, rec *adminlog.Recorder) http.HandlerFunc {
+func putAccommodationAvailability(setter availabilitySetter) http.HandlerFunc {
 	type body struct {
 		Available *bool `json:"available"`
 	}
@@ -601,17 +422,10 @@ func putAccommodationAvailability(regSvc availabilitySetter, rec *adminlog.Recor
 			return
 		}
 		code := chi.URLParam(r, "code")
-		if err := regSvc.SetAccommodationAvailability(r.Context(), code, *b.Available); err != nil {
+		if err := setter.SetAccommodationAvailability(r.Context(), admin.ActorFrom(r.Context()), code, *b.Available); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		state := "hid"
-		if *b.Available {
-			state = "showed"
-		}
-		admin.Audit(rec, r, adminlog.ActionAccommodationAvailability, nil,
-			admin.ActorFrom(r.Context())+" "+state+" "+code+" on the registration form",
-			map[string]any{"code": code, "available_for_registration": *b.Available})
 		render.Json(w, http.StatusOK, map[string]any{
 			"code":                       code,
 			"available_for_registration": *b.Available,

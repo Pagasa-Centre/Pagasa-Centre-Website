@@ -31,7 +31,7 @@ func (a *adminGroupRepo) SetPaymentStatus(_ context.Context, _ string, _ domain.
 
 func TestSetPaymentStatus_unknownGroup(t *testing.T) {
 	svc := NewService(&adminGroupRepo{}, nil, nil, nil, nil, nil, nil, nil, "", Config{})
-	err := svc.SetPaymentStatus(context.Background(), "missing", string(domain.PaymentPaid))
+	_, err := svc.SetPaymentStatus(context.Background(), "missing", string(domain.PaymentPaid))
 	if !errors.Is(err, domain.ErrGroupNotFound) {
 		t.Fatalf("got %v", err)
 	}
@@ -41,7 +41,7 @@ func TestSetPaymentStatus_invalidStatus(t *testing.T) {
 	svc := NewService(&adminGroupRepo{
 		group: &domain.Group{ID: "g1", PaymentStatus: domain.PaymentPending},
 	}, nil, nil, nil, nil, nil, nil, nil, "", Config{})
-	err := svc.SetPaymentStatus(context.Background(), "g1", "not-a-status")
+	_, err := svc.SetPaymentStatus(context.Background(), "g1", "not-a-status")
 	var ae *apperr.Error
 	if !errors.As(err, &ae) || ae.Kind != apperr.KindInvalid {
 		t.Fatalf("got %v", err)
@@ -54,9 +54,26 @@ func TestSetPaymentStatus_staleConflict(t *testing.T) {
 		setPaymentErr: domain.ErrVersionConflict,
 	}
 	svc := NewService(repo, nil, nil, nil, nil, nil, nil, nil, "", Config{})
-	err := svc.SetPaymentStatus(context.Background(), "g1", string(domain.PaymentPaid))
+	_, err := svc.SetPaymentStatus(context.Background(), "g1", string(domain.PaymentPaid))
 	var ae *apperr.Error
 	if !errors.As(err, &ae) || ae.Kind != apperr.KindConflict || ae.Code != "stale_state" {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestSetPaymentStatus_returnsTransition(t *testing.T) {
+	repo := &adminGroupRepo{
+		group: &domain.Group{ID: "g1", PaymentStatus: domain.PaymentPending},
+	}
+	svc := NewService(repo, nil, nil, nil, nil, nil, nil, nil, "", Config{})
+	tr, err := svc.SetPaymentStatus(context.Background(), "g1", string(domain.PaymentPaid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr != (domain.PaymentTransition{From: domain.PaymentPending, To: domain.PaymentPaid}) {
+		t.Fatalf("tr = %+v", tr)
+	}
+	if !repo.setPaymentCalled {
+		t.Fatal("expected SetPaymentStatus on repo")
 	}
 }
