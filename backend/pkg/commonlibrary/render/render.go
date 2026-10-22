@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 
+	"pagasacentre/backend/pkg/commonlibrary/apperr"
 	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 )
 
@@ -25,10 +26,11 @@ type ErrorMapFn func(err error) (status int, message string)
 // HandleServiceErrorResponse logs the error and writes an APIError JSON body.
 // The frozen {code, message, fields?} shape is preserved for the frontend.
 func HandleServiceErrorResponse(w http.ResponseWriter, r *http.Request, op string, err error, mapFn ErrorMapFn) {
-	status, msg := mapFn(err)
 	var apiErr commonerrors.APIError
-	if errors.As(err, &apiErr) {
-		pub, ref := commonerrors.Public(apiErr)
+	var de *apperr.Error
+	if errors.As(err, &apiErr) || errors.As(err, &de) {
+		pub, ref := commonerrors.Public(err)
+		status := commonerrors.StatusFor(pub)
 		if status >= http.StatusInternalServerError {
 			if ref != "" {
 				log.Printf("%s %s: internal error ref=%s: %v", r.Method, r.URL.Path, ref, err)
@@ -39,6 +41,7 @@ func HandleServiceErrorResponse(w http.ResponseWriter, r *http.Request, op strin
 		Json(w, status, pub)
 		return
 	}
+	status, msg := mapFn(err)
 	if status >= http.StatusInternalServerError {
 		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
 	}

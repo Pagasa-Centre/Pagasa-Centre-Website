@@ -62,12 +62,11 @@ Existing domains: `camp`, `accommodation`, `registration`, `consent` (api only),
 
 7. **SSE `/camp-admin/stream`** must stay **outside** the request-timeout middleware group (see router).
 
-8. **Errors cross layers as domain errors; only handlers speak HTTP.**
-   - Services and storage do not import `pkg/commonlibrary/errors`. Business failures are sentinel or typed errors declared in the service or `domain/` package (e.g. `var ErrRegistrationsClosed = errors.New("registrations closed")`, see `sermon.ErrNotFound`). Field validation returns a domain `ValidationError` carrying `Fields map[string]string`. Unexpected failures are wrapped with context: `fmt.Errorf("insert group: %w", err)`.
-   - Storage translates driver errors (e.g. `pgx.ErrNoRows`, unique violations) into domain errors, so services never match on SQL error text.
-   - Each handler package maps service errors to an `APIError` in one function, keeping the existing `code` strings — the frontend branches on some of them (e.g. `invalid_free_code` in `CampRegisterForm.tsx`).
-   - **Never put `err.Error()` in a response.** For anything unmapped, `log.Printf` the full error with the route (include the ref when present), then return the result of `commonerrors.Public(err)`. `WriteError` calls `Public` automatically: `internal_error` and non-`APIError` values become a generic message plus `(ref xxxxxx)` while the full cause is logged once. Explicit handler mapping is still preferred; `WriteError` is the backstop.
-   - Legacy services still return `APIError` and `commonerrors.Internal(err.Error())` (~100 call sites). Those no longer leak in responses; migrate them to domain errors when you touch them; do not add new ones.
+8. **Errors cross layers as domain errors; only the HTTP errors package speaks status and codes.**
+   - Services return `*apperr.Error` from `pkg/commonlibrary/apperr` (constructors `Invalid`, `Invalidf`, `InvalidCode`, `NotFound`, `Conflict`, `Validation`) or named sentinels in `internal/{domain}/domain/errors.go` (shared entities) or `internal/{domain}/errors.go` (service-specific). Unexpected failures are wrapped: `fmt.Errorf("insert group: %w", err)`. Services must not import `pkg/commonlibrary/errors`; `internal/archtest` enforces this.
+   - Storage translates driver errors (e.g. `pgx.ErrNoRows`, unique violations) into domain errors where appropriate, so services rarely match on SQL text.
+   - Handlers call `commonerrors.WriteError(w, err)`. `WriteError` maps through `commonerrors.FromError`: `KindInvalid` → 400 (`Code` or `bad_request`), `KindNotFound` → 404, `KindConflict` → 409 (`Code` or `conflict`), `KindValidation` → 400 with `fields`, everything else → sanitised `internal_error` with a ref via `Public`.
+   - **Never put raw `err.Error()` in a response.** Optional per-handler overrides: `errors.Is(err, registration.ErrRegistrationsClosed)` when a route needs different copy; otherwise rely on `WriteError`.
 
 ## Model types (no entity layer)
 
@@ -126,34 +125,15 @@ func (h *Handler) Submit() http.HandlerFunc {
 		}
 		result, err := h.service.Submit(r.Context(), mapper.RequestToDomain(req))
 		if err != nil {
-			commonerrors.WriteError(w, toAPIError(r, err))
+			commonerrors.WriteError(w, err) // FromError maps *apperr.Error to code + status
 			return
 		}
 		render.Json(w, http.StatusOK, mapper.SubmitToResponse(result))
 	}
 }
-
-// toAPIError is the only place this package turns service errors into HTTP errors.
-func toAPIError(r *http.Request, err error) commonerrors.APIError {
-	var verr registration.ValidationError
-	switch {
-	case errors.As(err, &verr):
-		return commonerrors.ValidationFailed(verr.Fields)
-	case errors.Is(err, registration.ErrRegistrationsClosed):
-		return commonerrors.APIError{Code: "registrations_closed", Message: "Camp registrations are currently closed"}
-	case errors.Is(err, registration.ErrInvalidFreeCode):
-		return commonerrors.APIError{Code: "invalid_free_code", Message: "That sponsorship code is not valid or has already been used."}
-	default:
-		pub, ref := commonerrors.Public(err)
-		if ref != "" {
-			log.Printf("%s %s: internal error ref=%s: %v", r.Method, r.URL.Path, ref, err)
-		}
-		return pub
-	}
-}
 ```
 
-`errors.StatusFor` turns the `APIError` code into the HTTP status. Validation maps to `errors.ValidationFailed(fields)` so the frontend can show per-field messages.
+Optional: if one route needs different wording, branch with `errors.Is(err, registration.ErrX)` and pass a handler-built `commonerrors.APIError` to `WriteError` instead of the service error.
 
 ## Service pattern
 
@@ -211,7 +191,8 @@ func (r *Repository) FindGroupByID(ctx context.Context, groupID string) (*domain
 |------|---------|
 | JSON response | `pagasacentre/backend/pkg/commonlibrary/render` |
 | Decode request body | `pagasacentre/backend/pkg/commonlibrary/request` |
-| API errors | `pagasacentre/backend/pkg/commonlibrary/errors` |
+| Domain errors | `pagasacentre/backend/pkg/commonlibrary/apperr` |
+| API errors (handlers only) | `pagasacentre/backend/pkg/commonlibrary/errors` |
 | DB pool / migrations | `pagasacentre/backend/pkg/commonlibrary/db` |
 | CORS, timeouts | `pagasacentre/backend/internal/middleware` |
 | Admin session | `pagasacentre/backend/internal/middleware` (`AuthConfig`, `RequireAdmin`) |

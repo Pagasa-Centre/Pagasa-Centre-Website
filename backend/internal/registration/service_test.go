@@ -13,7 +13,7 @@ import (
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/testhelper"
-	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
+	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
 
 type fakePriceLookup struct{ amount int }
@@ -179,11 +179,11 @@ func countGroupsForEmail(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 	return n
 }
 
-func assertAPIErrorCode(t *testing.T, err error, code string) {
+func assertDomainError(t *testing.T, err error, kind apperr.Kind, code string) {
 	t.Helper()
-	var apiErr commonerrors.APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != code {
-		t.Fatalf("expected APIError code %q, got %v", code, err)
+	var de *apperr.Error
+	if !errors.As(err, &de) || de.Kind != kind || de.Code != code {
+		t.Fatalf("expected domain error kind=%v code=%q, got %v", kind, code, err)
 	}
 }
 
@@ -207,7 +207,7 @@ func TestSubmit_invalidFreeCode(t *testing.T) {
 	svc := newIntegrationService(pool)
 
 	_, err := svc.Submit(ctx, sponsoredRequest("SPON-NOSUCH01", "bad@example.com"))
-	assertAPIErrorCode(t, err, "invalid_free_code")
+	assertDomainError(t, err, apperr.KindInvalid, "invalid_free_code")
 	if countGroupsForEmail(t, ctx, pool, "bad@example.com") != 0 {
 		t.Fatalf("expected no group row for submitter after invalid code")
 	}
@@ -220,7 +220,7 @@ func TestSubmit_usedFreeCodeRejected(t *testing.T) {
 	seedUsedFreeCode(t, ctx, pool, "SPON-USED0001")
 
 	_, err := svc.Submit(ctx, sponsoredRequest("SPON-USED0001", "used@example.com"))
-	assertAPIErrorCode(t, err, "invalid_free_code")
+	assertDomainError(t, err, apperr.KindInvalid, "invalid_free_code")
 	if countGroupsForEmail(t, ctx, pool, "used@example.com") != 0 {
 		t.Fatalf("expected no group for rejected submitter")
 	}
@@ -236,7 +236,7 @@ func TestSubmit_revokedFreeCodeRejected(t *testing.T) {
 	seedRevokedFreeCode(t, ctx, pool, "SPON-REVOK001")
 
 	_, err := svc.Submit(ctx, sponsoredRequest("SPON-REVOK001", "revoked@example.com"))
-	assertAPIErrorCode(t, err, "invalid_free_code")
+	assertDomainError(t, err, apperr.KindInvalid, "invalid_free_code")
 	if countGroupsForEmail(t, ctx, pool, "revoked@example.com") != 0 {
 		t.Fatalf("expected no group row for submitter after revoked code")
 	}
@@ -295,7 +295,7 @@ func TestSubmit_doubleRedeemFreeCode(t *testing.T) {
 		t.Fatalf("first Submit: %v", err)
 	}
 	_, err := svc.Submit(ctx, sponsoredRequest("SPON-DOUBLE01", "second@example.com"))
-	assertAPIErrorCode(t, err, "invalid_free_code")
+	assertDomainError(t, err, apperr.KindInvalid, "invalid_free_code")
 	if countGroupsForEmail(t, ctx, pool, "second@example.com") != 0 {
 		t.Fatalf("expected no group for second redeem attempt")
 	}
@@ -364,7 +364,7 @@ func TestSubmit_disabledAccommodationRejected(t *testing.T) {
 	t.Cleanup(func() { setAccommodationAvailability(t, context.Background(), pool, "lodge", true) })
 
 	_, err := svc.Submit(ctx, validRequest())
-	assertAPIErrorCode(t, err, "accommodation_unavailable")
+	assertDomainError(t, err, apperr.KindConflict, "accommodation_unavailable")
 	if countGroupsForEmail(t, ctx, pool, "jane@example.com") != 0 {
 		t.Fatalf("expected no group row after disabled-accommodation submit")
 	}
@@ -430,7 +430,7 @@ func TestRevokeFreeCode_rejectsUsedCode(t *testing.T) {
 	}
 
 	err = svc.RevokeFreeCode(ctx, id)
-	assertAPIErrorCode(t, err, "bad_request")
+	assertDomainError(t, err, apperr.KindInvalid, "")
 }
 
 func TestRowsFromRequest_dayPassIncludesShirtSize(t *testing.T) {

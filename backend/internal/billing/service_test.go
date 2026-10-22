@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
+	"pagasacentre/backend/pkg/commonlibrary/apperr"
 	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/registration"
 	"pagasacentre/backend/internal/registration/domain"
@@ -342,8 +342,8 @@ func TestAllocate_versionConflict(t *testing.T) {
 	}}}
 	// Stale version should 409-style conflict.
 	err = svc.Allocate(ctx, groupID, "Aliyah", 1, req)
-	var apiErr commonerrors.APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != "stale_state" {
+	var de *apperr.Error
+	if !errors.As(err, &de) || de.Kind != apperr.KindConflict || de.Code != "stale_state" {
 		t.Fatalf("expected stale_state conflict, got %v", err)
 	}
 }
@@ -402,8 +402,8 @@ func TestConfirmFree_rejectsNonFreeGroup(t *testing.T) {
 	}
 
 	err = svc.ConfirmFree(ctx, groupID, "Admin", domain.SkipVersionCheck)
-	var apiErr commonerrors.APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+	var de *apperr.Error
+	if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 		t.Fatalf("expected bad_request, got %v", err)
 	}
 }
@@ -426,8 +426,8 @@ func TestConfirmFree_rejectsNonAllocatedGroup(t *testing.T) {
 	}
 
 	err = svc.ConfirmFree(ctx, groupID, "Admin", domain.SkipVersionCheck)
-	var apiErr commonerrors.APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+	var de *apperr.Error
+	if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 		t.Fatalf("expected bad_request for non-allocated free group, got %v", err)
 	}
 }
@@ -918,12 +918,12 @@ func TestDeleteRegistration_refusesPaidInFullRegistration(t *testing.T) {
 	}
 
 	_, err = svc.DeleteRegistration(ctx, groupID, "Admin", domain.SkipVersionCheck)
-	var apiErr commonerrors.APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+	var de *apperr.Error
+	if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 		t.Fatalf("expected bad_request, got %v", err)
 	}
-	if !strings.Contains(apiErr.Message, "Stripe") {
-		t.Fatalf("message = %q, should send the admin to Stripe", apiErr.Message)
+	if !strings.Contains(de.Message, "Stripe") {
+		t.Fatalf("message = %q, should send the admin to Stripe", de.Message)
 	}
 	if len(stub.refundInvCall) != 0 {
 		t.Fatalf("refunds asked of Stripe = %+v, want none", stub.refundInvCall)
@@ -1219,8 +1219,8 @@ func TestDeleteRegistration_stripeFailureAborts(t *testing.T) {
 			}
 
 			_, err = svc.DeleteRegistration(ctx, groupID, "Admin", domain.SkipVersionCheck)
-			var apiErr commonerrors.APIError
-			if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+			var de *apperr.Error
+			if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 				t.Fatalf("expected bad_request, got %v", err)
 			}
 			if g, _ := repo.FindGroupByID(ctx, groupID); g == nil {
@@ -1248,11 +1248,8 @@ func TestDeleteRegistration_staleVersion(t *testing.T) {
 	}
 
 	_, err = svc.DeleteRegistration(ctx, groupID, "Admin", 1)
-	if !errors.As(err, &commonerrors.APIError{}) {
-		t.Fatalf("expected APIError, got %v", err)
-	}
-	var apiErr commonerrors.APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != "stale_state" {
+	var de *apperr.Error
+	if !errors.As(err, &de) || de.Kind != apperr.KindConflict || de.Code != "stale_state" {
 		t.Fatalf("expected stale_state, got %v", err)
 	}
 	g, _ := repo.FindGroupByID(ctx, groupID)
@@ -1472,8 +1469,8 @@ func TestRemoveCamper_mainContactBlocked(t *testing.T) {
 	groupID, mainID, _, _ := insertThreeCamperGroup(ctx, t, pool, domain.BillingAllocated, nil)
 
 	_, err := svc.RemoveCamper(ctx, groupID, mainID, "Admin", domain.SkipVersionCheck)
-	var apiErr commonerrors.APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+	var de *apperr.Error
+	if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 		t.Fatalf("expected bad_request, got %v", err)
 	}
 	campers, _ := repo.CampersForGroup(ctx, groupID)
@@ -1509,8 +1506,8 @@ func TestRemoveCamper_lastCamperBlocked(t *testing.T) {
 	}
 
 	_, err = svc.RemoveCamper(ctx, groupID, camperID, "Admin", domain.SkipVersionCheck)
-	var apiErr commonerrors.APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+	var de *apperr.Error
+	if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 		t.Fatalf("expected bad_request, got %v", err)
 	}
 }
@@ -1524,8 +1521,8 @@ func TestRemoveCamper_balancePaidBlocked(t *testing.T) {
 	groupID, _, camper2ID, _ := insertThreeCamperGroup(ctx, t, pool, domain.BillingBalancePaid, nil)
 
 	_, err := svc.RemoveCamper(ctx, groupID, camper2ID, "Admin", domain.SkipVersionCheck)
-	var apiErr commonerrors.APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+	var de *apperr.Error
+	if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 		t.Fatalf("expected bad_request, got %v", err)
 	}
 }
@@ -1607,8 +1604,8 @@ func TestRemoveCamper_staleVersion(t *testing.T) {
 	groupID, _, camper2ID, _ := insertThreeCamperGroup(ctx, t, pool, domain.BillingAllocated, nil)
 
 	_, err := svc.RemoveCamper(ctx, groupID, camper2ID, "Admin", 99)
-	var apiErr commonerrors.APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != "stale_state" {
+	var de *apperr.Error
+	if !errors.As(err, &de) || de.Kind != apperr.KindConflict || de.Code != "stale_state" {
 		t.Fatalf("expected stale_state, got %v", err)
 	}
 }
@@ -1747,8 +1744,8 @@ func TestSendCoachInvoice_paidGroup(t *testing.T) {
 
 	// Second send rejects — already charged.
 	err := svc.SendCoachInvoice(ctx, groupID, "Admin", domain.SkipVersionCheck)
-	var apiErr commonerrors.APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+	var de *apperr.Error
+	if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 		t.Fatalf("expected bad_request on repeat, got %v", err)
 	}
 }
@@ -1768,8 +1765,8 @@ func TestSendCoachInvoice_guards(t *testing.T) {
 	// Sponsored group → never coach-charged.
 	free := insertCoachGroup(ctx, t, pool, domain.BillingInvoiced, "lodge", true)
 	err := svc.SendCoachInvoice(ctx, free, "Admin", domain.SkipVersionCheck)
-	var apiErr commonerrors.APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+	var de *apperr.Error
+	if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 		t.Fatalf("expected bad_request for is_free, got %v", err)
 	}
 
@@ -1917,8 +1914,8 @@ func TestWaiveCoachFee_guards(t *testing.T) {
 			t.Fatalf("SendInvoice: %v", err)
 		}
 		err := svc.WaiveCoachFee(ctx, groupID, "Admin", domain.SkipVersionCheck)
-		var apiErr commonerrors.APIError
-		if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		var de *apperr.Error
+		if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 			t.Fatalf("expected bad_request, got %v", err)
 		}
 	})
@@ -1934,8 +1931,8 @@ func TestWaiveCoachFee_guards(t *testing.T) {
 			t.Fatalf("HandleCoachInvoicePaid: %v", err)
 		}
 		err := svc.WaiveCoachFee(ctx, groupID, "Admin", domain.SkipVersionCheck)
-		var apiErr commonerrors.APIError
-		if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		var de *apperr.Error
+		if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 			t.Fatalf("expected bad_request, got %v", err)
 		}
 	})
@@ -1952,8 +1949,8 @@ func TestSendCoachInvoice_waivedGroup(t *testing.T) {
 		t.Fatalf("WaiveCoachFee: %v", err)
 	}
 	err := svc.SendCoachInvoice(ctx, groupID, "Admin", domain.SkipVersionCheck)
-	var apiErr commonerrors.APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+	var de *apperr.Error
+	if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 		t.Fatalf("expected bad_request, got %v", err)
 	}
 }
@@ -2172,8 +2169,8 @@ func TestUpdateCamperCoach_guards(t *testing.T) {
 		t.Fatalf("set coach paid: %v", err)
 	}
 	_, err := svc.UpdateCamperCoach(ctx, groupID, camper1ID, "Admin", domain.SkipVersionCheck, UpdateCamperCoachRequest{NeedsCoach: false})
-	var apiErr commonerrors.APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+	var de *apperr.Error
+	if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 		t.Fatalf("expected bad_request when coach paid, got %v", err)
 	}
 
@@ -2184,7 +2181,7 @@ func TestUpdateCamperCoach_guards(t *testing.T) {
 		t.Fatalf("set coach in balance: %v", err)
 	}
 	_, err = svc.UpdateCamperCoach(ctx, groupID2, camper2a, "Admin", domain.SkipVersionCheck, UpdateCamperCoachRequest{NeedsCoach: false})
-	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+	if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 		t.Fatalf("expected bad_request when coach in balance, got %v", err)
 	}
 
@@ -2207,7 +2204,7 @@ func TestUpdateCamperCoach_guards(t *testing.T) {
 		t.Fatalf("insert day camper: %v", err)
 	}
 	_, err = svc.UpdateCamperCoach(ctx, dayGroup, dayCamper, "Admin", domain.SkipVersionCheck, UpdateCamperCoachRequest{NeedsCoach: true})
-	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+	if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 		t.Fatalf("expected bad_request for day pass, got %v", err)
 	}
 }
@@ -2283,8 +2280,8 @@ func TestUpdateCamperCoach_versionConflict(t *testing.T) {
 
 	groupID, camper1ID, _ := insertTwoCoachGroup(ctx, t, pool, domain.BillingBalancePaid)
 	_, err := svc.UpdateCamperCoach(ctx, groupID, camper1ID, "Admin", 99, UpdateCamperCoachRequest{NeedsCoach: false})
-	var apiErr commonerrors.APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != "stale_state" {
+	var de *apperr.Error
+	if !errors.As(err, &de) || de.Kind != apperr.KindConflict || de.Code != "stale_state" {
 		t.Fatalf("expected stale_state conflict, got %v", err)
 	}
 }
@@ -2541,8 +2538,8 @@ func TestConvertCamperToDayVisitor_guards(t *testing.T) {
 	t.Run("balance_paid", func(t *testing.T) {
 		groupID, _, camper2ID, _ := insertThreeCamperGroup(ctx, t, pool, domain.BillingBalancePaid, nil)
 		_, err := svc.ConvertCamperToDayVisitor(ctx, groupID, camper2ID, "Admin", domain.SkipVersionCheck, validConvertRequest())
-		var apiErr commonerrors.APIError
-		if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		var de *apperr.Error
+		if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 			t.Fatalf("expected bad_request, got %v", err)
 		}
 	})
@@ -2555,8 +2552,8 @@ func TestConvertCamperToDayVisitor_guards(t *testing.T) {
 			t.Fatalf("update camper: %v", err)
 		}
 		_, err = svc.ConvertCamperToDayVisitor(ctx, groupID, campers[0].ID, "Admin", domain.SkipVersionCheck, validConvertRequest())
-		var apiErr commonerrors.APIError
-		if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		var de *apperr.Error
+		if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 			t.Fatalf("expected bad_request, got %v", err)
 		}
 	})
@@ -2566,8 +2563,8 @@ func TestConvertCamperToDayVisitor_guards(t *testing.T) {
 		req := validConvertRequest()
 		req.Days = nil
 		_, err := svc.ConvertCamperToDayVisitor(ctx, groupID, camper2ID, "Admin", domain.SkipVersionCheck, req)
-		var apiErr commonerrors.APIError
-		if !errors.As(err, &apiErr) || apiErr.Code != "validation_failed" {
+		var de *apperr.Error
+		if !errors.As(err, &de) || de.Kind != apperr.KindValidation {
 			t.Fatalf("expected validation_failed, got %v", err)
 		}
 	})
@@ -2576,8 +2573,8 @@ func TestConvertCamperToDayVisitor_guards(t *testing.T) {
 		groupID := insertCoachGroup(ctx, t, pool, domain.BillingAllocated, "lodge", true)
 		campers, _ := repo.CampersForGroup(ctx, groupID)
 		_, err := svc.ConvertCamperToDayVisitor(ctx, groupID, campers[0].ID, "Admin", domain.SkipVersionCheck, validConvertRequest())
-		var apiErr commonerrors.APIError
-		if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		var de *apperr.Error
+		if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 			t.Fatalf("expected bad_request, got %v", err)
 		}
 		if len(stub.creditCalls) != 0 {
@@ -2786,8 +2783,8 @@ func TestUpdateDayPassCamper_guards(t *testing.T) {
 	t.Run("full_week", func(t *testing.T) {
 		groupID, _, camper2ID, _ := insertThreeCamperGroup(ctx, t, pool, domain.BillingAllocated, nil)
 		_, err := svc.UpdateDayPassCamper(ctx, groupID, camper2ID, "Admin", domain.SkipVersionCheck, validUpdateDayPassRequest())
-		var apiErr commonerrors.APIError
-		if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		var de *apperr.Error
+		if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 			t.Fatalf("expected bad_request, got %v", err)
 		}
 	})
@@ -2798,8 +2795,8 @@ func TestUpdateDayPassCamper_guards(t *testing.T) {
 		req.TshirtOption = domain.TshirtOptionTeamActivities
 		req.ShirtSize = ""
 		_, err := svc.UpdateDayPassCamper(ctx, groupID, camperID, "Admin", domain.SkipVersionCheck, req)
-		var apiErr commonerrors.APIError
-		if !errors.As(err, &apiErr) || apiErr.Code != "validation_failed" {
+		var de *apperr.Error
+		if !errors.As(err, &de) || de.Kind != apperr.KindValidation {
 			t.Fatalf("expected validation_failed, got %v", err)
 		}
 	})
@@ -2983,12 +2980,12 @@ func TestSendInvoice_rejectsPrepaidGroup(t *testing.T) {
 	}
 
 	err = svc.SendInvoice(ctx, groupID, "Admin", domain.SkipVersionCheck)
-	var apiErr commonerrors.APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+	var de *apperr.Error
+	if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 		t.Fatalf("expected bad_request, got %v", err)
 	}
-	if !strings.Contains(apiErr.Message, "paid in full at registration") {
-		t.Fatalf("unexpected message: %q", apiErr.Message)
+	if !strings.Contains(de.Message, "paid in full at registration") {
+		t.Fatalf("unexpected message: %q", de.Message)
 	}
 }
 
@@ -3123,8 +3120,8 @@ func TestMarkBalancePaidManually_voidFailureLeavesGroupUnpaid(t *testing.T) {
 	}
 
 	err := svc.MarkBalancePaidManually(ctx, groupID, "Diane", domain.SkipVersionCheck)
-	var apiErr commonerrors.APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+	var de *apperr.Error
+	if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 		t.Fatalf("expected bad_request when the void fails, got %v", err)
 	}
 
@@ -3150,8 +3147,8 @@ func TestMarkBalancePaidManually_guards(t *testing.T) {
 
 	expectBadRequest := func(t *testing.T, err error) {
 		t.Helper()
-		var apiErr commonerrors.APIError
-		if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		var de *apperr.Error
+		if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 			t.Fatalf("expected bad_request, got %v", err)
 		}
 	}
@@ -3194,8 +3191,8 @@ func TestMarkBalancePaidManually_versionConflict(t *testing.T) {
 	groupID := insertCoachGroup(ctx, t, pool, domain.BillingAllocated, "lodge", false)
 
 	err := svc.MarkBalancePaidManually(ctx, groupID, "Diane", 99)
-	var apiErr commonerrors.APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != "stale_state" {
+	var de *apperr.Error
+	if !errors.As(err, &de) || de.Kind != apperr.KindConflict || de.Code != "stale_state" {
 		t.Fatalf("expected stale_state conflict, got %v", err)
 	}
 	g, _ := repo.FindGroupByID(ctx, groupID)

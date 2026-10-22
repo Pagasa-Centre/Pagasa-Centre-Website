@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 	"pagasacentre/backend/internal/registration/domain"
+	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
 
 func ExpectedVersion(v *int) int {
@@ -41,7 +41,7 @@ type groupReader interface {
 	FindGroupByID(ctx context.Context, groupID string) (*domain.Group, error)
 }
 
-func staleConflict(ctx context.Context, repo groupReader, groupID string) commonerrors.APIError {
+func staleConflict(ctx context.Context, repo groupReader, groupID string) *apperr.Error {
 	who := "someone else"
 	state := "updated"
 	if g, err := repo.FindGroupByID(ctx, groupID); err == nil && g != nil {
@@ -54,12 +54,12 @@ func staleConflict(ctx context.Context, repo groupReader, groupID string) common
 		"This group was just updated by %s (%s). Your view was refreshed — please check and try again.",
 		who, state,
 	)
-	return commonerrors.Conflict("stale_state", msg, nil)
+	return apperr.Conflict("stale_state", msg)
 }
 
 func mapVersionErr(ctx context.Context, repo groupReader, groupID string, err error) error {
 	if errors.Is(err, domain.ErrVersionConflict) {
 		return staleConflict(ctx, repo, groupID)
 	}
-	return commonerrors.Internal(err.Error())
+	return fmt.Errorf("version check: %w", err)
 }

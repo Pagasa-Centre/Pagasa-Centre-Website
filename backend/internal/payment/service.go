@@ -11,8 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"pagasacentre/backend/internal/email"
-	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 	"pagasacentre/backend/internal/registration/domain"
+	"pagasacentre/backend/pkg/commonlibrary/apperr"
 	"pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/sheets"
 )
@@ -258,11 +258,10 @@ func (s *Service) UpdateGroupContact(ctx context.Context, groupID, firstName, la
 		return fmt.Errorf("load group: %w", err)
 	}
 	if g == nil {
-		return commonerrors.NotFound("registration not found")
+		return domain.ErrRegistrationNotFound
 	}
 	if resend && g.PaymentStatus != domain.PaymentPaid {
-		return commonerrors.BadRequest(
-			"the confirmation email can only be re-sent once the deposit is paid", nil)
+		return apperr.Invalid("the confirmation email can only be re-sent once the deposit is paid")
 	}
 
 	if err := s.regRepo.UpdateContact(ctx, groupID, firstName, lastName, emailAddr, phone); err != nil {

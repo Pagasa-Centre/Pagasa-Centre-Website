@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"pagasacentre/backend/internal/registration/domain"
-	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
+	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
 
 var emailRE = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
@@ -49,7 +49,7 @@ func Validate(req domain.SubmitRequest) error {
 	}
 
 	if len(fields) > 0 {
-		return commonerrors.ValidationFailed(fields)
+		return apperr.Validation(fields)
 	}
 	return nil
 }

@@ -2,11 +2,12 @@ package registration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"pagasacentre/backend/internal/registration/domain"
-	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
+	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
 
 type StripePriceAmounts interface {
@@ -238,12 +239,12 @@ func ensureCurrency(expected, got string) error {
 func (s *Service) PricingSnapshot(ctx context.Context) (*PricingSnapshot, error) {
 	mode, err := s.camp.RegistrationPaymentMode(ctx)
 	if err != nil {
-		return nil, commonerrors.Internal(err.Error())
+		return nil, errors.New(err.Error())
 	}
 
 	deposit, err := s.prices.GetPrice(ctx, domain.PriceDeposit)
 	if err != nil {
-		return nil, commonerrors.Internal(err.Error())
+		return nil, errors.New(err.Error())
 	}
 	currency := deposit.Currency
 	if currency == "" {
@@ -261,12 +262,12 @@ func (s *Service) PricingSnapshot(ctx context.Context) (*PricingSnapshot, error)
 	}
 
 	if s.stripeAmounts == nil {
-		return nil, commonerrors.Internal("stripe price catalog not configured")
+		return nil, errors.New("stripe price catalog not configured")
 	}
 
 	tiers, err := s.repo.ListAccommodationTypes(ctx)
 	if err != nil {
-		return nil, commonerrors.Internal(err.Error())
+		return nil, errors.New(err.Error())
 	}
 
 	for _, t := range tiers {
@@ -279,10 +280,10 @@ func (s *Service) PricingSnapshot(ctx context.Context) (*PricingSnapshot, error)
 		}
 		amount, cur, err := s.stripeAmounts.Amount(ctx, priceID)
 		if err != nil {
-			return nil, commonerrors.Internal(err.Error())
+			return nil, errors.New(err.Error())
 		}
 		if err := ensureCurrency(currency, cur); err != nil {
-			return nil, commonerrors.Internal(err.Error())
+			return nil, errors.New(err.Error())
 		}
 		snap.AccommodationTiers = append(snap.AccommodationTiers, PricingTier{
 			Code:        t.Code,
@@ -294,10 +295,10 @@ func (s *Service) PricingSnapshot(ctx context.Context) (*PricingSnapshot, error)
 	if s.cfg.StripePriceChildUnder3 != "" {
 		amount, cur, err := s.stripeAmounts.Amount(ctx, s.cfg.StripePriceChildUnder3)
 		if err != nil {
-			return nil, commonerrors.Internal(err.Error())
+			return nil, errors.New(err.Error())
 		}
 		if err := ensureCurrency(currency, cur); err != nil {
-			return nil, commonerrors.Internal(err.Error())
+			return nil, errors.New(err.Error())
 		}
 		snap.ChildUnder3AmountPence = int(amount)
 	}
@@ -305,10 +306,10 @@ func (s *Service) PricingSnapshot(ctx context.Context) (*PricingSnapshot, error)
 	if s.cfg.StripePriceDayPass != "" {
 		amount, cur, err := s.stripeAmounts.Amount(ctx, s.cfg.StripePriceDayPass)
 		if err != nil {
-			return nil, commonerrors.Internal(err.Error())
+			return nil, errors.New(err.Error())
 		}
 		if err := ensureCurrency(currency, cur); err != nil {
-			return nil, commonerrors.Internal(err.Error())
+			return nil, errors.New(err.Error())
 		}
 		snap.DayPassAmountPence = int(amount)
 	}
@@ -316,10 +317,10 @@ func (s *Service) PricingSnapshot(ctx context.Context) (*PricingSnapshot, error)
 	if s.cfg.StripePriceCoach != "" {
 		amount, cur, err := s.stripeAmounts.Amount(ctx, s.cfg.StripePriceCoach)
 		if err != nil {
-			return nil, commonerrors.Internal(err.Error())
+			return nil, errors.New(err.Error())
 		}
 		if err := ensureCurrency(currency, cur); err != nil {
-			return nil, commonerrors.Internal(err.Error())
+			return nil, errors.New(err.Error())
 		}
 		snap.CoachAmountPence = int(amount)
 	}
@@ -330,7 +331,7 @@ func (s *Service) PricingSnapshot(ctx context.Context) (*PricingSnapshot, error)
 func (s *Service) ValidateFullPaymentPricing(ctx context.Context) error {
 	deposit, err := s.prices.GetPrice(ctx, domain.PriceDeposit)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("pricing: %w", err)
 	}
 	currency := deposit.Currency
 	if currency == "" {
@@ -338,7 +339,7 @@ func (s *Service) ValidateFullPaymentPricing(ctx context.Context) error {
 	}
 
 	if s.stripeAmounts == nil {
-		return commonerrors.BadRequest("stripe price catalog not configured", nil)
+		return apperr.Invalid("stripe price catalog not configured")
 	}
 
 	var problems []string
@@ -363,7 +364,7 @@ func (s *Service) ValidateFullPaymentPricing(ctx context.Context) error {
 
 	tiers, err := s.repo.ListAccommodationTypes(ctx)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("pricing: %w", err)
 	}
 
 	for _, t := range tiers {
@@ -383,7 +384,7 @@ func (s *Service) ValidateFullPaymentPricing(ctx context.Context) error {
 	checkPrice("Coach (STRIPE_PRICE_COACH)", s.cfg.StripePriceCoach)
 
 	if len(problems) > 0 {
-		return commonerrors.BadRequest("cannot enable full payment mode: "+strings.Join(problems, "; "), nil)
+		return apperr.Invalid("cannot enable full payment mode: " + strings.Join(problems, "; "))
 	}
 	return nil
 }

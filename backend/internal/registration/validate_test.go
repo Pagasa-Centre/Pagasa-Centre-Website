@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"pagasacentre/backend/internal/registration/domain"
-	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
+	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
 
 func boolPtr(b bool) *bool { return &b }
@@ -43,12 +43,12 @@ func assertFieldError(t *testing.T, err error, field string) {
 	if err == nil {
 		t.Fatalf("expected error for field %s, got nil", field)
 	}
-	var apiErr commonerrors.APIError
-	if !errors.As(err, &apiErr) {
-		t.Fatalf("expected APIError, got %T: %v", err, err)
+	var de *apperr.Error
+	if !errors.As(err, &de) {
+		t.Fatalf("expected domain error, got %T: %v", err, err)
 	}
-	if _, ok := apiErr.Fields[field]; !ok {
-		t.Fatalf("expected error on %s, got fields %v", field, apiErr.Fields)
+	if _, ok := de.Fields[field]; !ok {
+		t.Fatalf("expected error on %s, got fields %v", field, de.Fields)
 	}
 }
 

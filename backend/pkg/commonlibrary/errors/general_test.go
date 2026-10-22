@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
+	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
 
 func TestWriteError_sanitisesInternalAPIError(t *testing.T) {
@@ -89,6 +91,45 @@ func TestPublic_passesStaleStateAndInvalidFreeCode(t *testing.T) {
 	pub, ref = commonerrors.Public(commonerrors.Conflict("stale_state", staleMsg, nil))
 	if ref != "" || pub.Message != staleMsg {
 		t.Fatalf("stale_state: ref=%q msg=%q", ref, pub.Message)
+	}
+}
+
+func TestWriteError_domainKinds(t *testing.T) {
+	stale := apperr.Conflict("stale_state", "updated by other")
+	w := httptest.NewRecorder()
+	commonerrors.WriteError(w, stale)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("stale_state status %d", w.Code)
+	}
+	var parsed commonerrors.APIError
+	_ = json.Unmarshal(w.Body.Bytes(), &parsed)
+	if parsed.Code != "stale_state" || parsed.Message != "updated by other" {
+		t.Fatalf("stale: %+v", parsed)
+	}
+
+	free := apperr.InvalidCode("invalid_free_code", "bad code")
+	w = httptest.NewRecorder()
+	commonerrors.WriteError(w, free)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid_free_code status %d", w.Code)
+	}
+
+	val := apperr.Validation(map[string]string{"email": "x"})
+	w = httptest.NewRecorder()
+	commonerrors.WriteError(w, val)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("validation status %d", w.Code)
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &parsed)
+	if parsed.Fields["email"] != "x" {
+		t.Fatalf("fields %+v", parsed.Fields)
+	}
+
+	wrapped := fmt.Errorf("outer: %w", apperr.NotFound("gone"))
+	w = httptest.NewRecorder()
+	commonerrors.WriteError(w, wrapped)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("wrapped not found status %d", w.Code)
 	}
 }
 

@@ -9,10 +9,10 @@ import (
 
 	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/registration"
-	"pagasacentre/backend/internal/sheets"
-	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/internal/registration/storage"
+	"pagasacentre/backend/internal/sheets"
+	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
 
 // stripeClient is the Stripe surface billing.Service needs. *StripeBilling satisfies it.
@@ -73,24 +73,24 @@ func (s *Service) depositAmountPence(ctx context.Context) int {
 func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedVersion int, req AllocateRequest) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	if g == nil {
-		return commonerrors.NotFound("group not found")
+		return domain.ErrGroupNotFound
 	}
 	if g.PaymentStatus != domain.PaymentPaid {
-		return commonerrors.BadRequest("deposit must be paid before allocation", nil)
+		return apperr.Invalid("deposit must be paid before allocation")
 	}
 	if g.BillingStatus == domain.BillingInvoiced {
-		return commonerrors.BadRequest("cannot change allocation while invoice is open; release first", nil)
+		return apperr.Invalid("cannot change allocation while invoice is open; release first")
 	}
 	if g.BillingStatus == domain.BillingBalancePaid && !g.PaidInFullAtRegistration {
-		return commonerrors.BadRequest("balance already paid", nil)
+		return domain.ErrBalancePaid
 	}
 
 	campers, err := s.repo.CampersForGroup(ctx, groupID)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	byID := map[string]domain.Camper{}
 	for _, c := range campers {
@@ -101,14 +101,14 @@ func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedV
 	for _, a := range req.Campers {
 		c, ok := byID[a.CamperID]
 		if !ok {
-			return commonerrors.BadRequest("unknown camper_id "+a.CamperID, nil)
+			return apperr.Invalid("unknown camper_id "+a.CamperID)
 		}
 		if c.AttendanceType != domain.AttendanceFullWeek {
 			continue
 		}
 		code := strings.TrimSpace(a.AllocatedAccommodationCode)
 		if code == "" {
-			return commonerrors.ValidationFailed(map[string]string{
+			return apperr.Validation(map[string]string{
 				a.CamperID: "allocated_accommodation_code is required for full-week campers",
 			})
 		}
@@ -146,7 +146,7 @@ func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedV
 			}
 		}
 		if !found {
-			return commonerrors.ValidationFailed(map[string]string{
+			return apperr.Validation(map[string]string{
 				"campers": fmt.Sprintf("full-week camper %s %s is not allocated", c.FirstName, c.LastName),
 			})
 		}
@@ -169,17 +169,17 @@ func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedV
 func (s *Service) Unallocate(ctx context.Context, groupID, actor string, expectedVersion int) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	if g == nil {
-		return commonerrors.NotFound("group not found")
+		return domain.ErrGroupNotFound
 	}
 	switch g.BillingStatus {
 	case domain.BillingInvoiced:
-		return commonerrors.BadRequest("invoice is open; use release instead", nil)
+		return ErrInvoiceOpen
 	case domain.BillingBalancePaid:
 		if !g.PaidInFullAtRegistration {
-			return commonerrors.BadRequest("balance already paid", nil)
+			return domain.ErrBalancePaid
 		}
 	}
 	meta := domain.ActionMeta{
@@ -201,16 +201,13 @@ func (s *Service) validateAllocatedUnit(ctx context.Context, tierCode, unitCode 
 	}
 	u, err := s.repo.GetAccommodationUnit(ctx, unitCode)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	if u == nil {
-		return commonerrors.BadRequest("unknown unit "+unitCode, nil)
+		return apperr.Invalid("unknown unit "+unitCode)
 	}
 	if u.AccommodationCode != tierCode {
-		return commonerrors.BadRequest(
-			fmt.Sprintf("unit %q belongs to %q, not %q", unitCode, u.AccommodationCode, tierCode),
-			nil,
-		)
+		return apperr.Invalidf("unit %q belongs to %q, not %q", unitCode, u.AccommodationCode, tierCode)
 	}
 	return nil
 }
@@ -218,11 +215,11 @@ func (s *Service) validateAllocatedUnit(ctx context.Context, tierCode, unitCode 
 func (s *Service) resolvePriceID(ctx context.Context, accommodationCode string, age int) (string, error) {
 	t, err := s.repo.GetAccommodationType(ctx, accommodationCode)
 	if err != nil {
-		return "", commonerrors.Internal(err.Error())
+		return "", fmt.Errorf("get accommodation type: %w", err)
 	}
 	priceID, err := registration.AccommodationPriceID(accommodationCode, age, t, s.cfg.StripePriceChildUnder3)
 	if err != nil {
-		return "", commonerrors.BadRequest(err.Error(), nil)
+		return "", apperr.Invalid(err.Error())
 	}
 	return priceID, nil
 }
@@ -231,23 +228,23 @@ func (s *Service) resolvePriceID(ctx context.Context, accommodationCode string, 
 func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expectedVersion int) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	if g == nil {
-		return commonerrors.NotFound("group not found")
+		return domain.ErrGroupNotFound
 	}
 	if g.IsFree {
-		return commonerrors.BadRequest("this is a church-sponsored registration; confirm the sponsorship instead of invoicing", nil)
+		return apperr.Invalid("this is a church-sponsored registration; confirm the sponsorship instead of invoicing")
 	}
 	if g.PaidInFullAtRegistration {
-		return commonerrors.BadRequest("this family paid in full at registration; there is nothing to invoice", nil)
+		return apperr.Invalid("this family paid in full at registration; there is nothing to invoice")
 	}
 	if g.PaymentStatus != domain.PaymentPaid {
-		return commonerrors.BadRequest("deposit must be paid first", nil)
+		return domain.ErrDepositUnpaid
 	}
 	campers, err := s.repo.CampersForGroup(ctx, groupID)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	hasFullWeek := false
 	for _, c := range campers {
@@ -259,15 +256,15 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 
 	switch g.BillingStatus {
 	case domain.BillingBalancePaid:
-		return commonerrors.BadRequest("balance already paid", nil)
+		return domain.ErrBalancePaid
 	case domain.BillingInvoiced:
-		return commonerrors.BadRequest("invoice already sent", nil)
+		return ErrInvoiceAlreadySent
 	case domain.BillingNone, domain.BillingReleased:
 		// Full-week campers must be allocated before invoicing. Day-pass-only
 		// groups have no accommodation to allocate, so they invoice straight
 		// from "none".
 		if hasFullWeek {
-			return commonerrors.BadRequest("group must be allocated before invoicing", nil)
+			return apperr.Invalid("group must be allocated before invoicing")
 		}
 	}
 
@@ -276,7 +273,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 		switch c.AttendanceType {
 		case domain.AttendanceFullWeek:
 			if c.AllocatedAccommodationCode == nil || strings.TrimSpace(*c.AllocatedAccommodationCode) == "" {
-				return commonerrors.BadRequest(fmt.Sprintf("camper %s %s is not allocated", c.FirstName, c.LastName), nil)
+				return apperr.Invalidf("camper %s %s is not allocated", c.FirstName, c.LastName)
 			}
 			// Re-resolve the Stripe Price from the CURRENT accommodation config at
 			// send time rather than replaying the value stored when the allocation
@@ -294,7 +291,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 				continue
 			}
 			if line.PriceID == "" {
-				return commonerrors.BadRequest("STRIPE_PRICE_DAY_PASS is not configured", nil)
+				return apperr.Invalid("STRIPE_PRICE_DAY_PASS is not configured")
 			}
 			lines = append(lines, line)
 		}
@@ -324,7 +321,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 	if g.CoachFeeWaivedAt == nil {
 		if line, ok := coachLine(coachCount, s.cfg.StripePriceCoach); ok {
 			if line.PriceID == "" {
-				return commonerrors.BadRequest("STRIPE_PRICE_COACH is not configured", nil)
+				return ErrCoachPriceNotConfigured
 			}
 			lines = append(lines, line)
 			coachIncluded = coachCount > 0
@@ -332,7 +329,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 	}
 
 	if len(lines) == 0 {
-		return commonerrors.BadRequest("nothing to invoice", nil)
+		return apperr.Invalid("nothing to invoice")
 	}
 
 	customerID := ""
@@ -342,18 +339,18 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 	name := strings.TrimSpace(g.ContactFirstName + " " + g.ContactLastName)
 	customerID, err = s.stripe.EnsureCustomer(ctx, customerID, g.ContactEmail, name, g.ID)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	if customerID != "" && (g.StripeCustomerID == nil || *g.StripeCustomerID != customerID) {
 		if err := s.repo.SetStripeCustomerID(ctx, groupID, customerID); err != nil {
-			return commonerrors.Internal(err.Error())
+			return fmt.Errorf("operation: %w", err)
 		}
 	}
 
 	res, err := s.stripe.CreateInvoice(
 		ctx, customerID, g.ID, lines, int64(s.cfg.InvoiceDueDays), "balance")
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	meta := domain.ActionMeta{
 		Actor:           actor,
@@ -425,33 +422,33 @@ func coachAlreadyCharged(g *domain.Group) bool {
 func (s *Service) SendCoachInvoice(ctx context.Context, groupID, actor string, expectedVersion int) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	if g == nil {
-		return commonerrors.NotFound("group not found")
+		return domain.ErrGroupNotFound
 	}
 	if g.IsFree {
-		return commonerrors.BadRequest("church-sponsored registrations are not charged for the coach", nil)
+		return ErrSponsoredNoCoach
 	}
 	if g.CoachFeeWaivedAt != nil {
-		return commonerrors.BadRequest("coach fee has been waived for this group", nil)
+		return apperr.Invalid("coach fee has been waived for this group")
 	}
 	if g.BillingStatus != domain.BillingInvoiced && g.BillingStatus != domain.BillingBalancePaid {
-		return commonerrors.BadRequest("coach fee is included in the balance invoice for this group", nil)
+		return ErrCoachInBalance
 	}
 	if coachAlreadyCharged(g) {
-		return commonerrors.BadRequest("coach fee already charged", nil)
+		return apperr.Invalid("coach fee already charged")
 	}
 	campers, err := s.repo.CampersForGroup(ctx, groupID)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	count := coachEligibleCount(campers)
 	if count == 0 {
-		return commonerrors.BadRequest("no coach passengers to charge", nil)
+		return apperr.Invalid("no coach passengers to charge")
 	}
 	if s.cfg.StripePriceCoach == "" {
-		return commonerrors.BadRequest("STRIPE_PRICE_COACH is not configured", nil)
+		return ErrCoachPriceNotConfigured
 	}
 
 	customerID := ""
@@ -461,11 +458,11 @@ func (s *Service) SendCoachInvoice(ctx context.Context, groupID, actor string, e
 	name := strings.TrimSpace(g.ContactFirstName + " " + g.ContactLastName)
 	customerID, err = s.stripe.EnsureCustomer(ctx, customerID, g.ContactEmail, name, g.ID)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	if customerID != "" && (g.StripeCustomerID == nil || *g.StripeCustomerID != customerID) {
 		if err := s.repo.SetStripeCustomerID(ctx, groupID, customerID); err != nil {
-			return commonerrors.Internal(err.Error())
+			return fmt.Errorf("operation: %w", err)
 		}
 	}
 
@@ -474,7 +471,7 @@ func (s *Service) SendCoachInvoice(ctx context.Context, groupID, actor string, e
 		[]InvoiceLine{{PriceID: s.cfg.StripePriceCoach, Quantity: count}},
 		int64(s.cfg.InvoiceDueDays), "coach")
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	meta := domain.ActionMeta{
 		Actor:           actor,
@@ -520,34 +517,33 @@ func (s *Service) SendCoachInvoicesBulk(ctx context.Context, actor string, group
 func (s *Service) WaiveCoachFee(ctx context.Context, groupID, actor string, expectedVersion int) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	if g == nil {
-		return commonerrors.NotFound("group not found")
+		return domain.ErrGroupNotFound
 	}
 	if g.IsFree {
-		return commonerrors.BadRequest("church-sponsored registrations are not charged for the coach", nil)
+		return ErrSponsoredNoCoach
 	}
 	if g.CoachFeeWaivedAt != nil {
-		return commonerrors.BadRequest("coach fee already waived", nil)
+		return apperr.Invalid("coach fee already waived")
 	}
 	if g.CoachIncludedInBalance {
-		return commonerrors.BadRequest("coach fee is included in the balance invoice for this group", nil)
+		return ErrCoachInBalance
 	}
 	if g.CoachFeePaidAt != nil {
-		return commonerrors.BadRequest("coach fee already paid", nil)
+		return apperr.Invalid("coach fee already paid")
 	}
 	campers, err := s.repo.CampersForGroup(ctx, groupID)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	if coachEligibleCount(campers) == 0 {
-		return commonerrors.BadRequest("no coach passengers to waive", nil)
+		return apperr.Invalid("no coach passengers to waive")
 	}
 	if g.StripeCoachInvoiceID != nil && strings.TrimSpace(*g.StripeCoachInvoiceID) != "" {
 		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeCoachInvoiceID); err != nil {
-			return commonerrors.BadRequest(
-				fmt.Sprintf("coach invoice void failed; coach fee was not waived: %v", err), nil)
+			return apperr.Invalidf("coach invoice void failed; coach fee was not waived: %v", err)
 		}
 	}
 	meta := domain.ActionMeta{
@@ -565,13 +561,13 @@ func (s *Service) WaiveCoachFee(ctx context.Context, groupID, actor string, expe
 func (s *Service) UnwaiveCoachFee(ctx context.Context, groupID, actor string, expectedVersion int) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	if g == nil {
-		return commonerrors.NotFound("group not found")
+		return domain.ErrGroupNotFound
 	}
 	if g.CoachFeeWaivedAt == nil {
-		return commonerrors.BadRequest("coach fee is not waived for this group", nil)
+		return apperr.Invalid("coach fee is not waived for this group")
 	}
 	meta := domain.ActionMeta{
 		Actor:           actor,
@@ -610,19 +606,19 @@ func (s *Service) HandleCoachInvoicePaid(ctx context.Context, stripeInvoiceID, g
 func (s *Service) ConfirmFree(ctx context.Context, groupID, actor string, expectedVersion int) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	if g == nil {
-		return commonerrors.NotFound("group not found")
+		return domain.ErrGroupNotFound
 	}
 	if !g.IsFree {
-		return commonerrors.BadRequest("this group is not church-sponsored", nil)
+		return apperr.Invalid("this group is not church-sponsored")
 	}
 	if g.PaymentStatus != domain.PaymentPaid {
-		return commonerrors.BadRequest("deposit must be paid first", nil)
+		return domain.ErrDepositUnpaid
 	}
 	if g.BillingStatus != domain.BillingAllocated {
-		return commonerrors.BadRequest("group must be allocated before confirming sponsorship", nil)
+		return apperr.Invalid("group must be allocated before confirming sponsorship")
 	}
 	meta := domain.ActionMeta{
 		Actor:           actor,
@@ -666,24 +662,24 @@ func (s *Service) sendSponsorshipConfirmedEmail(ctx context.Context, g *domain.G
 func (s *Service) MarkBalancePaidManually(ctx context.Context, groupID, actor string, expectedVersion int) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	if g == nil {
-		return commonerrors.NotFound("group not found")
+		return domain.ErrGroupNotFound
 	}
 	if g.PaymentStatus != domain.PaymentPaid {
-		return commonerrors.BadRequest("deposit must be paid first", nil)
+		return domain.ErrDepositUnpaid
 	}
 	if g.IsFree {
-		return commonerrors.BadRequest(
-			"church-sponsored groups are settled with Confirm sponsorship", nil)
+		return apperr.Invalid(
+			"church-sponsored groups are settled with Confirm sponsorship")
 	}
 	switch g.BillingStatus {
 	case domain.BillingAllocated, domain.BillingInvoiced:
 	default:
-		return commonerrors.BadRequest(
+		return apperr.Invalid(
 			"only allocated or invoiced groups can be marked paid; this group is "+
-				billingStatusLabel(g.BillingStatus), nil)
+				billingStatusLabel(g.BillingStatus))
 	}
 
 	amountLabel := ""
@@ -696,8 +692,7 @@ func (s *Service) MarkBalancePaidManually(ctx context.Context, groupID, actor st
 			amountLabel = formatAmountLabel(res.AmountDuePence, res.Currency)
 		}
 		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeInvoiceID); err != nil {
-			return commonerrors.BadRequest(
-				fmt.Sprintf("invoice void failed; group was not marked paid: %v", err), nil)
+			return apperr.Invalidf("invoice void failed; group was not marked paid: %v", err)
 		}
 	}
 
@@ -759,10 +754,10 @@ func (s *Service) sendManualBalancePaidEmails(ctx context.Context, g *domain.Gro
 func (s *Service) VoidAndRelease(ctx context.Context, groupID, reason, actor string, expectedVersion int, cancelled bool) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	if g == nil {
-		return commonerrors.NotFound("group not found")
+		return domain.ErrGroupNotFound
 	}
 	if g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" &&
 		g.BillingStatus == domain.BillingInvoiced {
@@ -819,15 +814,15 @@ type RemoveCamperSummary struct {
 func (s *Service) RemoveCamper(ctx context.Context, groupID, camperID, actor string, expectedVersion int) (RemoveCamperSummary, error) {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return RemoveCamperSummary{}, commonerrors.Internal(err.Error())
+		return RemoveCamperSummary{}, fmt.Errorf("operation: %w", err)
 	}
 	if g == nil {
-		return RemoveCamperSummary{}, commonerrors.NotFound("group not found")
+		return RemoveCamperSummary{}, domain.ErrGroupNotFound
 	}
 
 	campers, err := s.repo.CampersForGroup(ctx, groupID)
 	if err != nil {
-		return RemoveCamperSummary{}, commonerrors.Internal(err.Error())
+		return RemoveCamperSummary{}, fmt.Errorf("operation: %w", err)
 	}
 
 	var target *domain.Camper
@@ -838,7 +833,7 @@ func (s *Service) RemoveCamper(ctx context.Context, groupID, camperID, actor str
 		}
 	}
 	if target == nil {
-		return RemoveCamperSummary{}, commonerrors.NotFound("camper not found")
+		return RemoveCamperSummary{}, domain.ErrCamperNotFound
 	}
 
 	summary := RemoveCamperSummary{
@@ -846,20 +841,19 @@ func (s *Service) RemoveCamper(ctx context.Context, groupID, camperID, actor str
 	}
 
 	if target.IsMainContact {
-		return RemoveCamperSummary{}, commonerrors.BadRequest("can't remove the main contact; edit the booking another way", nil)
+		return RemoveCamperSummary{}, apperr.Invalid("can't remove the main contact; edit the booking another way")
 	}
 	if len(campers) <= 1 {
-		return RemoveCamperSummary{}, commonerrors.BadRequest("this is the last camper; delete the whole registration instead", nil)
+		return RemoveCamperSummary{}, apperr.Invalid("this is the last camper; delete the whole registration instead")
 	}
 	if g.BillingStatus == domain.BillingBalancePaid {
-		return RemoveCamperSummary{}, commonerrors.BadRequest("balance already paid; refund/handle in Stripe first", nil)
+		return RemoveCamperSummary{}, apperr.Invalid("balance already paid; refund/handle in Stripe first")
 	}
 
 	newStatus := ""
 	if g.BillingStatus == domain.BillingInvoiced && g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" {
 		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeInvoiceID); err != nil {
-			return RemoveCamperSummary{}, commonerrors.BadRequest(
-				fmt.Sprintf("invoice void failed; camper was not removed: %v", err), nil)
+			return RemoveCamperSummary{}, apperr.Invalidf("invoice void failed; camper was not removed: %v", err)
 		}
 		summary.InvoiceVoided = true
 		newStatus = domain.BillingNone
@@ -942,15 +936,15 @@ func (s *Service) ConvertCamperToDayVisitor(
 ) (ConvertSummary, error) {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return ConvertSummary{}, commonerrors.Internal(err.Error())
+		return ConvertSummary{}, fmt.Errorf("operation: %w", err)
 	}
 	if g == nil {
-		return ConvertSummary{}, commonerrors.NotFound("group not found")
+		return ConvertSummary{}, domain.ErrGroupNotFound
 	}
 
 	campers, err := s.repo.CampersForGroup(ctx, groupID)
 	if err != nil {
-		return ConvertSummary{}, commonerrors.Internal(err.Error())
+		return ConvertSummary{}, fmt.Errorf("operation: %w", err)
 	}
 
 	var target *domain.Camper
@@ -961,7 +955,7 @@ func (s *Service) ConvertCamperToDayVisitor(
 		}
 	}
 	if target == nil {
-		return ConvertSummary{}, commonerrors.NotFound("camper not found")
+		return ConvertSummary{}, domain.ErrCamperNotFound
 	}
 
 	summary := ConvertSummary{
@@ -969,14 +963,14 @@ func (s *Service) ConvertCamperToDayVisitor(
 	}
 
 	if target.AttendanceType != domain.AttendanceFullWeek {
-		return ConvertSummary{}, commonerrors.BadRequest("only full-week campers can be converted", nil)
+		return ConvertSummary{}, apperr.Invalid("only full-week campers can be converted")
 	}
 	if g.IsFree {
-		return ConvertSummary{}, commonerrors.BadRequest(
-			"church-sponsored registrations can't be converted here; handle manually", nil)
+		return ConvertSummary{}, apperr.Invalid(
+			"church-sponsored registrations can't be converted here; handle manually")
 	}
 	if g.BillingStatus == domain.BillingBalancePaid {
-		return ConvertSummary{}, commonerrors.BadRequest("balance already paid; handle in Stripe first", nil)
+		return ConvertSummary{}, apperr.Invalid("balance already paid; handle in Stripe first")
 	}
 
 	fields := map[string]string{}
@@ -988,7 +982,7 @@ func (s *Service) ConvertCamperToDayVisitor(
 		NeedsCatering: req.NeedsCatering,
 	}, fields)
 	if len(fields) > 0 {
-		return ConvertSummary{}, commonerrors.ValidationFailed(fields)
+		return ConvertSummary{}, apperr.Validation(fields)
 	}
 
 	// A camper added after the group's deposit checkout has their deposit
@@ -1011,26 +1005,25 @@ func (s *Service) ConvertCamperToDayVisitor(
 		name := strings.TrimSpace(g.ContactFirstName + " " + g.ContactLastName)
 		customerID, err = s.stripe.EnsureCustomer(ctx, customerID, g.ContactEmail, name, g.ID)
 		if err != nil {
-			return ConvertSummary{}, commonerrors.Internal(err.Error())
+			return ConvertSummary{}, fmt.Errorf("operation: %w", err)
 		}
 		if customerID != "" && (g.StripeCustomerID == nil || *g.StripeCustomerID != customerID) {
 			if err := s.repo.SetStripeCustomerID(ctx, groupID, customerID); err != nil {
-				return ConvertSummary{}, commonerrors.Internal(err.Error())
+				return ConvertSummary{}, fmt.Errorf("operation: %w", err)
 			}
 		}
 		if err := s.stripe.CreditCustomerBalance(
 			ctx, customerID, int64(depositCreditPence), g.Currency,
 			"Deposit credit (converted to day visitor)", "deposit-credit-"+camperID,
 		); err != nil {
-			return ConvertSummary{}, commonerrors.Internal(err.Error())
+			return ConvertSummary{}, fmt.Errorf("operation: %w", err)
 		}
 	}
 
 	newStatus := ""
 	if g.BillingStatus == domain.BillingInvoiced && g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" {
 		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeInvoiceID); err != nil {
-			return ConvertSummary{}, commonerrors.BadRequest(
-				fmt.Sprintf("invoice void failed; camper was not converted: %v", err), nil)
+			return ConvertSummary{}, apperr.Invalidf("invoice void failed; camper was not converted: %v", err)
 		}
 		summary.InvoiceVoided = true
 		newStatus = domain.BillingNone
@@ -1113,15 +1106,15 @@ func (s *Service) UpdateDayPassCamper(
 ) (UpdateDayPassSummary, error) {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return UpdateDayPassSummary{}, commonerrors.Internal(err.Error())
+		return UpdateDayPassSummary{}, fmt.Errorf("operation: %w", err)
 	}
 	if g == nil {
-		return UpdateDayPassSummary{}, commonerrors.NotFound("group not found")
+		return UpdateDayPassSummary{}, domain.ErrGroupNotFound
 	}
 
 	campers, err := s.repo.CampersForGroup(ctx, groupID)
 	if err != nil {
-		return UpdateDayPassSummary{}, commonerrors.Internal(err.Error())
+		return UpdateDayPassSummary{}, fmt.Errorf("operation: %w", err)
 	}
 
 	var target *domain.Camper
@@ -1132,7 +1125,7 @@ func (s *Service) UpdateDayPassCamper(
 		}
 	}
 	if target == nil {
-		return UpdateDayPassSummary{}, commonerrors.NotFound("camper not found")
+		return UpdateDayPassSummary{}, domain.ErrCamperNotFound
 	}
 
 	summary := UpdateDayPassSummary{
@@ -1140,7 +1133,7 @@ func (s *Service) UpdateDayPassCamper(
 	}
 
 	if target.AttendanceType != domain.AttendanceDayPass {
-		return UpdateDayPassSummary{}, commonerrors.BadRequest("only day-pass campers can be edited here", nil)
+		return UpdateDayPassSummary{}, apperr.Invalid("only day-pass campers can be edited here")
 	}
 
 	fields := map[string]string{}
@@ -1152,7 +1145,7 @@ func (s *Service) UpdateDayPassCamper(
 		NeedsCatering: req.NeedsCatering,
 	}, fields)
 	if len(fields) > 0 {
-		return UpdateDayPassSummary{}, commonerrors.ValidationFailed(fields)
+		return UpdateDayPassSummary{}, apperr.Validation(fields)
 	}
 
 	var shirtSize *string
@@ -1226,15 +1219,15 @@ func (s *Service) UpdateCamperCoach(
 ) (UpdateCamperCoachSummary, error) {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return UpdateCamperCoachSummary{}, commonerrors.Internal(err.Error())
+		return UpdateCamperCoachSummary{}, fmt.Errorf("operation: %w", err)
 	}
 	if g == nil {
-		return UpdateCamperCoachSummary{}, commonerrors.NotFound("group not found")
+		return UpdateCamperCoachSummary{}, domain.ErrGroupNotFound
 	}
 
 	campers, err := s.repo.CampersForGroup(ctx, groupID)
 	if err != nil {
-		return UpdateCamperCoachSummary{}, commonerrors.Internal(err.Error())
+		return UpdateCamperCoachSummary{}, fmt.Errorf("operation: %w", err)
 	}
 
 	var target *domain.Camper
@@ -1245,7 +1238,7 @@ func (s *Service) UpdateCamperCoach(
 		}
 	}
 	if target == nil {
-		return UpdateCamperCoachSummary{}, commonerrors.NotFound("camper not found")
+		return UpdateCamperCoachSummary{}, domain.ErrCamperNotFound
 	}
 
 	summary := UpdateCamperCoachSummary{
@@ -1254,7 +1247,7 @@ func (s *Service) UpdateCamperCoach(
 	}
 
 	if target.AttendanceType != domain.AttendanceFullWeek {
-		return UpdateCamperCoachSummary{}, commonerrors.BadRequest("only full-week campers can use the coach", nil)
+		return UpdateCamperCoachSummary{}, apperr.Invalid("only full-week campers can use the coach")
 	}
 
 	current := target.NeedsCoach != nil && *target.NeedsCoach
@@ -1265,19 +1258,18 @@ func (s *Service) UpdateCamperCoach(
 
 	if g.CoachFeePaidAt != nil ||
 		(g.CoachIncludedInBalance && g.BillingStatus == domain.BillingBalancePaid) {
-		return UpdateCamperCoachSummary{}, commonerrors.BadRequest(
-			"coach fee already paid; handle any refund in Stripe first", nil)
+		return UpdateCamperCoachSummary{}, apperr.Invalid(
+			"coach fee already paid; handle any refund in Stripe first")
 	}
 	if g.CoachIncludedInBalance {
-		return UpdateCamperCoachSummary{}, commonerrors.BadRequest(
-			"coach fee is included in the balance invoice for this group", nil)
+		return UpdateCamperCoachSummary{}, apperr.Invalid(
+			"coach fee is included in the balance invoice for this group")
 	}
 
 	invoiceVoided := false
 	if g.StripeCoachInvoiceID != nil && strings.TrimSpace(*g.StripeCoachInvoiceID) != "" && g.CoachFeePaidAt == nil {
 		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeCoachInvoiceID); err != nil {
-			return UpdateCamperCoachSummary{}, commonerrors.BadRequest(
-				fmt.Sprintf("coach invoice void failed; coach seat was not updated: %v", err), nil)
+			return UpdateCamperCoachSummary{}, apperr.Invalidf("coach invoice void failed; coach seat was not updated: %v", err)
 		}
 		invoiceVoided = true
 	}
@@ -1357,29 +1349,29 @@ func sheetRowsForGroup(g *domain.Group, campers []domain.Camper) []sheets.Row {
 func (s *Service) ResyncSheet(ctx context.Context, groupID, actor string, expectedVersion int) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	if g == nil {
-		return commonerrors.NotFound("group not found")
+		return domain.ErrGroupNotFound
 	}
 	switch g.PaymentStatus {
 	case domain.PaymentPaid, domain.PaymentPending:
 	default:
-		return commonerrors.BadRequest(
-			"only pending or paid registrations can be re-synced to the sheet", nil)
+		return apperr.Invalid(
+			"only pending or paid registrations can be re-synced to the sheet")
 	}
 
 	campers, err := s.repo.CampersForGroup(ctx, groupID)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	if len(campers) == 0 {
-		return commonerrors.BadRequest("registration has no campers", nil)
+		return apperr.Invalid("registration has no campers")
 	}
 
 	rows := sheetRowsForGroup(g, campers)
 	if err := s.sheets.RemoveByGroupID(ctx, groupID); err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	switch g.PaymentStatus {
 	case domain.PaymentPaid:
@@ -1388,7 +1380,7 @@ func (s *Service) ResyncSheet(ctx context.Context, groupID, actor string, expect
 		err = s.sheets.AppendPending(ctx, rows)
 	}
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 
 	meta := domain.ActionMeta{
@@ -1449,10 +1441,10 @@ type DeleteSummary struct {
 func (s *Service) DeleteRegistration(ctx context.Context, groupID, actor string, expectedVersion int) (DeleteSummary, error) {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return DeleteSummary{}, commonerrors.Internal(err.Error())
+		return DeleteSummary{}, fmt.Errorf("operation: %w", err)
 	}
 	if g == nil {
-		return DeleteSummary{}, commonerrors.NotFound("group not found")
+		return DeleteSummary{}, domain.ErrGroupNotFound
 	}
 
 	// A registration paid for in full at signup put the deposit and everything
@@ -1460,10 +1452,10 @@ func (s *Service) DeleteRegistration(ctx context.Context, groupID, actor string,
 	// no way to refund the rest without either guessing or refunding money the
 	// church is entitled to keep. Hand that decision to a human in Stripe.
 	if g.PaidInFullAtRegistration && g.PaymentStatus == domain.PaymentPaid {
-		return DeleteSummary{}, commonerrors.BadRequest(
-			"this family paid for everything in one payment, so the deposit cannot be "+
-				"separated from the rest automatically. Refund what they are owed in "+
-				"Stripe first, then delete the registration.", nil)
+		return DeleteSummary{}, apperr.Invalid(
+			"this family paid for everything in one payment, so the deposit cannot be " +
+				"separated from the rest automatically. Refund what they are owed in " +
+				"Stripe first, then delete the registration.")
 	}
 
 	summary := DeleteSummary{
@@ -1477,7 +1469,7 @@ func (s *Service) DeleteRegistration(ctx context.Context, groupID, actor string,
 	// invoiced part has to come off the balance refund below.
 	campers, err := s.repo.CampersForGroup(ctx, groupID)
 	if err != nil {
-		return DeleteSummary{}, commonerrors.Internal(err.Error())
+		return DeleteSummary{}, fmt.Errorf("operation: %w", err)
 	}
 	var depositOnInvoice int64
 	for _, c := range campers {
@@ -1493,8 +1485,7 @@ func (s *Service) DeleteRegistration(ctx context.Context, groupID, actor string,
 	if g.BillingStatus == domain.BillingBalancePaid && g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" {
 		amt, err := s.stripe.RefundInvoiceKeeping(ctx, *g.StripeInvoiceID, depositOnInvoice)
 		if err != nil {
-			return DeleteSummary{}, commonerrors.BadRequest(
-				fmt.Sprintf("balance refund failed; registration was not deleted: %v", err), nil)
+			return DeleteSummary{}, apperr.Invalidf("balance refund failed; registration was not deleted: %v", err)
 		}
 		summary.BalanceRefunded = amt > 0
 		refundTotal += amt
@@ -1502,8 +1493,7 @@ func (s *Service) DeleteRegistration(ctx context.Context, groupID, actor string,
 
 	if g.BillingStatus == domain.BillingInvoiced && g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" {
 		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeInvoiceID); err != nil {
-			return DeleteSummary{}, commonerrors.BadRequest(
-				fmt.Sprintf("invoice void failed; registration was not deleted: %v", err), nil)
+			return DeleteSummary{}, apperr.Invalidf("invoice void failed; registration was not deleted: %v", err)
 		}
 		summary.InvoiceVoided = true
 	}
@@ -1512,8 +1502,7 @@ func (s *Service) DeleteRegistration(ctx context.Context, groupID, actor string,
 	// the registration is gone. Paid coach fees are refunded manually in Stripe.
 	if g.StripeCoachInvoiceID != nil && *g.StripeCoachInvoiceID != "" && g.CoachFeePaidAt == nil {
 		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeCoachInvoiceID); err != nil {
-			return DeleteSummary{}, commonerrors.BadRequest(
-				fmt.Sprintf("coach invoice void failed; registration was not deleted: %v", err), nil)
+			return DeleteSummary{}, apperr.Invalidf("coach invoice void failed; registration was not deleted: %v", err)
 		}
 	}
 
@@ -1539,16 +1528,16 @@ func (s *Service) DeleteRegistration(ctx context.Context, groupID, actor string,
 func (s *Service) ResendInvoice(ctx context.Context, groupID, actor string, expectedVersion int) error {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	if g == nil {
-		return commonerrors.NotFound("group not found")
+		return domain.ErrGroupNotFound
 	}
 	if g.StripeInvoiceID == nil || *g.StripeInvoiceID == "" {
-		return commonerrors.BadRequest("no invoice on file", nil)
+		return apperr.Invalid("no invoice on file")
 	}
 	if g.BillingStatus != domain.BillingInvoiced {
-		return commonerrors.BadRequest("invoice is not open", nil)
+		return apperr.Invalid("invoice is not open")
 	}
 	// Primary: ask Stripe to re-email. If it succeeds, stamp and return.
 	if err := s.stripe.SendInvoiceEmail(ctx, *g.StripeInvoiceID); err == nil {
@@ -1567,7 +1556,7 @@ func (s *Service) ResendInvoice(ctx context.Context, groupID, actor string, expe
 	// Fallback: email the hosted payment link ourselves.
 	res, err := s.stripe.GetInvoice(ctx, *g.StripeInvoiceID)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	due := ""
 	if g.InvoiceDueAt != nil {
@@ -1588,7 +1577,7 @@ func (s *Service) ResendInvoice(ctx context.Context, groupID, actor string, expe
 		AmountLabel: formatAmountLabel(res.AmountDuePence, res.Currency),
 		Items:       balanceInvoiceItems(campers, s.accommodationNames(ctx), s.unitNames(ctx), coachCount),
 	}); err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("operation: %w", err)
 	}
 	meta := domain.ActionMeta{
 		Actor:           actor,

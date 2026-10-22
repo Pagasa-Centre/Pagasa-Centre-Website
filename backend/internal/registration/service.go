@@ -15,7 +15,6 @@ import (
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/sheets"
-	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 )
 
 type PriceLookup interface {
@@ -94,13 +93,10 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 
 	open, err := s.camp.RegistrationsOpen(ctx)
 	if err != nil {
-		return nil, commonerrors.Internal(err.Error())
+		return nil, fmt.Errorf("operation: %w", err)
 	}
 	if !open {
-		return nil, commonerrors.APIError{
-			Code:    "registrations_closed",
-			Message: "Camp registrations are currently closed",
-		}
+		return nil, ErrRegistrationsClosed
 	}
 
 	if err := s.ensureAccommodationAvailable(ctx, req); err != nil {
@@ -109,7 +105,7 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 
 	mode, err := s.camp.RegistrationPaymentMode(ctx)
 	if err != nil {
-		return nil, commonerrors.Internal(err.Error())
+		return nil, fmt.Errorf("operation: %w", err)
 	}
 	if mode != domain.PaymentModeDeposit && mode != domain.PaymentModeFull {
 		mode = domain.PaymentModeDeposit
@@ -117,7 +113,7 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 
 	charge, err := s.computeCharge(ctx, req, mode)
 	if err != nil {
-		return nil, commonerrors.Internal(err.Error())
+		return nil, fmt.Errorf("operation: %w", err)
 	}
 	total := charge.totalPence
 	currency := charge.currency
@@ -128,7 +124,7 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 
 	tx, err := s.repo.Pool().BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return nil, commonerrors.Internal(err.Error())
+		return nil, fmt.Errorf("operation: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -137,12 +133,9 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 		codeID, err := s.repo.ReserveFreeCode(ctx, tx, freeCode)
 		if err != nil {
 			if errors.Is(err, storage.ErrFreeCodeInvalid) {
-				return nil, commonerrors.APIError{
-					Code:    "invalid_free_code",
-					Message: "That sponsorship code is not valid or has already been used.",
-				}
+				return nil, ErrInvalidFreeCode
 			}
-			return nil, commonerrors.Internal(err.Error())
+			return nil, fmt.Errorf("operation: %w", err)
 		}
 		reservedCodeID = codeID
 		isFree = true
@@ -153,16 +146,16 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 
 	groupID, err := s.repo.InsertGroup(ctx, tx, req, total, currency, isFree, paidInFull)
 	if err != nil {
-		return nil, commonerrors.Internal(err.Error())
+		return nil, fmt.Errorf("operation: %w", err)
 	}
 	for _, c := range req.Campers {
 		if err := s.repo.InsertCamper(ctx, tx, groupID, c); err != nil {
-			return nil, commonerrors.Internal(err.Error())
+			return nil, fmt.Errorf("operation: %w", err)
 		}
 	}
 	if reservedCodeID != "" {
 		if err := s.repo.MarkFreeCodeUsed(ctx, tx, reservedCodeID, groupID); err != nil {
-			return nil, commonerrors.Internal(err.Error())
+			return nil, fmt.Errorf("operation: %w", err)
 		}
 	}
 
@@ -180,13 +173,13 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 		if paidInFull {
 			coachIncluded := coachEligibleCountFromRequest(req) > 0
 			if err := s.repo.MarkPaidInFull(ctx, tx, groupID, "", coachIncluded); err != nil {
-				return nil, commonerrors.Internal(err.Error())
+				return nil, fmt.Errorf("operation: %w", err)
 			}
 		} else if err := s.repo.MarkPaid(ctx, tx, groupID, ""); err != nil {
-			return nil, commonerrors.Internal(err.Error())
+			return nil, fmt.Errorf("operation: %w", err)
 		}
 		if err := tx.Commit(ctx); err != nil {
-			return nil, commonerrors.Internal(err.Error())
+			return nil, fmt.Errorf("operation: %w", err)
 		}
 		s.sendConfirmationEmail(ctx, req, total, currency, hasMinor, isFree, paidInFull)
 		now := time.Now().UTC()
@@ -204,14 +197,14 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 		Lines:    charge.lines,
 	})
 	if err != nil {
-		return nil, commonerrors.Internal(fmt.Sprintf("stripe checkout: %s", err.Error()))
+		return nil, fmt.Errorf("stripe checkout: %w", err)
 	}
 	if err := s.repo.SetStripeSession(ctx, tx, groupID, session.ID); err != nil {
-		return nil, commonerrors.Internal(err.Error())
+		return nil, fmt.Errorf("operation: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return nil, commonerrors.Internal(err.Error())
+		return nil, fmt.Errorf("operation: %w", err)
 	}
 
 	pendingRows := rowsFromRequest(groupID, req, domain.PaymentPending, total, currency, time.Now().UTC(), nil)
@@ -280,7 +273,7 @@ func ptrIfNotEmpty(s string) *string {
 func (s *Service) ensureAccommodationAvailable(ctx context.Context, req domain.SubmitRequest) error {
 	avail, err := s.repo.AccommodationAvailability(ctx)
 	if err != nil {
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("accommodation availability: %w", err)
 	}
 	disabled := func(code string) bool {
 		code = strings.TrimSpace(code)
@@ -293,10 +286,7 @@ func (s *Service) ensureAccommodationAvailable(ctx context.Context, req domain.S
 	for _, c := range req.Campers {
 		if disabled(c.Attendance.AccommodationFirstChoice) ||
 			disabled(c.Attendance.AccommodationSecondChoice) {
-			return commonerrors.APIError{
-				Code:    "accommodation_unavailable",
-				Message: "One or more selected accommodation types are no longer available. Please refresh and choose again.",
-			}
+			return ErrAccommodationUnavailable
 		}
 	}
 	return nil
@@ -343,10 +333,7 @@ const MinDepositAge = 4
 
 func (s *Service) Summary(ctx context.Context, sessionID, groupID string) (*domain.SummaryResponse, error) {
 	if sessionID == "" && groupID == "" {
-		return nil, commonerrors.APIError{
-			Code:    "missing_identifier",
-			Message: "either session_id or group_id is required",
-		}
+		return nil, ErrMissingIdentifier
 	}
 
 	var group *domain.Group
@@ -357,7 +344,7 @@ func (s *Service) Summary(ctx context.Context, sessionID, groupID string) (*doma
 		group, err = s.repo.FindGroupByID(ctx, groupID)
 	}
 	if err != nil {
-		return nil, commonerrors.Internal(err.Error())
+		return nil, fmt.Errorf("operation: %w", err)
 	}
 	if group == nil {
 		return nil, nil
@@ -365,7 +352,7 @@ func (s *Service) Summary(ctx context.Context, sessionID, groupID string) (*doma
 
 	campers, err := s.repo.CampersForGroup(ctx, group.ID)
 	if err != nil {
-		return nil, commonerrors.Internal(err.Error())
+		return nil, fmt.Errorf("operation: %w", err)
 	}
 	out := &domain.SummaryResponse{
 		GroupID:          group.ID,
@@ -409,17 +396,17 @@ func (s *Service) GenerateFreeCode(ctx context.Context, actor, note string) (str
 	for attempt := 0; attempt < 5; attempt++ {
 		code, err := randomFreeCode()
 		if err != nil {
-			return "", commonerrors.Internal(err.Error())
+			return "", fmt.Errorf("generate free code: %w", err)
 		}
 		if err := s.repo.GenerateFreeCode(ctx, code, actor, note); err != nil {
 			if isUniqueViolation(err) {
 				continue
 			}
-			return "", commonerrors.Internal(err.Error())
+			return "", fmt.Errorf("generate free code: %w", err)
 		}
 		return code, nil
 	}
-	return "", commonerrors.Internal("could not generate unique free code")
+	return "", errors.New("could not generate unique free code")
 }
 
 func randomFreeCode() (string, error) {
@@ -445,7 +432,7 @@ func isUniqueViolation(err error) bool {
 func (s *Service) ListFreeCodes(ctx context.Context) ([]domain.FreeCode, error) {
 	codes, err := s.repo.ListFreeCodes(ctx)
 	if err != nil {
-		return nil, commonerrors.Internal(err.Error())
+		return nil, fmt.Errorf("operation: %w", err)
 	}
 	for i := range codes {
 		codes[i].Code = MaskFreeCode(codes[i].Code)
@@ -471,9 +458,9 @@ func MaskFreeCode(code string) string {
 func (s *Service) RevokeFreeCode(ctx context.Context, id string) error {
 	if err := s.repo.RevokeFreeCode(ctx, id); err != nil {
 		if errors.Is(err, storage.ErrFreeCodeNotRevocable) {
-			return commonerrors.BadRequest("code cannot be revoked (already used or revoked)", nil)
+			return ErrCodeNotRevocable
 		}
-		return commonerrors.Internal(err.Error())
+		return fmt.Errorf("revoke free code: %w", err)
 	}
 	return nil
 }

@@ -13,7 +13,7 @@ import (
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/testhelper"
-	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
+	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
 
 // fakePrices stands in for the live price table so a test can prove the deposit
@@ -416,8 +416,8 @@ func TestCamperActions_rejectStaleVersion(t *testing.T) {
 	for name, call := range cases {
 		t.Run(name, func(t *testing.T) {
 			err := call()
-			var apiErr commonerrors.APIError
-			if !errors.As(err, &apiErr) || apiErr.Code != "stale_state" {
+			var de *apperr.Error
+			if !errors.As(err, &de) || de.Kind != apperr.KindConflict || de.Code != "stale_state" {
 				t.Fatalf("error = %v, want stale_state", err)
 			}
 		})
@@ -566,8 +566,8 @@ func TestEditCamper_repricingRefusedOnPaidBalance(t *testing.T) {
 		ctx, groupID, otherID, "Diane", domain.SkipVersionCheck, reprice); err == nil {
 		t.Fatal("expected a repricing edit to be refused once the balance is paid")
 	} else {
-		var apiErr commonerrors.APIError
-		if !errors.As(err, &apiErr) || apiErr.Code != "bad_request" {
+		var de *apperr.Error
+		if !errors.As(err, &de) || de.Kind != apperr.KindInvalid {
 			t.Fatalf("error = %v, want bad_request", err)
 		}
 	}
@@ -649,8 +649,8 @@ func TestEditCamper_childAccommodationAgeLimit(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an age past the child limit to be refused while in child accommodation")
 	}
-	var apiErr commonerrors.APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != "validation_failed" {
+	var de *apperr.Error
+	if !errors.As(err, &de) || de.Kind != apperr.KindValidation {
 		t.Fatalf("error = %v, want validation_failed", err)
 	}
 }
@@ -671,8 +671,8 @@ func TestEditCamper_fullReplacementCatchesInvalidCombination(t *testing.T) {
 	if err == nil {
 		t.Fatal("a full-week camper with no shirt size should be rejected")
 	}
-	var apiErr commonerrors.APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != "validation_failed" {
+	var de *apperr.Error
+	if !errors.As(err, &de) || de.Kind != apperr.KindValidation {
 		t.Fatalf("error = %v, want validation_failed", err)
 	}
 }

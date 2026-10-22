@@ -10,7 +10,7 @@ import (
 	"pagasacentre/backend/internal/registration"
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/internal/registration/storage"
-	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
+	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
 
 // EditCamperRequest replaces one camper's details wholesale. Every editable
@@ -79,18 +79,18 @@ func (s *Service) EditCamper(
 ) (EditCamperSummary, error) {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return EditCamperSummary{}, commonerrors.Internal(err.Error())
+		return EditCamperSummary{}, fmt.Errorf("operation: %w", err)
 	}
 	if g == nil {
-		return EditCamperSummary{}, commonerrors.NotFound("group not found")
+		return EditCamperSummary{}, domain.ErrGroupNotFound
 	}
 	campers, err := s.repo.CampersForGroup(ctx, groupID)
 	if err != nil {
-		return EditCamperSummary{}, commonerrors.Internal(err.Error())
+		return EditCamperSummary{}, fmt.Errorf("operation: %w", err)
 	}
 	target := findCamper(campers, camperID)
 	if target == nil {
-		return EditCamperSummary{}, commonerrors.NotFound("camper not found")
+		return EditCamperSummary{}, domain.ErrCamperNotFound
 	}
 
 	fullWeek := target.AttendanceType == domain.AttendanceFullWeek
@@ -116,8 +116,8 @@ func (s *Service) EditCamper(
 				return EditCamperSummary{}, err
 			}
 		} else if unitCode != "" {
-			return EditCamperSummary{}, commonerrors.BadRequest(
-				"cannot set a unit without an accommodation", nil)
+			return EditCamperSummary{}, apperr.Invalid(
+				"cannot set a unit without an accommodation")
 		}
 
 		priceBefore, err := s.priceFor(ctx, strVal(target.AllocatedAccommodationCode), target.Age, g.IsFree)
@@ -141,10 +141,10 @@ func (s *Service) EditCamper(
 	}
 
 	if repriced && g.BillingStatus == domain.BillingBalancePaid {
-		return EditCamperSummary{}, commonerrors.BadRequest(
-			"this balance is already paid, so changes that alter what they owe "+
-				"have to be settled in Stripe; details that don't change the price "+
-				"can still be edited", nil)
+		return EditCamperSummary{}, apperr.Invalid(
+			"this balance is already paid, so changes that alter what they owe " +
+				"have to be settled in Stripe; details that don't change the price " +
+				"can still be edited")
 	}
 
 	summary := EditCamperSummary{
@@ -157,8 +157,7 @@ func (s *Service) EditCamper(
 	if repriced && g.BillingStatus == domain.BillingInvoiced &&
 		g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" {
 		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeInvoiceID); err != nil {
-			return EditCamperSummary{}, commonerrors.BadRequest(
-				fmt.Sprintf("invoice void failed; nothing was changed: %v", err), nil)
+			return EditCamperSummary{}, apperr.Invalidf("invoice void failed; nothing was changed: %v", err)
 		}
 		summary.InvoiceVoided = true
 		newStatus = allocatedOrNone(campersAfterEdit(campers, camperID, details))
@@ -189,28 +188,28 @@ func (s *Service) AddCamper(
 ) (AddCamperSummary, error) {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return AddCamperSummary{}, commonerrors.Internal(err.Error())
+		return AddCamperSummary{}, fmt.Errorf("operation: %w", err)
 	}
 	if g == nil {
-		return AddCamperSummary{}, commonerrors.NotFound("group not found")
+		return AddCamperSummary{}, domain.ErrGroupNotFound
 	}
 
 	if g.PaymentStatus != domain.PaymentPaid {
-		return AddCamperSummary{}, commonerrors.BadRequest(
-			"this group has not paid their deposit yet; wait for it to clear before adding anyone", nil)
+		return AddCamperSummary{}, apperr.Invalid(
+			"this group has not paid their deposit yet; wait for it to clear before adding anyone")
 	}
 	if g.IsFree {
-		return AddCamperSummary{}, commonerrors.BadRequest(
-			"church-sponsored registrations are agreed as a whole; add this person as their own registration", nil)
+		return AddCamperSummary{}, apperr.Invalid(
+			"church-sponsored registrations are agreed as a whole; add this person as their own registration")
 	}
 	if g.PaidInFullAtRegistration {
-		return AddCamperSummary{}, commonerrors.BadRequest(
-			"this family paid for camp in full at registration; add this person as their own registration", nil)
+		return AddCamperSummary{}, apperr.Invalid(
+			"this family paid for camp in full at registration; add this person as their own registration")
 	}
 	if g.BillingStatus == domain.BillingBalancePaid {
-		return AddCamperSummary{}, commonerrors.BadRequest(
-			"this balance is already paid, so there is no invoice left to charge them on; "+
-				"add this person as their own registration", nil)
+		return AddCamperSummary{}, apperr.Invalid(
+			"this balance is already paid, so there is no invoice left to charge them on; " +
+				"add this person as their own registration")
 	}
 
 	c := req.Camper
@@ -218,7 +217,7 @@ func (s *Service) AddCamper(
 	fields := map[string]string{}
 	registration.ValidateCamper("camper", c, fields)
 	if len(fields) > 0 {
-		return AddCamperSummary{}, commonerrors.ValidationFailed(fields)
+		return AddCamperSummary{}, apperr.Validation(fields)
 	}
 
 	depositOwed := 0
@@ -233,7 +232,7 @@ func (s *Service) AddCamper(
 
 	campers, err := s.repo.CampersForGroup(ctx, groupID)
 	if err != nil {
-		return AddCamperSummary{}, commonerrors.Internal(err.Error())
+		return AddCamperSummary{}, fmt.Errorf("operation: %w", err)
 	}
 
 	// A new full-week camper has no bed. Sending the group back to needing
@@ -244,8 +243,7 @@ func (s *Service) AddCamper(
 	if g.BillingStatus == domain.BillingInvoiced &&
 		g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" {
 		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeInvoiceID); err != nil {
-			return AddCamperSummary{}, commonerrors.BadRequest(
-				fmt.Sprintf("invoice void failed; nobody was added: %v", err), nil)
+			return AddCamperSummary{}, apperr.Invalidf("invoice void failed; nobody was added: %v", err)
 		}
 		summary.InvoiceVoided = true
 		newStatus = domain.BillingNone
@@ -283,18 +281,18 @@ func (s *Service) MakeMainContact(
 ) (string, error) {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return "", commonerrors.Internal(err.Error())
+		return "", fmt.Errorf("operation: %w", err)
 	}
 	if g == nil {
-		return "", commonerrors.NotFound("group not found")
+		return "", domain.ErrGroupNotFound
 	}
 	campers, err := s.repo.CampersForGroup(ctx, groupID)
 	if err != nil {
-		return "", commonerrors.Internal(err.Error())
+		return "", fmt.Errorf("operation: %w", err)
 	}
 	target := findCamper(campers, camperID)
 	if target == nil {
-		return "", commonerrors.NotFound("camper not found")
+		return "", domain.ErrCamperNotFound
 	}
 	name := strings.TrimSpace(target.FirstName + " " + target.LastName)
 	if target.IsMainContact {
@@ -324,22 +322,22 @@ func (s *Service) WaiveCamperDeposit(
 ) (string, error) {
 	g, err := s.repo.FindGroupByID(ctx, groupID)
 	if err != nil {
-		return "", commonerrors.Internal(err.Error())
+		return "", fmt.Errorf("operation: %w", err)
 	}
 	if g == nil {
-		return "", commonerrors.NotFound("group not found")
+		return "", domain.ErrGroupNotFound
 	}
 	if g.BillingStatus == domain.BillingBalancePaid {
-		return "", commonerrors.BadRequest(
-			"this balance is already paid; there is no invoice left to take it off", nil)
+		return "", apperr.Invalid(
+			"this balance is already paid; there is no invoice left to take it off")
 	}
 	campers, err := s.repo.CampersForGroup(ctx, groupID)
 	if err != nil {
-		return "", commonerrors.Internal(err.Error())
+		return "", fmt.Errorf("operation: %w", err)
 	}
 	target := findCamper(campers, camperID)
 	if target == nil {
-		return "", commonerrors.NotFound("camper not found")
+		return "", domain.ErrCamperNotFound
 	}
 	name := strings.TrimSpace(target.FirstName + " " + target.LastName)
 	if target.DepositOwedPence <= 0 {
@@ -400,7 +398,7 @@ func validateEdit(target domain.Camper, req EditCamperRequest, fullWeek bool) er
 			req.AllocatedAccommodationCode, req.Age, fields)
 	}
 	if len(fields) > 0 {
-		return commonerrors.ValidationFailed(fields)
+		return apperr.Validation(fields)
 	}
 	return nil
 }
