@@ -2,20 +2,12 @@ package registration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
-
-var allowedPaymentStatuses = map[string]struct{}{
-	domain.PaymentPending:         {},
-	domain.PaymentPaid:            {},
-	domain.PaymentFailed:          {},
-	domain.PaymentFailedCapacity:  {},
-	domain.PaymentRefunded:        {},
-	domain.PaymentCancelled:       {},
-}
 
 func (s *Service) FindGroup(ctx context.Context, id string) (*domain.Group, error) {
 	return s.repo.FindGroupByID(ctx, id)
@@ -49,10 +41,22 @@ func (s *Service) ListGroupsWithCampers(ctx context.Context, f domain.ListFilter
 }
 
 func (s *Service) SetPaymentStatus(ctx context.Context, groupID, status string) error {
-	if _, ok := allowedPaymentStatuses[status]; !ok {
+	to, ok := domain.ParsePaymentStatus(status)
+	if !ok {
 		return apperr.Invalid("invalid payment_status")
 	}
-	if err := s.repo.MarkStatus(ctx, groupID, status); err != nil {
+	g, err := s.repo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		return fmt.Errorf("set payment status: %w", err)
+	}
+	if g == nil {
+		return domain.ErrGroupNotFound
+	}
+	tr := g.OverridePaymentStatus(to)
+	if err := s.repo.SetPaymentStatus(ctx, groupID, tr); err != nil {
+		if errors.Is(err, domain.ErrVersionConflict) {
+			return apperr.Conflict("stale_state", "This registration was just updated. Refresh and try again.")
+		}
 		return fmt.Errorf("set payment status: %w", err)
 	}
 	return nil

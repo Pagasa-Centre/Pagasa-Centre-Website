@@ -8,15 +8,14 @@ import (
 	commondb "pagasacentre/backend/pkg/commonlibrary/db"
 )
 
-// UpdateCamperDetailsMeta rewrites one camper's details. newBillingStatus, when
-// non-empty, reverts the group's billing_status and clears invoice fields after a
-// now-stale invoice has been voided.
+// UpdateCamperDetailsMeta rewrites one camper's details. tr, when it changes
+// billing_status, clears invoice fields after a now-stale invoice was voided.
 func (r *Repository) UpdateCamperDetailsMeta(
 	ctx context.Context,
 	groupID, camperID string,
 	d domain.CamperDetails,
-	newBillingStatus string,
 	meta domain.ActionMeta,
+	tr domain.BillingTransition,
 ) error {
 	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
@@ -71,15 +70,12 @@ func (r *Repository) UpdateCamperDetailsMeta(
 		return fmt.Errorf("camper %q not in group %q", camperID, groupID)
 	}
 
-	if newBillingStatus == "" {
-		if err := stampExec(ctx, tx, groupID, meta, ""); err != nil {
-			return err
-		}
-	} else {
-		extra := `, billing_status = $3, stripe_invoice_id = NULL, invoice_due_at = NULL`
-		if err := stampExec(ctx, tx, groupID, meta, extra, newBillingStatus); err != nil {
-			return err
-		}
+	extra := ""
+	if tr.ChangesBilling() {
+		extra = `, stripe_invoice_id = NULL, invoice_due_at = NULL`
+	}
+	if err := stampExec(ctx, tx, groupID, meta, tr, extra); err != nil {
+		return err
 	}
 	return tx.Commit(ctx)
 }
@@ -87,15 +83,14 @@ func (r *Repository) UpdateCamperDetailsMeta(
 // AddCamperMeta inserts a camper into an existing group and returns the new row's
 // id. depositOwedPence records a deposit this person still owes because the
 // group's deposit checkout was already settled before they joined.
-// newBillingStatus, when non-empty, reverts the group's billing_status and clears
-// invoice fields.
+// tr carries any billing fallout from adding someone to the roster.
 func (r *Repository) AddCamperMeta(
 	ctx context.Context,
 	groupID string,
 	c domain.CamperDTO,
 	depositOwedPence int,
-	newBillingStatus string,
 	meta domain.ActionMeta,
+	tr domain.BillingTransition,
 ) (string, error) {
 	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
@@ -168,15 +163,12 @@ func (r *Repository) AddCamperMeta(
 		return "", fmt.Errorf("add camper: %w", err)
 	}
 
-	if newBillingStatus == "" {
-		if err := stampExec(ctx, tx, groupID, meta, ""); err != nil {
-			return "", err
-		}
-	} else {
-		extra := `, billing_status = $3, stripe_invoice_id = NULL, invoice_due_at = NULL`
-		if err := stampExec(ctx, tx, groupID, meta, extra, newBillingStatus); err != nil {
-			return "", err
-		}
+	extra := ""
+	if tr.ChangesBilling() {
+		extra = `, stripe_invoice_id = NULL, invoice_due_at = NULL`
+	}
+	if err := stampExec(ctx, tx, groupID, meta, tr, extra); err != nil {
+		return "", err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", err
@@ -220,7 +212,7 @@ func (r *Repository) SetMainContactMeta(
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("group %q has no campers", groupID)
 	}
-	if err := stampExec(ctx, tx, groupID, meta, ""); err != nil {
+	if err := stampExec(ctx, tx, groupID, meta, domain.BillingTransition{}, ""); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -259,7 +251,7 @@ func (r *Repository) WaiveCamperDepositMeta(
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("camper %q not in group %q", camperID, groupID)
 	}
-	if err := stampExec(ctx, tx, groupID, meta, ""); err != nil {
+	if err := stampExec(ctx, tx, groupID, meta, domain.BillingTransition{}, ""); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

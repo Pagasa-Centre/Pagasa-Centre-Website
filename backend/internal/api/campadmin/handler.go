@@ -123,8 +123,8 @@ func listRegistrationsJSON(svc registrationLister) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		f := domain.ListFilterBilling{
-			PaymentStatus: r.URL.Query().Get("status"),
-			BillingStatus: r.URL.Query().Get("billing_status"),
+			PaymentStatus: domain.PaymentStatus(r.URL.Query().Get("status")),
+			BillingStatus: domain.BillingStatus(r.URL.Query().Get("billing_status")),
 		}
 		groups, byGroup, err := svc.ListGroupsWithCampers(ctx, f)
 		if err != nil {
@@ -147,8 +147,8 @@ func listRegistrationsCSV(svc registrationLister) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		groups, byGroup, err := svc.ListGroupsWithCampers(ctx, domain.ListFilterBilling{
-			PaymentStatus: r.URL.Query().Get("status"),
-			BillingStatus: r.URL.Query().Get("billing_status"),
+			PaymentStatus: domain.PaymentStatus(r.URL.Query().Get("status")),
+			BillingStatus: domain.BillingStatus(r.URL.Query().Get("billing_status")),
 		})
 		if err != nil {
 			commonerrors.WriteError(w, err)

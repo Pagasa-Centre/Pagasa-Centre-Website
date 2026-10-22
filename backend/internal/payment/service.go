@@ -58,18 +58,19 @@ func (s *Service) HandleCheckoutCompleted(ctx context.Context, evt CheckoutCompl
 		if g == nil {
 			return fmt.Errorf("no registration group for session %s", evt.SessionID)
 		}
-		if g.PaymentStatus != domain.PaymentPending {
+		settlement, ok := g.SettleCheckout()
+		if !ok {
 			return nil
 		}
+		coachIncluded := false
 		if g.PaidInFullAtRegistration {
-			coachIncluded, err := s.groupHasCoachEligible(txCtx, g.ID)
+			var err error
+			coachIncluded, err = s.groupHasCoachEligible(txCtx, g.ID)
 			if err != nil {
 				return err
 			}
-			if err := s.regRepo.MarkPaidInFull(txCtx, g.ID, evt.PaymentIntentID, coachIncluded); err != nil {
-				return err
-			}
-		} else if err := s.regRepo.MarkPaid(txCtx, g.ID, evt.PaymentIntentID); err != nil {
+		}
+		if err := s.regRepo.ApplySettlement(txCtx, g.ID, evt.PaymentIntentID, coachIncluded, settlement); err != nil {
 			return err
 		}
 		group = g
@@ -113,7 +114,7 @@ func rowsFromGroup(g *domain.Group, campers []domain.Camper) []sheets.Row {
 	for _, c := range campers {
 		rows = append(rows, sheets.Row{
 			GroupID:                   g.ID,
-			PaymentStatus:             g.PaymentStatus,
+			PaymentStatus:             string(g.PaymentStatus),
 			SubmittedAt:               g.CreatedAt,
 			PaidAt:                    g.PaidAt,
 			TotalAmountPence:          g.TotalAmountPence,
@@ -152,10 +153,14 @@ func (s *Service) HandleCheckoutExpired(ctx context.Context, sessionID string) e
 		if err != nil {
 			return err
 		}
-		if group == nil || group.PaymentStatus != domain.PaymentPending {
+		if group == nil {
 			return nil
 		}
-		return s.regRepo.MarkStatus(txCtx, group.ID, domain.PaymentCancelled)
+		tr, ok := group.ExpireCheckout()
+		if !ok {
+			return nil
+		}
+		return s.regRepo.SetPaymentStatus(txCtx, group.ID, tr)
 	})
 }
 

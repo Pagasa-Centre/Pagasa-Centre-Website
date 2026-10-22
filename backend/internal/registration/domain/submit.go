@@ -49,7 +49,7 @@ type SubmitResponse struct {
 
 type SummaryResponse struct {
 	GroupID          string          `json:"group_id"`
-	PaymentStatus    string          `json:"payment_status"`
+	PaymentStatus    PaymentStatus   `json:"payment_status"`
 	TotalAmountPence int             `json:"total_amount_pence"`
 	Currency         string          `json:"currency"`
 	ContactEmail     string          `json:"contact_email"`

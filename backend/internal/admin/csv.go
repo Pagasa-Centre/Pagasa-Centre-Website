@@ -36,8 +36,8 @@ func WriteCSV(w io.Writer, groups []domain.Group, campersByGroup map[string][]do
 		for _, c := range campers {
 			row := []string{
 				g.ID,
-				g.PaymentStatus,
-				g.BillingStatus,
+				string(g.PaymentStatus),
+				string(g.BillingStatus),
 				formatTimePtr(g.PaidAt),
 				formatTimePtr(g.BalancePaidAt),
 				formatTimePtr(g.InvoiceDueAt),

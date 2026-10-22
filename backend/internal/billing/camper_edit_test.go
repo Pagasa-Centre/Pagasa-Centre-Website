@@ -67,7 +67,7 @@ func insertEditableGroup(
 	ctx context.Context,
 	t *testing.T,
 	pool *pgxpool.Pool,
-	billingStatus string,
+	billingStatus domain.BillingStatus,
 ) (groupID, mainID, otherID string) {
 	t.Helper()
 	err := pool.QueryRow(ctx, `

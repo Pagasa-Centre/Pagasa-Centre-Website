@@ -166,13 +166,15 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 		}
 
 		if total == 0 {
-			if paidInFull {
-				coachIncluded := coachEligibleCountFromRequest(req) > 0
-				if err := s.repo.MarkPaidInFull(txCtx, groupID, "", coachIncluded); err != nil {
-					return fmt.Errorf("mark paid in full: %w", err)
-				}
-			} else if err := s.repo.MarkPaid(txCtx, groupID, ""); err != nil {
-				return fmt.Errorf("mark paid: %w", err)
+			pending := domain.Group{
+				PaymentStatus:            domain.PaymentPending,
+				BillingStatus:            domain.BillingNone,
+				PaidInFullAtRegistration: paidInFull,
+			}
+			settlement, _ := pending.SettleCheckout()
+			coachIncluded := paidInFull && coachEligibleCountFromRequest(req) > 0
+			if err := s.repo.ApplySettlement(txCtx, groupID, "", coachIncluded, settlement); err != nil {
+				return fmt.Errorf("apply settlement: %w", err)
 			}
 			return nil
 		}
@@ -213,12 +215,12 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 	return resp, nil
 }
 
-func rowsFromRequest(groupID string, req domain.SubmitRequest, status string, totalPence int, currency string, submittedAt time.Time, paidAt *time.Time) []sheets.Row {
+func rowsFromRequest(groupID string, req domain.SubmitRequest, status domain.PaymentStatus, totalPence int, currency string, submittedAt time.Time, paidAt *time.Time) []sheets.Row {
 	rows := make([]sheets.Row, 0, len(req.Campers))
 	for _, c := range req.Campers {
 		row := sheets.Row{
 			GroupID:          groupID,
-			PaymentStatus:    status,
+			PaymentStatus:    string(status),
 			SubmittedAt:      submittedAt,
 			PaidAt:           paidAt,
 			TotalAmountPence: totalPence,

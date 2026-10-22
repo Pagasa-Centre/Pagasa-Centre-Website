@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/pkg/commonlibrary/apperr"
@@ -110,5 +111,32 @@ func TestAllocate_RepositoryErrorWrapped(t *testing.T) {
 	}
 	if !errors.Is(err, cause) {
 		t.Fatalf("expected wrapped cause, got %v", err)
+	}
+}
+
+func TestExtendDueAt_unknownGroup(t *testing.T) {
+	svc := NewService(&fakeRepo{}, nil, nil, nil, Config{})
+	err := svc.ExtendDueAt(context.Background(), "missing", "admin", 1, time.Now())
+	if !errors.Is(err, domain.ErrGroupNotFound) {
+		t.Fatalf("expected ErrGroupNotFound, got %v", err)
+	}
+}
+
+func TestExtendDueAt_notOpenInvoice(t *testing.T) {
+	repo := &fakeRepo{groups: map[string]*domain.Group{
+		"g1": {
+			ID:            "g1",
+			BillingStatus: domain.BillingAllocated,
+			PaymentStatus: domain.PaymentPaid,
+		},
+	}}
+	svc := NewService(repo, nil, nil, nil, Config{})
+	err := svc.ExtendDueAt(context.Background(), "g1", "admin", 1, time.Now())
+	var ae *apperr.Error
+	if !errors.As(err, &ae) || ae.Kind != apperr.KindInvalid {
+		t.Fatalf("expected invalid, got %v", err)
+	}
+	if ae.Message != "invoice is not open" {
+		t.Fatalf("message = %q", ae.Message)
 	}
 }

@@ -8,4 +8,6 @@ var (
 	ErrRegistrationNotFound = apperr.NotFound("registration not found")
 	ErrDepositUnpaid        = apperr.Invalid("deposit must be paid first")
 	ErrBalancePaid          = apperr.Invalid("balance already paid")
+	ErrInvoiceOpen          = apperr.Invalid("invoice is open; use release instead")
+	ErrInvoiceAlreadySent   = apperr.Invalid("invoice already sent")
 )

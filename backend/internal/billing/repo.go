@@ -19,25 +19,25 @@ type billingRepo interface {
 	ListAccommodationTypes(ctx context.Context) ([]domain.AccommodationType, error)
 	ListAccommodationUnits(ctx context.Context) ([]domain.AccommodationUnit, error)
 	SetStripeCustomerID(ctx context.Context, groupID, customerID string) error
-	AllocateGroup(ctx context.Context, groupID string, allocs []domain.CamperAllocation, meta domain.ActionMeta) error
-	UnallocateGroup(ctx context.Context, groupID string, meta domain.ActionMeta) error
-	ConfirmFreeMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error
-	SetInvoiceDetailsMeta(ctx context.Context, groupID, invoiceID string, dueAt time.Time, coachIncluded bool, meta domain.ActionMeta) error
+	AllocateGroup(ctx context.Context, groupID string, allocs []domain.CamperAllocation, meta domain.ActionMeta, tr domain.BillingTransition) error
+	UnallocateGroup(ctx context.Context, groupID string, meta domain.ActionMeta, tr domain.BillingTransition) error
+	ConfirmFreeMeta(ctx context.Context, groupID string, meta domain.ActionMeta, tr domain.BillingTransition) error
+	SetInvoiceDetailsMeta(ctx context.Context, groupID, invoiceID string, dueAt time.Time, coachIncluded bool, meta domain.ActionMeta, tr domain.BillingTransition) error
 	SetCoachInvoiceMeta(ctx context.Context, groupID, coachInvoiceID string, dueAt time.Time, meta domain.ActionMeta) error
 	MarkCoachFeePaidMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error
 	WaiveCoachFeeMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error
 	UnwaiveCoachFeeMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error
-	ClearInvoiceAndReleaseMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error
-	DeleteCamperMeta(ctx context.Context, groupID, camperID, newBillingStatus string, meta domain.ActionMeta) error
-	ConvertCamperToDayPassMeta(ctx context.Context, groupID, camperID string, dp domain.DayPassFields, depositCreditPence int, newBillingStatus string, meta domain.ActionMeta) error
+	ClearInvoiceAndReleaseMeta(ctx context.Context, groupID string, meta domain.ActionMeta, tr domain.BillingTransition) error
+	DeleteCamperMeta(ctx context.Context, groupID, camperID string, meta domain.ActionMeta, tr domain.BillingTransition) error
+	ConvertCamperToDayPassMeta(ctx context.Context, groupID, camperID string, dp domain.DayPassFields, depositCreditPence int, meta domain.ActionMeta, tr domain.BillingTransition) error
 	UpdateDayPassCamperMeta(ctx context.Context, groupID, camperID string, tshirtOption string, needsCatering bool, shirtSize, dietary *string, meta domain.ActionMeta) error
 	UpdateCamperCoachMeta(ctx context.Context, groupID, camperID string, needsCoach bool, clearCoachInvoice bool, meta domain.ActionMeta) error
 	DeleteGroupMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error
-	MarkBalancePaidMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error
-	ExtendInvoiceDueAtMeta(ctx context.Context, groupID string, dueAt time.Time, meta domain.ActionMeta) error
-	StampOnly(ctx context.Context, groupID string, meta domain.ActionMeta) error
-	UpdateCamperDetailsMeta(ctx context.Context, groupID, camperID string, d domain.CamperDetails, newBillingStatus string, meta domain.ActionMeta) error
-	AddCamperMeta(ctx context.Context, groupID string, c domain.CamperDTO, depositOwedPence int, newBillingStatus string, meta domain.ActionMeta) (string, error)
+	MarkBalancePaidMeta(ctx context.Context, groupID string, meta domain.ActionMeta, tr domain.BillingTransition) error
+	ExtendInvoiceDueAtMeta(ctx context.Context, groupID string, dueAt time.Time, meta domain.ActionMeta, tr domain.BillingTransition) error
+	StampOnly(ctx context.Context, groupID string, meta domain.ActionMeta, tr domain.BillingTransition) error
+	UpdateCamperDetailsMeta(ctx context.Context, groupID, camperID string, d domain.CamperDetails, meta domain.ActionMeta, tr domain.BillingTransition) error
+	AddCamperMeta(ctx context.Context, groupID string, c domain.CamperDTO, depositOwedPence int, meta domain.ActionMeta, tr domain.BillingTransition) (string, error)
 	SetMainContactMeta(ctx context.Context, groupID, camperID string, meta domain.ActionMeta) error
 	WaiveCamperDepositMeta(ctx context.Context, groupID, camperID string, meta domain.ActionMeta) error
 }

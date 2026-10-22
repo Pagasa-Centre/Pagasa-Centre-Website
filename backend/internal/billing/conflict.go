@@ -18,25 +18,6 @@ func ExpectedVersion(v *int) int {
 
 func expectedVersion(v *int) int { return ExpectedVersion(v) }
 
-func billingStatusLabel(status string) string {
-	switch status {
-	case domain.BillingNone:
-		return "Needs accommodation"
-	case domain.BillingAllocated:
-		return "Ready to invoice"
-	case domain.BillingInvoiced:
-		return "Awaiting payment"
-	case domain.BillingBalancePaid:
-		return "Paid in full"
-	case domain.BillingFreeConfirmed:
-		return "Sponsorship confirmed"
-	case domain.BillingReleased:
-		return "Released"
-	default:
-		return status
-	}
-}
-
 type groupReader interface {
 	FindGroupByID(ctx context.Context, groupID string) (*domain.Group, error)
 }
@@ -48,7 +29,7 @@ func staleConflict(ctx context.Context, repo groupReader, groupID string) *apper
 		if g.LastActionBy != nil && *g.LastActionBy != "" {
 			who = *g.LastActionBy
 		}
-		state = billingStatusLabel(g.BillingStatus)
+		state = g.BillingStatus.Label()
 	}
 	msg := fmt.Sprintf(
 		"This group was just updated by %s (%s). Your view was refreshed — please check and try again.",

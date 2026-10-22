@@ -12,10 +12,9 @@ type txRunner interface {
 
 type regRepo interface {
 	GetGroupBySession(ctx context.Context, sessionID string) (*domain.Group, error)
-	MarkPaid(ctx context.Context, groupID, paymentIntentID string) error
-	MarkPaidInFull(ctx context.Context, groupID, paymentIntentID string, coachIncluded bool) error
-	MarkStatus(ctx context.Context, groupID, status string) error
-	CampersForGroup(ctx context.Context, groupID string) ([]domain.Camper, error)
 	FindGroupByID(ctx context.Context, groupID string) (*domain.Group, error)
+	CampersForGroup(ctx context.Context, groupID string) ([]domain.Camper, error)
 	UpdateContact(ctx context.Context, groupID, firstName, lastName, email, phone string) error
+	ApplySettlement(ctx context.Context, groupID, paymentIntentID string, coachIncluded bool, s domain.Settlement) error
+	SetPaymentStatus(ctx context.Context, groupID string, tr domain.PaymentTransition) error
 }

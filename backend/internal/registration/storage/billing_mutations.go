@@ -23,23 +23,31 @@ func checkVersion(g *domain.Group, meta domain.ActionMeta) error {
 	return nil
 }
 
-func stampExec(ctx context.Context, q pgx.Tx, groupID string, meta domain.ActionMeta, extraSQL string, extraArgs ...any) error {
-	base := `UPDATE registration_groups
+func stampExec(ctx context.Context, q pgx.Tx, groupID string, meta domain.ActionMeta, tr domain.BillingTransition, extraSQL string, extraArgs ...any) error {
+	set := `UPDATE registration_groups
 	 SET version = version + 1,
 	     last_action = $1,
 	     last_action_by = $2,
-	     last_action_at = now()` + extraSQL
+	     last_action_at = now()`
 	args := []any{meta.Action, meta.Actor}
+	set += extraSQL
 	args = append(args, extraArgs...)
-	n := len(args) + 1
-	args = append(args, groupID)
-	where := fmt.Sprintf(` WHERE id = $%d`, n)
-	if meta.EnforceVersion() {
-		n++
-		args = append(args, meta.ExpectedVersion)
-		where += fmt.Sprintf(` AND version = $%d`, n)
+	if tr.ChangesBilling() {
+		set += fmt.Sprintf(`, billing_status = $%d`, len(args)+1)
+		args = append(args, tr.To)
 	}
-	tag, err := q.Exec(ctx, base+where, args...)
+
+	args = append(args, groupID)
+	where := fmt.Sprintf(` WHERE id = $%d`, len(args))
+	if tr.From != "" {
+		args = append(args, tr.From)
+		where += fmt.Sprintf(` AND billing_status = $%d`, len(args))
+	}
+	if meta.EnforceVersion() {
+		args = append(args, meta.ExpectedVersion)
+		where += fmt.Sprintf(` AND version = $%d`, len(args))
+	}
+	tag, err := q.Exec(ctx, set+where, args...)
 	if err != nil {
 		return fmt.Errorf("stamp group: %w", err)
 	}
@@ -73,7 +81,7 @@ func setCamperAllocationsTx(ctx context.Context, tx pgx.Tx, groupID string, allo
 }
 
 // AllocateGroup saves placements and sets billing_status=allocated atomically.
-func (r *Repository) AllocateGroup(ctx context.Context, groupID string, allocs []domain.CamperAllocation, meta domain.ActionMeta) error {
+func (r *Repository) AllocateGroup(ctx context.Context, groupID string, allocs []domain.CamperAllocation, meta domain.ActionMeta, tr domain.BillingTransition) error {
 	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
@@ -93,14 +101,14 @@ func (r *Repository) AllocateGroup(ctx context.Context, groupID string, allocs [
 	if err := setCamperAllocationsTx(ctx, tx, groupID, allocs); err != nil {
 		return err
 	}
-	if err := stampExec(ctx, tx, groupID, meta, `, billing_status = CASE WHEN paid_in_full_at_registration THEN billing_status ELSE 'allocated' END`); err != nil {
+	if err := stampExec(ctx, tx, groupID, meta, tr, ""); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
 // UnallocateGroup clears placements and returns billing_status to none.
-func (r *Repository) UnallocateGroup(ctx context.Context, groupID string, meta domain.ActionMeta) error {
+func (r *Repository) UnallocateGroup(ctx context.Context, groupID string, meta domain.ActionMeta, tr domain.BillingTransition) error {
 	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
@@ -126,14 +134,14 @@ func (r *Repository) UnallocateGroup(ctx context.Context, groupID string, meta d
 	if err != nil {
 		return fmt.Errorf("clear allocations: %w", err)
 	}
-	if err := stampExec(ctx, tx, groupID, meta, `, billing_status = CASE WHEN paid_in_full_at_registration THEN billing_status ELSE 'none' END`); err != nil {
+	if err := stampExec(ctx, tx, groupID, meta, tr, ""); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
 // ConfirmFreeMeta marks a church-sponsored group as fully confirmed (no invoice).
-func (r *Repository) ConfirmFreeMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error {
+func (r *Repository) ConfirmFreeMeta(ctx context.Context, groupID string, meta domain.ActionMeta, tr domain.BillingTransition) error {
 	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
@@ -147,16 +155,10 @@ func (r *Repository) ConfirmFreeMeta(ctx context.Context, groupID string, meta d
 	if g == nil {
 		return fmt.Errorf("group %q not found", groupID)
 	}
-	if !g.IsFree {
-		return fmt.Errorf("group %q is not church-sponsored", groupID)
-	}
-	if g.BillingStatus != domain.BillingAllocated {
-		return fmt.Errorf("group %q must be allocated before confirming sponsorship", groupID)
-	}
 	if err := checkVersion(g, meta); err != nil {
 		return err
 	}
-	if err := stampExec(ctx, tx, groupID, meta, `, billing_status = 'free_confirmed'`); err != nil {
+	if err := stampExec(ctx, tx, groupID, meta, tr, ""); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -165,7 +167,7 @@ func (r *Repository) ConfirmFreeMeta(ctx context.Context, groupID string, meta d
 // SetInvoiceDetailsMeta records invoice id/due and moves to invoiced with
 // attribution. coachIncluded records whether the coach fee was folded into this
 // balance invoice, so we never also send a separate coach invoice for the group.
-func (r *Repository) SetInvoiceDetailsMeta(ctx context.Context, groupID, invoiceID string, dueAt time.Time, coachIncluded bool, meta domain.ActionMeta) error {
+func (r *Repository) SetInvoiceDetailsMeta(ctx context.Context, groupID, invoiceID string, dueAt time.Time, coachIncluded bool, meta domain.ActionMeta, tr domain.BillingTransition) error {
 	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
@@ -182,8 +184,8 @@ func (r *Repository) SetInvoiceDetailsMeta(ctx context.Context, groupID, invoice
 	if err := checkVersion(g, meta); err != nil {
 		return err
 	}
-	extra := `, stripe_invoice_id = $3, invoice_due_at = $4, billing_status = 'invoiced', coach_included_in_balance = $5`
-	if err := stampExec(ctx, tx, groupID, meta, extra, invoiceID, dueAt.UTC(), coachIncluded); err != nil {
+	extra := `, stripe_invoice_id = $3, invoice_due_at = $4, coach_included_in_balance = $5`
+	if err := stampExec(ctx, tx, groupID, meta, tr, extra, invoiceID, dueAt.UTC(), coachIncluded); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -209,7 +211,7 @@ func (r *Repository) SetCoachInvoiceMeta(ctx context.Context, groupID, coachInvo
 		return err
 	}
 	extra := `, stripe_coach_invoice_id = $3, coach_invoice_due_at = $4`
-	if err := stampExec(ctx, tx, groupID, meta, extra, coachInvoiceID, dueAt.UTC()); err != nil {
+	if err := stampExec(ctx, tx, groupID, meta, domain.BillingTransition{}, extra, coachInvoiceID, dueAt.UTC()); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -218,7 +220,7 @@ func (r *Repository) SetCoachInvoiceMeta(ctx context.Context, groupID, coachInvo
 // MarkCoachFeePaidMeta stamps coach_fee_paid_at (Stripe webhook).
 func (r *Repository) MarkCoachFeePaidMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error {
 	extra := `, coach_fee_paid_at = $3`
-	return r.stampGroupPool(ctx, groupID, meta, extra, time.Now().UTC())
+	return r.stampGroupPool(ctx, groupID, meta, domain.BillingTransition{}, extra, time.Now().UTC())
 }
 
 // WaiveCoachFeeMeta marks the coach fee waived and clears any separate coach invoice fields.
@@ -241,7 +243,7 @@ func (r *Repository) WaiveCoachFeeMeta(ctx context.Context, groupID string, meta
 	}
 	now := time.Now().UTC()
 	extra := `, coach_fee_waived_at = $3, stripe_coach_invoice_id = NULL, coach_invoice_due_at = NULL`
-	if err := stampExec(ctx, tx, groupID, meta, extra, now); err != nil {
+	if err := stampExec(ctx, tx, groupID, meta, domain.BillingTransition{}, extra, now); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -250,11 +252,11 @@ func (r *Repository) WaiveCoachFeeMeta(ctx context.Context, groupID string, meta
 // UnwaiveCoachFeeMeta clears coach_fee_waived_at so the group can be coach-charged again.
 func (r *Repository) UnwaiveCoachFeeMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error {
 	extra := `, coach_fee_waived_at = NULL`
-	return r.stampGroupPool(ctx, groupID, meta, extra)
+	return r.stampGroupPool(ctx, groupID, meta, domain.BillingTransition{}, extra)
 }
 
 // ClearInvoiceAndReleaseMeta voids invoice state, releases allocation, stamps attribution.
-func (r *Repository) ClearInvoiceAndReleaseMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error {
+func (r *Repository) ClearInvoiceAndReleaseMeta(ctx context.Context, groupID string, meta domain.ActionMeta, tr domain.BillingTransition) error {
 	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
@@ -280,17 +282,15 @@ func (r *Repository) ClearInvoiceAndReleaseMeta(ctx context.Context, groupID str
 	if err != nil {
 		return fmt.Errorf("clear camper allocations: %w", err)
 	}
-	extra := `, billing_status = 'released', stripe_invoice_id = NULL, invoice_due_at = NULL`
-	if err := stampExec(ctx, tx, groupID, meta, extra); err != nil {
+	extra := `, stripe_invoice_id = NULL, invoice_due_at = NULL`
+	if err := stampExec(ctx, tx, groupID, meta, tr, extra); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
-// DeleteCamperMeta removes one camper row from a group. newBillingStatus, when
-// non-empty, reverts the group's billing_status and clears invoice fields
-// (used after voiding a now-stale invoice).
-func (r *Repository) DeleteCamperMeta(ctx context.Context, groupID, camperID, newBillingStatus string, meta domain.ActionMeta) error {
+// DeleteCamperMeta removes one camper row from a group.
+func (r *Repository) DeleteCamperMeta(ctx context.Context, groupID, camperID string, meta domain.ActionMeta, tr domain.BillingTransition) error {
 	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
@@ -314,20 +314,16 @@ func (r *Repository) DeleteCamperMeta(ctx context.Context, groupID, camperID, ne
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("camper %q not in group %q", camperID, groupID)
 	}
-	if newBillingStatus == "" {
-		if err := stampExec(ctx, tx, groupID, meta, ""); err != nil {
-			return err
-		}
-	} else {
-		extra := `, billing_status = $3, stripe_invoice_id = NULL, invoice_due_at = NULL`
-		if err := stampExec(ctx, tx, groupID, meta, extra, newBillingStatus); err != nil {
-			return err
-		}
+	extra := ""
+	if tr.ChangesBilling() {
+		extra = `, stripe_invoice_id = NULL, invoice_due_at = NULL`
+	}
+	if err := stampExec(ctx, tx, groupID, meta, tr, extra); err != nil {
+		return err
 	}
 	return tx.Commit(ctx)
 }
 
-// domain.DayPassFields holds day-visitor details applied during a full-week conversion.
 // ConvertCamperToDayPassMeta rewrites one camper as a day-visitor, clearing
 // accommodation/coach/allocation and recording any deposit credit applied in Stripe.
 func (r *Repository) ConvertCamperToDayPassMeta(
@@ -335,8 +331,8 @@ func (r *Repository) ConvertCamperToDayPassMeta(
 	groupID, camperID string,
 	dp domain.DayPassFields,
 	depositCreditPence int,
-	newBillingStatus string,
 	meta domain.ActionMeta,
+	tr domain.BillingTransition,
 ) error {
 	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
@@ -379,15 +375,12 @@ func (r *Repository) ConvertCamperToDayPassMeta(
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("camper %q not in group %q", camperID, groupID)
 	}
-	if newBillingStatus == "" {
-		if err := stampExec(ctx, tx, groupID, meta, ""); err != nil {
-			return err
-		}
-	} else {
-		extra := `, billing_status = $3, stripe_invoice_id = NULL, invoice_due_at = NULL`
-		if err := stampExec(ctx, tx, groupID, meta, extra, newBillingStatus); err != nil {
-			return err
-		}
+	extra := ""
+	if tr.ChangesBilling() {
+		extra = `, stripe_invoice_id = NULL, invoice_due_at = NULL`
+	}
+	if err := stampExec(ctx, tx, groupID, meta, tr, extra); err != nil {
+		return err
 	}
 	return tx.Commit(ctx)
 }
@@ -432,7 +425,7 @@ func (r *Repository) UpdateDayPassCamperMeta(
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("camper %q not in group %q", camperID, groupID)
 	}
-	if err := stampExec(ctx, tx, groupID, meta, ""); err != nil {
+	if err := stampExec(ctx, tx, groupID, meta, domain.BillingTransition{}, ""); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -477,7 +470,7 @@ func (r *Repository) UpdateCamperCoachMeta(
 	if clearCoachInvoice {
 		extra = `, stripe_coach_invoice_id = NULL, coach_invoice_due_at = NULL`
 	}
-	if err := stampExec(ctx, tx, groupID, meta, extra); err != nil {
+	if err := stampExec(ctx, tx, groupID, meta, domain.BillingTransition{}, extra); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -524,7 +517,7 @@ func (r *Repository) DeleteGroupMeta(ctx context.Context, groupID string, meta d
 // This is the only place a deposit becomes paid. Waiving a deposit and converting
 // a camper to a day visitor also zero what is owed, but no money arrives, so
 // neither may write the paid column.
-func (r *Repository) MarkBalancePaidMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error {
+func (r *Repository) MarkBalancePaidMeta(ctx context.Context, groupID string, meta domain.ActionMeta, tr domain.BillingTransition) error {
 	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
@@ -547,15 +540,15 @@ func (r *Repository) MarkBalancePaidMeta(ctx context.Context, groupID string, me
 		  WHERE group_id = $1 AND deposit_owed_pence > 0`, groupID); err != nil {
 		return fmt.Errorf("settle outstanding deposits: %w", err)
 	}
-	extra := `, billing_status = 'balance_paid', balance_paid_at = $3`
-	if err := stampExec(ctx, tx, groupID, meta, extra, time.Now().UTC()); err != nil {
+	extra := `, balance_paid_at = $3`
+	if err := stampExec(ctx, tx, groupID, meta, tr, extra, time.Now().UTC()); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
 // ExtendInvoiceDueAtMeta updates due date with optional version check.
-func (r *Repository) ExtendInvoiceDueAtMeta(ctx context.Context, groupID string, dueAt time.Time, meta domain.ActionMeta) error {
+func (r *Repository) ExtendInvoiceDueAtMeta(ctx context.Context, groupID string, dueAt time.Time, meta domain.ActionMeta, tr domain.BillingTransition) error {
 	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
@@ -569,20 +562,17 @@ func (r *Repository) ExtendInvoiceDueAtMeta(ctx context.Context, groupID string,
 	if g == nil {
 		return fmt.Errorf("group %q not found", groupID)
 	}
-	if g.BillingStatus != domain.BillingInvoiced {
-		return fmt.Errorf("group %q not invoiced", groupID)
-	}
 	if err := checkVersion(g, meta); err != nil {
 		return err
 	}
 	extra := `, invoice_due_at = $3`
-	if err := stampExec(ctx, tx, groupID, meta, extra, dueAt.UTC()); err != nil {
+	if err := stampExec(ctx, tx, groupID, meta, tr, extra, dueAt.UTC()); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
-func (r *Repository) stampGroupPool(ctx context.Context, groupID string, meta domain.ActionMeta, extraSQL string, extraArgs ...any) error {
+func (r *Repository) stampGroupPool(ctx context.Context, groupID string, meta domain.ActionMeta, tr domain.BillingTransition, extraSQL string, extraArgs ...any) error {
 	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
@@ -597,13 +587,13 @@ func (r *Repository) stampGroupPool(ctx context.Context, groupID string, meta do
 			return err
 		}
 	}
-	if err := stampExec(ctx, tx, groupID, meta, extraSQL, extraArgs...); err != nil {
+	if err := stampExec(ctx, tx, groupID, meta, tr, extraSQL, extraArgs...); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
 // StampOnly bumps version/attribution without changing billing fields (e.g. resend).
-func (r *Repository) StampOnly(ctx context.Context, groupID string, meta domain.ActionMeta) error {
-	return r.stampGroupPool(ctx, groupID, meta, "")
+func (r *Repository) StampOnly(ctx context.Context, groupID string, meta domain.ActionMeta, tr domain.BillingTransition) error {
+	return r.stampGroupPool(ctx, groupID, meta, tr, "")
 }

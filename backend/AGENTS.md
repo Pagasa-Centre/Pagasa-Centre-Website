@@ -68,6 +68,8 @@ Existing domains: `camp`, `accommodation`, `registration`, `consent` (api only),
    - Handlers call `commonerrors.WriteError(w, err)`. `WriteError` maps through `commonerrors.FromError`: `KindInvalid` → 400 (`Code` or `bad_request`), `KindNotFound` → 404, `KindConflict` → 409 (`Code` or `conflict`), `KindValidation` → 400 with `fields`, everything else → sanitised `internal_error` with a ref via `Public`.
    - **Never put raw `err.Error()` in a response.** Optional per-handler overrides: `errors.Is(err, registration.ErrRegistrationsClosed)` when a route needs different copy; otherwise rely on `WriteError`.
 
+9. **Entities own lifecycle rules.** Billing and payment status changes are decided by methods on `domain.Group` that return a `BillingTransition`, `PaymentTransition`, or `Settlement`. Services call those methods and pass the result to storage. Storage persists transitions with compare-and-set (`WHERE billing_status = From` / `payment_status = From`) and never writes status literals or `CASE` logic in SQL. `internal/archtest` (`TestStorageDoesNotDecideStatus`) enforces the storage rule.
+
 ## Model types (no entity layer)
 
 We use **two** model layers (not three — there is no sqlboiler `entity` package):
@@ -88,7 +90,7 @@ type SubmitRequest = domain.SubmitRequest
 
 ## Adding a new endpoint (existing domain)
 
-1. Add or extend domain types in `internal/{domain}/domain/`.
+1. Add or extend domain types in `internal/{domain}/domain/`. Lifecycle rules go on the entity (`domain.Group` methods — guardrail 9).
 2. Add service method in `internal/{domain}/service.go` (return domain types and domain errors — guardrail 8).
 3. Add storage method in `internal/{domain}/storage/repository.go` if DB access is needed.
 4. Add DTOs + mappers in `internal/api/{domain}/dto/`.

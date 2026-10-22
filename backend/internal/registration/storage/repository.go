@@ -203,52 +203,49 @@ func (r *Repository) FindGroupByID(ctx context.Context, groupID string) (*domain
 	return &g, nil
 }
 
-// MarkPaid transitions the group to 'paid' and stamps paid_at + payment intent.
-// paymentIntentID may be empty (used by the £0 day-pass-only Submit path where
-// no Stripe session was ever created).
-func (r *Repository) MarkPaid(ctx context.Context, groupID, paymentIntentID string) error {
-	_, err := r.db(ctx).Exec(ctx,
-		`UPDATE registration_groups
-		    SET payment_status = 'paid',
-		        stripe_payment_intent_id = COALESCE($1, stripe_payment_intent_id),
-		        paid_at = $2
-		  WHERE id = $3`,
-		nullableString(paymentIntentID), time.Now().UTC(), groupID)
+// ApplySettlement persists a checkout or zero-total submit with payment CAS and
+// optional billing settlement.
+func (r *Repository) ApplySettlement(ctx context.Context, groupID, paymentIntentID string, coachIncluded bool, s domain.Settlement) error {
+	now := time.Now().UTC()
+	set := `UPDATE registration_groups
+		    SET payment_status = $1,
+		        stripe_payment_intent_id = COALESCE($2, stripe_payment_intent_id),
+		        paid_at = $3`
+	args := []any{s.Payment.To, nullableString(paymentIntentID), now}
+	if s.Billing.ChangesBilling() {
+		set += fmt.Sprintf(`, billing_status = $%d, balance_paid_at = $%d`, len(args)+1, len(args)+2)
+		args = append(args, s.Billing.To, now)
+		set += fmt.Sprintf(`, coach_included_in_balance = coach_included_in_balance OR $%d`, len(args)+1)
+		args = append(args, coachIncluded)
+	}
+	idArg := len(args) + 1
+	fromArg := len(args) + 2
+	args = append(args, groupID, s.Payment.From)
+	where := fmt.Sprintf(` WHERE id = $%d AND payment_status = $%d`, idArg, fromArg)
+	if s.Billing.From != "" {
+		args = append(args, s.Billing.From)
+		where += fmt.Sprintf(` AND billing_status = $%d`, len(args))
+	}
+	tag, err := r.db(ctx).Exec(ctx, set+where, args...)
 	if err != nil {
-		return fmt.Errorf("mark paid: %w", err)
+		return fmt.Errorf("apply settlement: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrVersionConflict
 	}
 	return nil
 }
 
-// MarkPaidInFull transitions a prepaid registration group to fully settled:
-// payment paid plus billing balance_paid.
-func (r *Repository) MarkPaidInFull(ctx context.Context, groupID, paymentIntentID string, coachIncluded bool) error {
-	_, err := r.db(ctx).Exec(ctx,
-		`UPDATE registration_groups
-		    SET payment_status = 'paid',
-		        stripe_payment_intent_id = COALESCE($1, stripe_payment_intent_id),
-		        paid_at = $2,
-		        billing_status = 'balance_paid',
-		        balance_paid_at = $2,
-		        coach_included_in_balance = coach_included_in_balance OR $3
-		  WHERE id = $4`,
-		nullableString(paymentIntentID), time.Now().UTC(), coachIncluded, groupID)
-	if err != nil {
-		return fmt.Errorf("mark paid in full: %w", err)
-	}
-	return nil
-}
-
-// MarkStatus changes payment_status (used by admin + cancelled webhook).
-func (r *Repository) MarkStatus(ctx context.Context, groupID, status string) error {
+// SetPaymentStatus updates payment_status with compare-and-set.
+func (r *Repository) SetPaymentStatus(ctx context.Context, groupID string, tr domain.PaymentTransition) error {
 	tag, err := r.db(ctx).Exec(ctx,
-		`UPDATE registration_groups SET payment_status = $1 WHERE id = $2`,
-		status, groupID)
+		`UPDATE registration_groups SET payment_status = $1 WHERE id = $2 AND payment_status = $3`,
+		tr.To, groupID, tr.From)
 	if err != nil {
 		return fmt.Errorf("update payment_status: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("group %q not found", groupID)
+		return domain.ErrVersionConflict
 	}
 	return nil
 }
@@ -272,33 +269,6 @@ func (r *Repository) UpdateContact(ctx context.Context, groupID, firstName, last
 		return fmt.Errorf("group %q not found", groupID)
 	}
 	return nil
-}
-
-// List returns groups (newest first), optionally filtered by status.
-func (r *Repository) List(ctx context.Context, f domain.ListFilter) ([]domain.Group, error) {
-	args := []any{}
-	q := `SELECT ` + groupSelectCols + ` FROM registration_groups`
-	if f.PaymentStatus != "" {
-		q += ` WHERE payment_status = $1`
-		args = append(args, f.PaymentStatus)
-	}
-	q += ` ORDER BY created_at DESC`
-
-	rows, err := r.db(ctx).Query(ctx, q, args...)
-	if err != nil {
-		return nil, fmt.Errorf("list groups: %w", err)
-	}
-	defer rows.Close()
-
-	var out []domain.Group
-	for rows.Next() {
-		g, err := scanGroup(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, g)
-	}
-	return out, rows.Err()
 }
 
 // CampersForGroup returns the camper rows for a single group.

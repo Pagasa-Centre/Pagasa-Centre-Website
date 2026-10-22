@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"pagasacentre/backend/internal/registration/domain"
-	commondb "pagasacentre/backend/pkg/commonlibrary/db"
 )
 
 // ListWithBilling is List with optional billing_status filter.
@@ -131,20 +130,6 @@ func (r *Repository) ClearCamperAllocations(ctx context.Context, groupID string)
 	return nil
 }
 
-// SetBillingStatus updates billing_status on a group.
-func (r *Repository) SetBillingStatus(ctx context.Context, groupID, status string) error {
-	tag, err := r.db(ctx).Exec(ctx,
-		`UPDATE registration_groups SET billing_status = $1 WHERE id = $2`,
-		status, groupID)
-	if err != nil {
-		return fmt.Errorf("set billing_status: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("group %q not found", groupID)
-	}
-	return nil
-}
-
 // SetStripeCustomerID stores the Stripe Customer id for balance invoicing.
 func (r *Repository) SetStripeCustomerID(ctx context.Context, groupID, customerID string) error {
 	_, err := r.db(ctx).Exec(ctx,
@@ -156,72 +141,14 @@ func (r *Repository) SetStripeCustomerID(ctx context.Context, groupID, customerI
 	return nil
 }
 
-// SetInvoiceDetails records invoice id, due date, and moves to invoiced.
-func (r *Repository) SetInvoiceDetails(ctx context.Context, groupID, invoiceID string, dueAt time.Time) error {
-	_, err := r.db(ctx).Exec(ctx,
-		`UPDATE registration_groups
-		    SET stripe_invoice_id = $1,
-		        invoice_due_at = $2,
-		        billing_status = 'invoiced'
-		  WHERE id = $3`,
-		invoiceID, dueAt.UTC(), groupID)
-	if err != nil {
-		return fmt.Errorf("set invoice details: %w", err)
-	}
-	return nil
-}
-
-// MarkBalancePaid sets billing_status and balance_paid_at.
-func (r *Repository) MarkBalancePaid(ctx context.Context, groupID string) error {
-	_, err := r.db(ctx).Exec(ctx,
-		`UPDATE registration_groups
-		    SET billing_status = 'balance_paid',
-		        balance_paid_at = $1
-		  WHERE id = $2`,
-		time.Now().UTC(), groupID)
-	if err != nil {
-		return fmt.Errorf("mark balance paid: %w", err)
-	}
-	return nil
-}
-
-// ClearInvoiceAndRelease clears invoice fields, sets released, clears allocations.
-func (r *Repository) ClearInvoiceAndRelease(ctx context.Context, groupID string) error {
-	tx, err := commondb.Begin(ctx, r.pool)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-
-	_, err = tx.Exec(ctx,
-		`UPDATE registration_groups
-		    SET billing_status = 'released',
-		        stripe_invoice_id = NULL,
-		        invoice_due_at = NULL
-		  WHERE id = $1`, groupID)
-	if err != nil {
-		return fmt.Errorf("release group: %w", err)
-	}
-	_, err = tx.Exec(ctx,
-		`UPDATE registrations
-		    SET allocated_accommodation_code = NULL,
-		        allocated_unit_code = NULL,
-		        billed_stripe_price_id = NULL
-		  WHERE group_id = $1`, groupID)
-	if err != nil {
-		return fmt.Errorf("clear camper allocations: %w", err)
-	}
-	return tx.Commit(ctx)
-}
-
 // ListOverdueInvoiced returns groups past invoice_due_at still in invoiced status.
 func (r *Repository) ListOverdueInvoiced(ctx context.Context, now time.Time) ([]domain.Group, error) {
 	const q = `SELECT ` + groupSelectCols + `
 		  FROM registration_groups
-		 WHERE billing_status = 'invoiced'
+		 WHERE billing_status = $2
 		   AND invoice_due_at IS NOT NULL
 		   AND invoice_due_at < $1`
-	rows, err := r.db(ctx).Query(ctx, q, now.UTC())
+	rows, err := r.db(ctx).Query(ctx, q, now.UTC(), domain.BillingInvoiced)
 	if err != nil {
 		return nil, fmt.Errorf("list overdue invoiced: %w", err)
 	}
@@ -363,20 +290,6 @@ func (r *Repository) UpdateAccommodationStripePrice(ctx context.Context, code, p
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("accommodation %q not found", code)
-	}
-	return nil
-}
-
-// ExtendInvoiceDueAt pushes the due date (admin action).
-func (r *Repository) ExtendInvoiceDueAt(ctx context.Context, groupID string, dueAt time.Time) error {
-	tag, err := r.db(ctx).Exec(ctx,
-		`UPDATE registration_groups SET invoice_due_at = $1 WHERE id = $2 AND billing_status = 'invoiced'`,
-		dueAt.UTC(), groupID)
-	if err != nil {
-		return fmt.Errorf("extend invoice due: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("group %q not found or not invoiced", groupID)
 	}
 	return nil
 }

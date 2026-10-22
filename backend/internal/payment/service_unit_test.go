@@ -19,15 +19,15 @@ func (f *fakeTx) WithTx(_ context.Context, fn func(context.Context) error) error
 type expiredRegRepo struct {
 	regRepo
 	group       *domain.Group
-	markCalls   int
+	setPaymentCalls int
 }
 
 func (f *expiredRegRepo) GetGroupBySession(_ context.Context, _ string) (*domain.Group, error) {
 	return f.group, nil
 }
 
-func (f *expiredRegRepo) MarkStatus(_ context.Context, _, _ string) error {
-	f.markCalls++
+func (f *expiredRegRepo) SetPaymentStatus(_ context.Context, _ string, _ domain.PaymentTransition) error {
+	f.setPaymentCalls++
 	return nil
 }
 
@@ -43,7 +43,7 @@ func TestHandleCheckoutExpired_NonPendingSkipsMarkStatus(t *testing.T) {
 	if err := svc.HandleCheckoutExpired(context.Background(), "sess_paid"); err != nil {
 		t.Fatalf("HandleCheckoutExpired: %v", err)
 	}
-	if repo.markCalls != 0 {
-		t.Fatalf("MarkStatus called %d times, want 0", repo.markCalls)
+	if repo.setPaymentCalls != 0 {
+		t.Fatalf("SetPaymentStatus called %d times, want 0", repo.setPaymentCalls)
 	}
 }

@@ -139,7 +139,7 @@ func (s *Service) EditCamper(
 		details.BilledStripePriceID = optStr(priceAfter)
 	}
 
-	if repriced && g.BillingStatus == domain.BillingBalancePaid {
+	if repriced && g.BalanceSettled() {
 		return EditCamperSummary{}, apperr.Invalid(
 			"this balance is already paid, so changes that alter what they owe " +
 				"have to be settled in Stripe; details that don't change the price " +
@@ -152,22 +152,23 @@ func (s *Service) EditCamper(
 		Repriced:     repriced,
 	}
 
-	newStatus := ""
-	if repriced && g.BillingStatus == domain.BillingInvoiced &&
-		g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" {
+	invoiceStale := false
+	if repriced && g.HasOpenInvoice() {
 		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeInvoiceID); err != nil {
 			return EditCamperSummary{}, apperr.Invalidf("invoice void failed; nothing was changed: %v", err)
 		}
 		summary.InvoiceVoided = true
-		newStatus = allocatedOrNone(campersAfterEdit(campers, camperID, details))
+		invoiceStale = true
 	}
+	after := campersAfterEdit(campers, camperID, details)
+	tr, _ := g.RosterChanged(after, invoiceStale)
 
 	meta := domain.ActionMeta{
 		Actor:           actor,
 		Action:          "camper_edited",
 		ExpectedVersion: expectedVersion,
 	}
-	if err := s.repo.UpdateCamperDetailsMeta(ctx, groupID, camperID, details, newStatus, meta); err != nil {
+	if err := s.repo.UpdateCamperDetailsMeta(ctx, groupID, camperID, details, meta, tr); err != nil {
 		return EditCamperSummary{}, mapVersionErr(ctx, s.repo, groupID, err)
 	}
 
@@ -205,7 +206,7 @@ func (s *Service) AddCamper(
 		return AddCamperSummary{}, apperr.Invalid(
 			"this family paid for camp in full at registration; add this person as their own registration")
 	}
-	if g.BillingStatus == domain.BillingBalancePaid {
+	if g.BalanceSettled() {
 		return AddCamperSummary{}, apperr.Invalid(
 			"this balance is already paid, so there is no invoice left to charge them on; " +
 				"add this person as their own registration")
@@ -238,20 +239,17 @@ func (s *Service) AddCamper(
 	// accommodation is what puts them in front of the White Team again, rather
 	// than leaving someone quietly unplaced on an allocated group.
 	addedFullWeek := c.Attendance.Type == domain.AttendanceFullWeek
-	newStatus := ""
-	if g.BillingStatus == domain.BillingInvoiced &&
-		g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" {
+	invoiceStale := false
+	if g.HasOpenInvoice() {
 		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeInvoiceID); err != nil {
 			return AddCamperSummary{}, apperr.Invalidf("invoice void failed; nobody was added: %v", err)
 		}
 		summary.InvoiceVoided = true
-		newStatus = domain.BillingNone
-		if !addedFullWeek {
-			newStatus = allocatedOrNone(campers)
-		}
-	} else if addedFullWeek && g.BillingStatus == domain.BillingAllocated {
-		newStatus = domain.BillingNone
+		invoiceStale = true
 	}
+	after := append([]domain.Camper{}, campers...)
+	after = append(after, domain.Camper{AttendanceType: c.Attendance.Type})
+	tr, _ := g.RosterChanged(after, invoiceStale)
 	summary.NeedsAllocation = addedFullWeek
 
 	meta := domain.ActionMeta{
@@ -259,7 +257,7 @@ func (s *Service) AddCamper(
 		Action:          "camper_added",
 		ExpectedVersion: expectedVersion,
 	}
-	camperID, err := s.repo.AddCamperMeta(ctx, groupID, c, depositOwed, newStatus, meta)
+	camperID, err := s.repo.AddCamperMeta(ctx, groupID, c, depositOwed, meta, tr)
 	if err != nil {
 		return AddCamperSummary{}, mapVersionErr(ctx, s.repo, groupID, err)
 	}
@@ -326,7 +324,7 @@ func (s *Service) WaiveCamperDeposit(
 	if g == nil {
 		return "", domain.ErrGroupNotFound
 	}
-	if g.BillingStatus == domain.BillingBalancePaid {
+	if g.BalanceSettled() {
 		return "", apperr.Invalid(
 			"this balance is already paid; there is no invoice left to take it off")
 	}
@@ -428,28 +426,6 @@ func coachEligibleAtAge(c domain.Camper, age int) bool {
 	return c.AttendanceType == domain.AttendanceFullWeek &&
 		c.NeedsCoach != nil && *c.NeedsCoach &&
 		age >= registration.MinDepositAge
-}
-
-// allocatedOrNone is the billing status a group falls back to once its invoice
-// is voided. It only claims to be allocated when every full-week camper actually
-// has a bed; otherwise the group goes back to needing accommodation. Claiming
-// "allocated" with someone unplaced strands the group — invoicing refuses it, and
-// the fix is buried in a screen that says everything is done.
-func allocatedOrNone(campers []domain.Camper) string {
-	anyFullWeek := false
-	for _, c := range campers {
-		if c.AttendanceType != domain.AttendanceFullWeek {
-			continue
-		}
-		anyFullWeek = true
-		if strVal(c.AllocatedAccommodationCode) == "" {
-			return domain.BillingNone
-		}
-	}
-	if anyFullWeek {
-		return domain.BillingAllocated
-	}
-	return domain.BillingNone
 }
 
 // campersAfterEdit is the roster as it will be once this edit lands, so the

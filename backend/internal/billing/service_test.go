@@ -1171,7 +1171,7 @@ func TestDeleteRegistration_stripeFailureAborts(t *testing.T) {
 
 	cases := map[string]struct {
 		stub           *stubStripe
-		billingStatus  string
+		billingStatus  domain.BillingStatus
 		coachInvoiceID *string
 	}{
 		"balance refund fails": {
@@ -1369,7 +1369,7 @@ func TestDeleteRegistration_invoicedVoidsAndDeletes(t *testing.T) {
 	}
 }
 
-func insertThreeCamperGroup(ctx context.Context, t *testing.T, pool *pgxpool.Pool, billingStatus string, stripeInvoiceID *string) (groupID, mainID, camper2ID, camper3ID string) {
+func insertThreeCamperGroup(ctx context.Context, t *testing.T, pool *pgxpool.Pool, billingStatus domain.BillingStatus, stripeInvoiceID *string) (groupID, mainID, camper2ID, camper3ID string) {
 	t.Helper()
 	inv := any(nil)
 	if stripeInvoiceID != nil {
@@ -1457,6 +1457,9 @@ func TestRemoveCamper_success(t *testing.T) {
 	}
 	if g.LastAction == nil || *g.LastAction != "camper_removed" {
 		t.Fatalf("last_action = %v", g.LastAction)
+	}
+	if g.BillingStatus != domain.BillingAllocated {
+		t.Fatalf("billing_status = %v, want allocated (remaining campers placed)", g.BillingStatus)
 	}
 }
 
@@ -1573,6 +1576,38 @@ func TestRemoveCamper_invoicedVoidsAndReverts(t *testing.T) {
 	}
 }
 
+// An unplaced full-week camper left behind sends the group back to needing
+// accommodation rather than "allocated" (plan Decision 1).
+func TestRemoveCamper_invoicedRevertsToNoneWhenFullWeekUnplaced(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	stub := &stubStripe{voidInvIdem: func(context.Context, string) error { return nil }}
+	svc := NewService(repo, stub, nil, nil, Config{})
+
+	inv := "in_remove_unplaced"
+	groupID, _, camper2ID, camper3ID := insertThreeCamperGroup(ctx, t, pool, domain.BillingInvoiced, &inv)
+	if _, err := pool.Exec(ctx,
+		`UPDATE registrations SET allocated_accommodation_code = NULL WHERE id = $1`, camper3ID); err != nil {
+		t.Fatalf("clear allocation: %v", err)
+	}
+
+	sum, err := svc.RemoveCamper(ctx, groupID, camper2ID, "Admin", domain.SkipVersionCheck)
+	if err != nil {
+		t.Fatalf("RemoveCamper: %v", err)
+	}
+	if !sum.InvoiceVoided {
+		t.Fatal("expected invoice voided")
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g == nil || g.BillingStatus != domain.BillingNone {
+		t.Fatalf("billing_status = %v, want none", g)
+	}
+	if g.StripeInvoiceID != nil {
+		t.Fatal("stripe_invoice_id should be cleared")
+	}
+}
+
 func TestRemoveCamper_freesAllocation(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
@@ -1630,7 +1665,7 @@ func TestRemoveCamper_sheetFailureNonFatal(t *testing.T) {
 
 // insertCoachGroup seeds a paid group with one full-week camper (age 30) who
 // needs the coach, allocated to `tier`, with the given billing_status.
-func insertCoachGroup(ctx context.Context, t *testing.T, pool *pgxpool.Pool, billingStatus, tier string, isFree bool) string {
+func insertCoachGroup(ctx context.Context, t *testing.T, pool *pgxpool.Pool, billingStatus domain.BillingStatus, tier string, isFree bool) string {
 	t.Helper()
 	var groupID string
 	err := pool.QueryRow(ctx, `
@@ -2072,7 +2107,7 @@ func TestUnwaiveCoachFee(t *testing.T) {
 	}
 }
 
-func insertTwoCoachGroup(ctx context.Context, t *testing.T, pool *pgxpool.Pool, billingStatus string) (groupID, camper1ID, camper2ID string) {
+func insertTwoCoachGroup(ctx context.Context, t *testing.T, pool *pgxpool.Pool, billingStatus domain.BillingStatus) (groupID, camper1ID, camper2ID string) {
 	t.Helper()
 	err := pool.QueryRow(ctx, `
 		INSERT INTO registration_groups (
@@ -2406,6 +2441,9 @@ func TestConvertCamperToDayVisitor_allocated(t *testing.T) {
 	if err != nil || g == nil {
 		t.Fatalf("FindGroupByID: %v", err)
 	}
+	if g.BillingStatus != domain.BillingAllocated {
+		t.Fatalf("billing_status = %v, want allocated (remaining campers placed)", g.BillingStatus)
+	}
 	if g.Version != 2 {
 		t.Fatalf("version = %d, want 2", g.Version)
 	}
@@ -2480,6 +2518,40 @@ func TestConvertCamperToDayVisitor_invoicedVoidsAndReverts(t *testing.T) {
 	}
 	if g.StripeInvoiceID != nil {
 		t.Fatal("stripe_invoice_id should be cleared")
+	}
+}
+
+// An unplaced full-week camper left behind sends the group back to needing
+// accommodation rather than "allocated" (plan Decision 1).
+func TestConvertCamperToDayVisitor_invoicedRevertsToNoneWhenFullWeekUnplaced(t *testing.T) {
+	pool := testhelper.MaybePool(t)
+	ctx := context.Background()
+	repo := storage.NewRepository(pool)
+	stub := &stubStripe{
+		voidInvIdem: func(context.Context, string) error { return nil },
+		ensureCust: func(_ context.Context, _, _, _, _ string) (string, error) {
+			return "cus_unplaced", nil
+		},
+	}
+	svc := NewService(repo, stub, nil, nil, Config{DepositPricePence: 5000})
+
+	inv := "in_convert_unplaced"
+	groupID, _, camper2ID, camper3ID := insertThreeCamperGroup(ctx, t, pool, domain.BillingInvoiced, &inv)
+	if _, err := pool.Exec(ctx,
+		`UPDATE registrations SET allocated_accommodation_code = NULL WHERE id = $1`, camper3ID); err != nil {
+		t.Fatalf("clear allocation: %v", err)
+	}
+
+	sum, err := svc.ConvertCamperToDayVisitor(ctx, groupID, camper2ID, "Admin", domain.SkipVersionCheck, validConvertRequest())
+	if err != nil {
+		t.Fatalf("ConvertCamperToDayVisitor: %v", err)
+	}
+	if !sum.InvoiceVoided {
+		t.Fatal("expected invoice voided")
+	}
+	g, _ := repo.FindGroupByID(ctx, groupID)
+	if g == nil || g.BillingStatus != domain.BillingNone {
+		t.Fatalf("billing_status = %v, want none", g)
 	}
 }
 
@@ -2652,7 +2724,7 @@ func (r *recordingSheets) AppendPending(_ context.Context, rows []sheets.Row) er
 	return nil
 }
 
-func insertDayPassGroup(ctx context.Context, t *testing.T, pool *pgxpool.Pool, billingStatus string) (groupID, camperID string) {
+func insertDayPassGroup(ctx context.Context, t *testing.T, pool *pgxpool.Pool, billingStatus domain.BillingStatus) (groupID, camperID string) {
 	t.Helper()
 	err := pool.QueryRow(ctx, `
 		INSERT INTO registration_groups (

@@ -37,6 +37,6 @@ func (f *fakeRepo) CampersForGroup(_ context.Context, groupID string) ([]domain.
 	return f.campers[groupID], nil
 }
 
-func (f *fakeRepo) AllocateGroup(_ context.Context, _ string, _ []domain.CamperAllocation, _ domain.ActionMeta) error {
+func (f *fakeRepo) AllocateGroup(_ context.Context, _ string, _ []domain.CamperAllocation, _ domain.ActionMeta, _ domain.BillingTransition) error {
 	return f.allocateErr
 }

@@ -16,8 +16,8 @@ type groupRepo interface {
 	InsertGroup(ctx context.Context, req domain.SubmitRequest, totalPence int, currency string, isFree, paidInFull bool) (string, error)
 	InsertCamper(ctx context.Context, groupID string, c domain.CamperDTO) error
 	MarkFreeCodeUsed(ctx context.Context, codeID, groupID string) error
-	MarkPaid(ctx context.Context, groupID, paymentIntentID string) error
-	MarkPaidInFull(ctx context.Context, groupID, paymentIntentID string, coachIncluded bool) error
+	ApplySettlement(ctx context.Context, groupID, paymentIntentID string, coachIncluded bool, s domain.Settlement) error
+	SetPaymentStatus(ctx context.Context, groupID string, tr domain.PaymentTransition) error
 	SetStripeSession(ctx context.Context, groupID, sessionID string) error
 	ListAccommodationTypes(ctx context.Context) ([]domain.AccommodationType, error)
 	ListAccommodationUnits(ctx context.Context) ([]domain.AccommodationUnit, error)
@@ -30,5 +30,4 @@ type groupRepo interface {
 	RevokeFreeCode(ctx context.Context, id string) error
 	ListWithBilling(ctx context.Context, f domain.ListFilterBilling) ([]domain.Group, error)
 	CampersForGroups(ctx context.Context, groupIDs []string) ([]domain.Camper, error)
-	MarkStatus(ctx context.Context, groupID, status string) error
 }

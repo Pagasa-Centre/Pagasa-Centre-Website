@@ -77,14 +77,9 @@ func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedV
 	if g == nil {
 		return domain.ErrGroupNotFound
 	}
-	if g.PaymentStatus != domain.PaymentPaid {
-		return apperr.Invalid("deposit must be paid before allocation")
-	}
-	if g.BillingStatus == domain.BillingInvoiced {
-		return apperr.Invalid("cannot change allocation while invoice is open; release first")
-	}
-	if g.BillingStatus == domain.BillingBalancePaid && !g.PaidInFullAtRegistration {
-		return domain.ErrBalancePaid
+	tr, err := g.Allocate()
+	if err != nil {
+		return err
 	}
 
 	campers, err := s.repo.CampersForGroup(ctx, groupID)
@@ -156,7 +151,7 @@ func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedV
 		Action:          "allocated",
 		ExpectedVersion: expectedVersion,
 	}
-	if err := s.repo.AllocateGroup(ctx, groupID, allocs, meta); err != nil {
+	if err := s.repo.AllocateGroup(ctx, groupID, allocs, meta, tr); err != nil {
 		return mapVersionErr(ctx, s.repo, groupID, err)
 	}
 	return nil
@@ -173,20 +168,16 @@ func (s *Service) Unallocate(ctx context.Context, groupID, actor string, expecte
 	if g == nil {
 		return domain.ErrGroupNotFound
 	}
-	switch g.BillingStatus {
-	case domain.BillingInvoiced:
-		return ErrInvoiceOpen
-	case domain.BillingBalancePaid:
-		if !g.PaidInFullAtRegistration {
-			return domain.ErrBalancePaid
-		}
+	tr, err := g.Unallocate()
+	if err != nil {
+		return err
 	}
 	meta := domain.ActionMeta{
 		Actor:           actor,
 		Action:          "unallocated",
 		ExpectedVersion: expectedVersion,
 	}
-	if err := s.repo.UnallocateGroup(ctx, groupID, meta); err != nil {
+	if err := s.repo.UnallocateGroup(ctx, groupID, meta, tr); err != nil {
 		return mapVersionErr(ctx, s.repo, groupID, err)
 	}
 	return nil
@@ -232,15 +223,6 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 	if g == nil {
 		return domain.ErrGroupNotFound
 	}
-	if g.IsFree {
-		return apperr.Invalid("this is a church-sponsored registration; confirm the sponsorship instead of invoicing")
-	}
-	if g.PaidInFullAtRegistration {
-		return apperr.Invalid("this family paid in full at registration; there is nothing to invoice")
-	}
-	if g.PaymentStatus != domain.PaymentPaid {
-		return domain.ErrDepositUnpaid
-	}
 	campers, err := s.repo.CampersForGroup(ctx, groupID)
 	if err != nil {
 		return fmt.Errorf("operation: %w", err)
@@ -252,19 +234,9 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 			break
 		}
 	}
-
-	switch g.BillingStatus {
-	case domain.BillingBalancePaid:
-		return domain.ErrBalancePaid
-	case domain.BillingInvoiced:
-		return ErrInvoiceAlreadySent
-	case domain.BillingNone, domain.BillingReleased:
-		// Full-week campers must be allocated before invoicing. Day-pass-only
-		// groups have no accommodation to allocate, so they invoice straight
-		// from "none".
-		if hasFullWeek {
-			return apperr.Invalid("group must be allocated before invoicing")
-		}
+	tr, err := g.Invoice(hasFullWeek)
+	if err != nil {
+		return err
 	}
 
 	var lines []InvoiceLine
@@ -356,7 +328,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 		Action:          "invoice_sent",
 		ExpectedVersion: expectedVersion,
 	}
-	if err := s.repo.SetInvoiceDetailsMeta(ctx, groupID, res.ID, res.DueAt, coachIncluded, meta); err != nil {
+	if err := s.repo.SetInvoiceDetailsMeta(ctx, groupID, res.ID, res.DueAt, coachIncluded, meta, tr); err != nil {
 		return mapVersionErr(ctx, s.repo, groupID, err)
 	}
 	accNames := s.accommodationNames(ctx)
@@ -610,21 +582,16 @@ func (s *Service) ConfirmFree(ctx context.Context, groupID, actor string, expect
 	if g == nil {
 		return domain.ErrGroupNotFound
 	}
-	if !g.IsFree {
-		return apperr.Invalid("this group is not church-sponsored")
-	}
-	if g.PaymentStatus != domain.PaymentPaid {
-		return domain.ErrDepositUnpaid
-	}
-	if g.BillingStatus != domain.BillingAllocated {
-		return apperr.Invalid("group must be allocated before confirming sponsorship")
+	tr, err := g.ConfirmSponsorship()
+	if err != nil {
+		return err
 	}
 	meta := domain.ActionMeta{
 		Actor:           actor,
 		Action:          "free_confirmed",
 		ExpectedVersion: expectedVersion,
 	}
-	if err := s.repo.ConfirmFreeMeta(ctx, groupID, meta); err != nil {
+	if err := s.repo.ConfirmFreeMeta(ctx, groupID, meta, tr); err != nil {
 		return mapVersionErr(ctx, s.repo, groupID, err)
 	}
 	s.sendSponsorshipConfirmedEmail(ctx, g)
@@ -666,19 +633,9 @@ func (s *Service) MarkBalancePaidManually(ctx context.Context, groupID, actor st
 	if g == nil {
 		return domain.ErrGroupNotFound
 	}
-	if g.PaymentStatus != domain.PaymentPaid {
-		return domain.ErrDepositUnpaid
-	}
-	if g.IsFree {
-		return apperr.Invalid(
-			"church-sponsored groups are settled with Confirm sponsorship")
-	}
-	switch g.BillingStatus {
-	case domain.BillingAllocated, domain.BillingInvoiced:
-	default:
-		return apperr.Invalid(
-			"only allocated or invoiced groups can be marked paid; this group is "+
-				billingStatusLabel(g.BillingStatus))
+	tr, err := g.MarkBalancePaidManually()
+	if err != nil {
+		return err
 	}
 
 	amountLabel := ""
@@ -700,7 +657,7 @@ func (s *Service) MarkBalancePaidManually(ctx context.Context, groupID, actor st
 		Action:          "balance_paid",
 		ExpectedVersion: expectedVersion,
 	}
-	if err := s.repo.MarkBalancePaidMeta(ctx, groupID, meta); err != nil {
+	if err := s.repo.MarkBalancePaidMeta(ctx, groupID, meta, tr); err != nil {
 		return mapVersionErr(ctx, s.repo, groupID, err)
 	}
 
@@ -769,12 +726,13 @@ func (s *Service) VoidAndRelease(ctx context.Context, groupID, reason, actor str
 	if cancelled {
 		action = "cancel"
 	}
+	tr := g.Release()
 	meta := domain.ActionMeta{
 		Actor:           actor,
 		Action:          action,
 		ExpectedVersion: expectedVersion,
 	}
-	if err := s.repo.ClearInvoiceAndReleaseMeta(ctx, groupID, meta); err != nil {
+	if err := s.repo.ClearInvoiceAndReleaseMeta(ctx, groupID, meta, tr); err != nil {
 		return mapVersionErr(ctx, s.repo, groupID, err)
 	}
 
@@ -845,27 +803,25 @@ func (s *Service) RemoveCamper(ctx context.Context, groupID, camperID, actor str
 	if len(campers) <= 1 {
 		return RemoveCamperSummary{}, apperr.Invalid("this is the last camper; delete the whole registration instead")
 	}
-	if g.BillingStatus == domain.BillingBalancePaid {
+	if g.BalanceSettled() {
 		return RemoveCamperSummary{}, apperr.Invalid("balance already paid; refund/handle in Stripe first")
 	}
 
-	newStatus := ""
-	if g.BillingStatus == domain.BillingInvoiced && g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" {
+	invoiceStale := false
+	if g.HasOpenInvoice() {
 		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeInvoiceID); err != nil {
 			return RemoveCamperSummary{}, apperr.Invalidf("invoice void failed; camper was not removed: %v", err)
 		}
 		summary.InvoiceVoided = true
-		newStatus = domain.BillingNone
-		for _, c := range campers {
-			if c.ID == camperID {
-				continue
-			}
-			if c.AttendanceType == domain.AttendanceFullWeek {
-				newStatus = domain.BillingAllocated
-				break
-			}
+		invoiceStale = true
+	}
+	after := make([]domain.Camper, 0, len(campers)-1)
+	for _, c := range campers {
+		if c.ID != camperID {
+			after = append(after, c)
 		}
 	}
+	tr, _ := g.RosterChanged(after, invoiceStale)
 
 	// If removing this camper leaves no coach passengers, void any open (unpaid)
 	// separate coach invoice so a departed passenger's fee can't still be paid.
@@ -891,7 +847,7 @@ func (s *Service) RemoveCamper(ctx context.Context, groupID, camperID, actor str
 		Action:          "camper_removed",
 		ExpectedVersion: expectedVersion,
 	}
-	if err := s.repo.DeleteCamperMeta(ctx, groupID, camperID, newStatus, meta); err != nil {
+	if err := s.repo.DeleteCamperMeta(ctx, groupID, camperID, meta, tr); err != nil {
 		return RemoveCamperSummary{}, mapVersionErr(ctx, s.repo, groupID, err)
 	}
 
@@ -968,7 +924,7 @@ func (s *Service) ConvertCamperToDayVisitor(
 		return ConvertSummary{}, apperr.Invalid(
 			"church-sponsored registrations can't be converted here; handle manually")
 	}
-	if g.BillingStatus == domain.BillingBalancePaid {
+	if g.BalanceSettled() {
 		return ConvertSummary{}, apperr.Invalid("balance already paid; handle in Stripe first")
 	}
 
@@ -1019,23 +975,21 @@ func (s *Service) ConvertCamperToDayVisitor(
 		}
 	}
 
-	newStatus := ""
-	if g.BillingStatus == domain.BillingInvoiced && g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" {
+	invoiceStale := false
+	if g.HasOpenInvoice() {
 		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeInvoiceID); err != nil {
 			return ConvertSummary{}, apperr.Invalidf("invoice void failed; camper was not converted: %v", err)
 		}
 		summary.InvoiceVoided = true
-		newStatus = domain.BillingNone
-		for _, c := range campers {
-			if c.ID == camperID {
-				continue
-			}
-			if c.AttendanceType == domain.AttendanceFullWeek {
-				newStatus = domain.BillingAllocated
-				break
-			}
+		invoiceStale = true
+	}
+	after := make([]domain.Camper, 0, len(campers)-1)
+	for _, c := range campers {
+		if c.ID != camperID {
+			after = append(after, c)
 		}
 	}
+	tr, _ := g.RosterChanged(after, invoiceStale)
 
 	var shirtSize *string
 	switch req.TshirtOption {
@@ -1064,7 +1018,7 @@ func (s *Service) ConvertCamperToDayVisitor(
 		Action:          "camper_converted",
 		ExpectedVersion: expectedVersion,
 	}
-	if err := s.repo.ConvertCamperToDayPassMeta(ctx, groupID, camperID, dp, depositCreditPence, newStatus, meta); err != nil {
+	if err := s.repo.ConvertCamperToDayPassMeta(ctx, groupID, camperID, dp, depositCreditPence, meta, tr); err != nil {
 		return ConvertSummary{}, mapVersionErr(ctx, s.repo, groupID, err)
 	}
 
@@ -1311,7 +1265,7 @@ func sheetRowsForGroup(g *domain.Group, campers []domain.Camper) []sheets.Row {
 	for _, c := range campers {
 		rows = append(rows, sheets.Row{
 			GroupID:                   g.ID,
-			PaymentStatus:             g.PaymentStatus,
+			PaymentStatus:             string(g.PaymentStatus),
 			SubmittedAt:               g.CreatedAt,
 			PaidAt:                    g.PaidAt,
 			TotalAmountPence:          g.TotalAmountPence,
@@ -1387,7 +1341,7 @@ func (s *Service) ResyncSheet(ctx context.Context, groupID, actor string, expect
 		Action:          "sheet_resynced",
 		ExpectedVersion: expectedVersion,
 	}
-	if err := s.repo.StampOnly(ctx, groupID, meta); err != nil {
+	if err := s.repo.StampOnly(ctx, groupID, meta, domain.BillingTransition{}); err != nil {
 		return mapVersionErr(ctx, s.repo, groupID, err)
 	}
 	return nil
@@ -1398,7 +1352,7 @@ func (s *Service) ResyncSheet(ctx context.Context, groupID, actor string, expect
 func (s *Service) ResyncAllSheets(ctx context.Context, actor string) (int, map[string]error) {
 	errs := map[string]error{}
 	synced := 0
-	for _, status := range []string{domain.PaymentPaid, domain.PaymentPending} {
+	for _, status := range []domain.PaymentStatus{domain.PaymentPaid, domain.PaymentPending} {
 		groups, err := s.repo.ListWithBilling(ctx, domain.ListFilterBilling{PaymentStatus: status})
 		if err != nil {
 			errs["_list"] = err
@@ -1481,7 +1435,7 @@ func (s *Service) DeleteRegistration(ctx context.Context, groupID, actor string,
 
 	var refundTotal int64
 
-	if g.BillingStatus == domain.BillingBalancePaid && g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" {
+	if g.BalanceSettled() && g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" {
 		amt, err := s.stripe.RefundInvoiceKeeping(ctx, *g.StripeInvoiceID, depositOnInvoice)
 		if err != nil {
 			return DeleteSummary{}, apperr.Invalidf("balance refund failed; registration was not deleted: %v", err)
@@ -1535,8 +1489,9 @@ func (s *Service) ResendInvoice(ctx context.Context, groupID, actor string, expe
 	if g.StripeInvoiceID == nil || *g.StripeInvoiceID == "" {
 		return apperr.Invalid("no invoice on file")
 	}
-	if g.BillingStatus != domain.BillingInvoiced {
-		return apperr.Invalid("invoice is not open")
+	openTR, err := g.RequireOpenInvoice()
+	if err != nil {
+		return err
 	}
 	// Primary: ask Stripe to re-email. If it succeeds, stamp and return.
 	if err := s.stripe.SendInvoiceEmail(ctx, *g.StripeInvoiceID); err == nil {
@@ -1545,7 +1500,7 @@ func (s *Service) ResendInvoice(ctx context.Context, groupID, actor string, expe
 			Action:          "invoice_resent",
 			ExpectedVersion: expectedVersion,
 		}
-		if err := s.repo.StampOnly(ctx, groupID, meta); err != nil {
+		if err := s.repo.StampOnly(ctx, groupID, meta, openTR); err != nil {
 			return mapVersionErr(ctx, s.repo, groupID, err)
 		}
 		return nil
@@ -1583,7 +1538,7 @@ func (s *Service) ResendInvoice(ctx context.Context, groupID, actor string, expe
 		Action:          "invoice_resent",
 		ExpectedVersion: expectedVersion,
 	}
-	if err := s.repo.StampOnly(ctx, groupID, meta); err != nil {
+	if err := s.repo.StampOnly(ctx, groupID, meta, openTR); err != nil {
 		return mapVersionErr(ctx, s.repo, groupID, err)
 	}
 	return nil
@@ -1591,12 +1546,23 @@ func (s *Service) ResendInvoice(ctx context.Context, groupID, actor string, expe
 
 // ExtendDueAt updates the stored due date (Stripe due date is informational after send).
 func (s *Service) ExtendDueAt(ctx context.Context, groupID, actor string, expectedVersion int, dueAt time.Time) error {
+	g, err := s.repo.FindGroupByID(ctx, groupID)
+	if err != nil {
+		return fmt.Errorf("operation: %w", err)
+	}
+	if g == nil {
+		return domain.ErrGroupNotFound
+	}
+	tr, err := g.RequireOpenInvoice()
+	if err != nil {
+		return err
+	}
 	meta := domain.ActionMeta{
 		Actor:           actor,
 		Action:          "extend_due",
 		ExpectedVersion: expectedVersion,
 	}
-	if err := s.repo.ExtendInvoiceDueAtMeta(ctx, groupID, dueAt, meta); err != nil {
+	if err := s.repo.ExtendInvoiceDueAtMeta(ctx, groupID, dueAt, meta, tr); err != nil {
 		return mapVersionErr(ctx, s.repo, groupID, err)
 	}
 	return nil
@@ -1615,14 +1581,15 @@ func (s *Service) HandleInvoicePaid(ctx context.Context, stripeInvoiceID, groupI
 			return fmt.Errorf("group not found for invoice %s", stripeInvoiceID)
 		}
 	}
-	if g.BillingStatus == domain.BillingBalancePaid {
+	tr, already := g.SettleBalance()
+	if already {
 		return nil
 	}
 	if err := s.repo.MarkBalancePaidMeta(ctx, g.ID, domain.ActionMeta{
 		Actor:           "Stripe",
 		Action:          "balance_paid",
 		ExpectedVersion: domain.SkipVersionCheck,
-	}); err != nil {
+	}, tr); err != nil {
 		return err
 	}
 	campers, _ := s.repo.CampersForGroup(ctx, g.ID)
