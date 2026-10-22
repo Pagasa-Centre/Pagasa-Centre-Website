@@ -14,7 +14,7 @@ func AllocateToDomain(req dto.AllocateRequest) allocation.AllocateRequest {
 			CamperID:                   c.CamperID,
 			AllocatedAccommodationCode: c.AllocatedAccommodationCode,
 			AllocatedUnitCode:          c.AllocatedUnitCode,
-			BilledStripePriceID:        c.BilledStripePriceID,
+			BilledPriceRef:             c.BilledPriceRef,
 		}
 	}
 	return allocation.AllocateRequest{Campers: campers}

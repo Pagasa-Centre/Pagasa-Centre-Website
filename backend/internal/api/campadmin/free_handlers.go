@@ -5,25 +5,25 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"pagasacentre/backend/internal/admin"
 	admindto "pagasacentre/backend/internal/api/campadmin/dto"
 	"pagasacentre/backend/internal/api/campadmin/dto/mapper"
+	"pagasacentre/backend/internal/auth"
 	"pagasacentre/backend/internal/billing"
 	usecase "pagasacentre/backend/internal/campadmin"
-	"pagasacentre/backend/internal/middleware"
 	"pagasacentre/backend/internal/registration"
+	"pagasacentre/backend/pkg/commonlibrary/apperr"
 	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 	"pagasacentre/backend/pkg/commonlibrary/render"
 	"pagasacentre/backend/pkg/commonlibrary/request"
 )
 
-func postGenerateFreeCode(auth middleware.AuthConfig, svc *usecase.Service) http.HandlerFunc {
+func postGenerateFreeCode(authSvc *auth.Service, svc *usecase.Service) http.HandlerFunc {
 	type body struct {
 		Password string `json:"password"`
 		Note     string `json:"note"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		if auth.FreeCodePassword == "" {
+		if !authSvc.SponsorshipCodesEnabled() {
 			commonerrors.WriteError(w, commonerrors.APIError{
 				Code:    "forbidden",
 				Message: "sponsorship codes are not configured on this server",
@@ -35,11 +35,11 @@ func postGenerateFreeCode(auth middleware.AuthConfig, svc *usecase.Service) http
 			commonerrors.WriteError(w, err)
 			return
 		}
-		if !auth.FreeCodePasswordMatches(b.Password) {
-			http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		if !authSvc.FreeCodePasswordMatches(b.Password) {
+			commonerrors.WriteError(w, apperr.Unauthorized("invalid credentials"))
 			return
 		}
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		code, err := svc.GenerateFreeCode(r.Context(), actor, b.Note)
 		if err != nil {
 			commonerrors.WriteError(w, err)
@@ -63,7 +63,7 @@ func getFreeCodes(svc *registration.Service) http.HandlerFunc {
 func postRevokeFreeCode(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		if err := svc.RevokeFreeCode(r.Context(), admin.ActorFrom(r.Context()), id); err != nil {
+		if err := svc.RevokeFreeCode(r.Context(), auth.ActorFrom(r.Context()), id); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
@@ -76,7 +76,7 @@ func postConfirmFree(svc *usecase.Service) http.HandlerFunc {
 		var body admindto.VersionedBody
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		if err := svc.ConfirmFree(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
 			commonerrors.WriteError(w, err)
 			return

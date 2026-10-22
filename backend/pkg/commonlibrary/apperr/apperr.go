@@ -9,7 +9,9 @@ const (
 	KindInvalid              // business rule rejected the request
 	KindNotFound
 	KindConflict
-	KindValidation // per-field input errors
+	KindValidation   // per-field input errors
+	KindUnauthorized // auth rejected
+	KindRateLimited  // too many attempts
 )
 
 // Error is a transport-neutral application error returned by services.
@@ -48,4 +50,12 @@ func Validation(fields map[string]string) *Error {
 		Message: "Validation failed",
 		Fields:  fields,
 	}
+}
+
+func Unauthorized(msg string) *Error {
+	return &Error{Kind: KindUnauthorized, Message: msg}
+}
+
+func RateLimited(msg string) *Error {
+	return &Error{Kind: KindRateLimited, Message: msg}
 }

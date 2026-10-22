@@ -20,7 +20,6 @@ import (
 	"pagasacentre/backend/internal/billing/sweep"
 	sweepstorage "pagasacentre/backend/internal/billing/sweep/storage"
 	"pagasacentre/backend/internal/email"
-	"pagasacentre/backend/internal/registration"
 	regstorage "pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/sheets"
 )
@@ -42,11 +41,11 @@ func NewEnv(t *testing.T, pool *pgxpool.Pool, stripe invoicingStripe, mail email
 }
 
 // NewEnvWithPrices is like NewEnv but wires a live deposit price lookup (late-arrival tests).
-func NewEnvWithPrices(t *testing.T, pool *pgxpool.Pool, stripe invoicingStripe, mail email.Mailer, sheetSync sheets.Sync, cfg billing.Config, prices registration.PriceLookup) *Env {
+func NewEnvWithPrices(t *testing.T, pool *pgxpool.Pool, stripe invoicingStripe, mail email.Mailer, sheetSync sheets.Sync, cfg billing.Config, prices billing.PriceLookup) *Env {
 	return newEnv(t, pool, stripe, mail, sheetSync, cfg, prices)
 }
 
-func newEnv(t *testing.T, pool *pgxpool.Pool, stripe invoicingStripe, mail email.Mailer, sheetSync sheets.Sync, cfg billing.Config, prices registration.PriceLookup) *Env {
+func newEnv(t *testing.T, pool *pgxpool.Pool, stripe invoicingStripe, mail email.Mailer, sheetSync sheets.Sync, cfg billing.Config, prices billing.PriceLookup) *Env {
 	t.Helper()
 	repo := regstorage.NewRepository(pool)
 	pricer := billing.NewPricer(repo, cfg, prices)
@@ -76,7 +75,7 @@ func newEnv(t *testing.T, pool *pgxpool.Pool, stripe invoicingStripe, mail email
 	}
 }
 
-// invoicingStripe is satisfied by billingtest.StubStripe and *billing.StripeBilling.
+// invoicingStripe is satisfied by billingtest.StubStripe and *stripe.BillingClient.
 type invoicingStripe interface {
 	EnsureCustomer(ctx context.Context, existingID, email, name, groupID string) (string, error)
 	CreateInvoice(ctx context.Context, customerID, groupID string, lines []billing.InvoiceLine, daysUntilDue int64, invoiceType string) (billing.InvoiceResult, error)

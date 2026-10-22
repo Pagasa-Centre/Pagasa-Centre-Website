@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"pagasacentre/backend/internal/email"
-	"pagasacentre/backend/internal/registration"
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/internal/sheets"
 )
@@ -52,7 +51,7 @@ func CoachEligibleCount(campers []domain.Camper) int64 {
 		if c.AttendanceType != domain.AttendanceFullWeek {
 			continue
 		}
-		if c.NeedsCoach != nil && *c.NeedsCoach && c.Age >= registration.MinDepositAge {
+		if c.CoachEligible() {
 			n++
 		}
 	}
@@ -168,7 +167,7 @@ func OffPreferenceChanges(campers []domain.Camper, accNames map[string]string) [
 			FirstChoice:  accDisplayName(accNames, first),
 			SecondChoice: accDisplayName(accNames, second),
 			Allocated:    accDisplayName(accNames, alloc),
-			TentGuidance: alloc == registration.AccommodationTent,
+			TentGuidance: alloc == domain.AccommodationTent,
 		})
 	}
 	return out

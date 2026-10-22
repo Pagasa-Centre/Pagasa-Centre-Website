@@ -15,7 +15,7 @@ func StampOnly(ctx context.Context, pool *pgxpool.Pool, groupID string, meta dom
 	return StampPool(ctx, pool, groupID, meta, tr, "")
 }
 
-func SetStripeCustomerID(ctx context.Context, pool *pgxpool.Pool, groupID, customerID string) error {
+func SetBillingCustomerRef(ctx context.Context, pool *pgxpool.Pool, groupID, customerID string) error {
 	_, err := commondb.Conn(ctx, pool).Exec(ctx,
 		`UPDATE registration_groups SET stripe_customer_id = $1 WHERE id = $2`,
 		customerID, groupID)

@@ -10,14 +10,14 @@ import (
 	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
 
-type StripePriceAmounts interface {
+type PriceAmounts interface {
 	Amount(ctx context.Context, priceID string) (int64, string, error)
 }
 
 type Config struct {
-	StripePriceChildUnder3 string
-	StripePriceDayPass     string
-	StripePriceCoach       string
+	ChildUnder3PriceRef string
+	DayPassPriceRef     string
+	CoachPriceRef       string
 }
 
 // CheckoutLine is one dynamic Stripe Checkout line item.
@@ -51,24 +51,6 @@ type PricingSnapshot struct {
 	CoachAmountPence       int
 }
 
-// AccommodationPriceID mirrors the billing resolver so both modes price a
-// given tier + age from the same Stripe Price.
-func AccommodationPriceID(code string, age int, tier *domain.AccommodationType, childUnder3PriceID string) (string, error) {
-	if code == AccommodationChild && age < MinDepositAge {
-		if childUnder3PriceID == "" {
-			return "", fmt.Errorf("STRIPE_PRICE_CHILD_UNDER3 is not configured")
-		}
-		return childUnder3PriceID, nil
-	}
-	if tier == nil {
-		return "", fmt.Errorf("unknown accommodation %q", code)
-	}
-	if tier.StripePriceID == nil || strings.TrimSpace(*tier.StripePriceID) == "" {
-		return "", fmt.Errorf("accommodation %q has no stripe_price_id configured", code)
-	}
-	return strings.TrimSpace(*tier.StripePriceID), nil
-}
-
 func (s *Service) computeCharge(ctx context.Context, req domain.Submission, mode string) (charge, error) {
 	deposit, err := s.prices.GetPrice(ctx, domain.PriceDeposit)
 	if err != nil {
@@ -93,7 +75,7 @@ func (s *Service) computeCharge(ctx context.Context, req domain.Submission, mode
 		return charge{totalPence: total, currency: currency, lines: lines}, nil
 	}
 
-	if s.stripeAmounts == nil {
+	if s.priceAmounts == nil {
 		return charge{}, fmt.Errorf("stripe price catalog not configured")
 	}
 
@@ -136,11 +118,11 @@ func (s *Service) computeCharge(ctx context.Context, req domain.Submission, mode
 			return charge{}, fmt.Errorf("full-week camper missing accommodation first choice")
 		}
 		tier := tierByCode[code]
-		priceID, err := AccommodationPriceID(code, c.Age, &tier, s.cfg.StripePriceChildUnder3)
+		priceID, err := domain.AccommodationPriceID(code, c.Age, &tier, s.cfg.ChildUnder3PriceRef)
 		if err != nil {
 			return charge{}, err
 		}
-		unit, cur, err := s.stripeAmounts.Amount(ctx, priceID)
+		unit, cur, err := s.priceAmounts.Amount(ctx, priceID)
 		if err != nil {
 			return charge{}, fmt.Errorf("lookup price for %s: %w", code, err)
 		}
@@ -171,10 +153,10 @@ func (s *Service) computeCharge(ctx context.Context, req domain.Submission, mode
 		}
 	}
 	if dayPassDays > 0 {
-		if s.cfg.StripePriceDayPass == "" {
+		if s.cfg.DayPassPriceRef == "" {
 			return charge{}, fmt.Errorf("STRIPE_PRICE_DAY_PASS is not configured")
 		}
-		unit, cur, err := s.stripeAmounts.Amount(ctx, s.cfg.StripePriceDayPass)
+		unit, cur, err := s.priceAmounts.Amount(ctx, s.cfg.DayPassPriceRef)
 		if err != nil {
 			return charge{}, fmt.Errorf("lookup day pass price: %w", err)
 		}
@@ -193,10 +175,10 @@ func (s *Service) computeCharge(ctx context.Context, req domain.Submission, mode
 
 	coachCount := coachEligibleCountFromRequest(req)
 	if coachCount > 0 {
-		if s.cfg.StripePriceCoach == "" {
+		if s.cfg.CoachPriceRef == "" {
 			return charge{}, fmt.Errorf("STRIPE_PRICE_COACH is not configured")
 		}
-		unit, cur, err := s.stripeAmounts.Amount(ctx, s.cfg.StripePriceCoach)
+		unit, cur, err := s.priceAmounts.Amount(ctx, s.cfg.CoachPriceRef)
 		if err != nil {
 			return charge{}, fmt.Errorf("lookup coach price: %w", err)
 		}
@@ -222,7 +204,7 @@ func coachEligibleCountFromRequest(req domain.Submission) int64 {
 		if c.Attendance.Type != domain.AttendanceFullWeek {
 			continue
 		}
-		if c.Attendance.NeedsCoach != nil && *c.Attendance.NeedsCoach && c.Age >= MinDepositAge {
+		if c.CoachEligible() {
 			n++
 		}
 	}
@@ -261,7 +243,7 @@ func (s *Service) PricingSnapshot(ctx context.Context) (*PricingSnapshot, error)
 		return snap, nil
 	}
 
-	if s.stripeAmounts == nil {
+	if s.priceAmounts == nil {
 		return nil, errors.New("stripe price catalog not configured")
 	}
 
@@ -271,14 +253,14 @@ func (s *Service) PricingSnapshot(ctx context.Context) (*PricingSnapshot, error)
 	}
 
 	for _, t := range tiers {
-		if !t.AvailableForRegistration && t.Code != AccommodationChild {
+		if !t.AvailableForRegistration && t.Code != domain.AccommodationChild {
 			continue
 		}
-		priceID, err := AccommodationPriceID(t.Code, MinDepositAge, &t, s.cfg.StripePriceChildUnder3)
+		priceID, err := domain.AccommodationPriceID(t.Code, domain.MinDepositAge, &t, s.cfg.ChildUnder3PriceRef)
 		if err != nil {
 			continue
 		}
-		amount, cur, err := s.stripeAmounts.Amount(ctx, priceID)
+		amount, cur, err := s.priceAmounts.Amount(ctx, priceID)
 		if err != nil {
 			return nil, errors.New(err.Error())
 		}
@@ -292,8 +274,8 @@ func (s *Service) PricingSnapshot(ctx context.Context) (*PricingSnapshot, error)
 		})
 	}
 
-	if s.cfg.StripePriceChildUnder3 != "" {
-		amount, cur, err := s.stripeAmounts.Amount(ctx, s.cfg.StripePriceChildUnder3)
+	if s.cfg.ChildUnder3PriceRef != "" {
+		amount, cur, err := s.priceAmounts.Amount(ctx, s.cfg.ChildUnder3PriceRef)
 		if err != nil {
 			return nil, errors.New(err.Error())
 		}
@@ -303,8 +285,8 @@ func (s *Service) PricingSnapshot(ctx context.Context) (*PricingSnapshot, error)
 		snap.ChildUnder3AmountPence = int(amount)
 	}
 
-	if s.cfg.StripePriceDayPass != "" {
-		amount, cur, err := s.stripeAmounts.Amount(ctx, s.cfg.StripePriceDayPass)
+	if s.cfg.DayPassPriceRef != "" {
+		amount, cur, err := s.priceAmounts.Amount(ctx, s.cfg.DayPassPriceRef)
 		if err != nil {
 			return nil, errors.New(err.Error())
 		}
@@ -314,8 +296,8 @@ func (s *Service) PricingSnapshot(ctx context.Context) (*PricingSnapshot, error)
 		snap.DayPassAmountPence = int(amount)
 	}
 
-	if s.cfg.StripePriceCoach != "" {
-		amount, cur, err := s.stripeAmounts.Amount(ctx, s.cfg.StripePriceCoach)
+	if s.cfg.CoachPriceRef != "" {
+		amount, cur, err := s.priceAmounts.Amount(ctx, s.cfg.CoachPriceRef)
 		if err != nil {
 			return nil, errors.New(err.Error())
 		}
@@ -338,7 +320,7 @@ func (s *Service) ValidateFullPaymentPricing(ctx context.Context) error {
 		currency = "GBP"
 	}
 
-	if s.stripeAmounts == nil {
+	if s.priceAmounts == nil {
 		return apperr.Invalid("stripe price catalog not configured")
 	}
 
@@ -349,7 +331,7 @@ func (s *Service) ValidateFullPaymentPricing(ctx context.Context) error {
 			problems = append(problems, label+" is not configured")
 			return
 		}
-		amount, cur, err := s.stripeAmounts.Amount(ctx, priceID)
+		amount, cur, err := s.priceAmounts.Amount(ctx, priceID)
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("%s: %v", label, err))
 			return
@@ -368,10 +350,10 @@ func (s *Service) ValidateFullPaymentPricing(ctx context.Context) error {
 	}
 
 	for _, t := range tiers {
-		if !t.AvailableForRegistration && t.Code != AccommodationChild {
+		if !t.AvailableForRegistration && t.Code != domain.AccommodationChild {
 			continue
 		}
-		priceID, err := AccommodationPriceID(t.Code, MinDepositAge, &t, s.cfg.StripePriceChildUnder3)
+		priceID, err := domain.AccommodationPriceID(t.Code, domain.MinDepositAge, &t, s.cfg.ChildUnder3PriceRef)
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("%s: %v", t.DisplayName, err))
 			continue
@@ -379,9 +361,9 @@ func (s *Service) ValidateFullPaymentPricing(ctx context.Context) error {
 		checkPrice(t.DisplayName, priceID)
 	}
 
-	checkPrice("Child under 3 (STRIPE_PRICE_CHILD_UNDER3)", s.cfg.StripePriceChildUnder3)
-	checkPrice("Day pass (STRIPE_PRICE_DAY_PASS)", s.cfg.StripePriceDayPass)
-	checkPrice("Coach (STRIPE_PRICE_COACH)", s.cfg.StripePriceCoach)
+	checkPrice("Child under 3 (STRIPE_PRICE_CHILD_UNDER3)", s.cfg.ChildUnder3PriceRef)
+	checkPrice("Day pass (STRIPE_PRICE_DAY_PASS)", s.cfg.DayPassPriceRef)
+	checkPrice("Coach (STRIPE_PRICE_COACH)", s.cfg.CoachPriceRef)
 
 	if len(problems) > 0 {
 		return apperr.Invalid("cannot enable full payment mode: " + strings.Join(problems, "; "))

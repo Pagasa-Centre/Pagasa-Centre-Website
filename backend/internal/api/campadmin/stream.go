@@ -10,16 +10,17 @@ import (
 
 	"pagasacentre/backend/internal/adminlog"
 	"pagasacentre/backend/internal/api/campadmin/dto/mapper"
-	"pagasacentre/backend/internal/middleware"
+	"pagasacentre/backend/internal/auth"
+	"pagasacentre/backend/pkg/commonlibrary/apperr"
 	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 	"pagasacentre/backend/pkg/commonlibrary/render"
 )
 
-func HandleStream(auth middleware.AuthConfig, hub *adminlog.Hub) http.HandlerFunc {
+func HandleStream(authSvc *auth.Service, hub *adminlog.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := r.URL.Query().Get("token")
-		if _, ok := middleware.VerifySessionToken(auth.SessionSecret, token); !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		if _, ok := authSvc.VerifyToken(token); !ok {
+			commonerrors.WriteError(w, apperr.Unauthorized("unauthorized"))
 			return
 		}
 		flusher, ok := w.(http.Flusher)

@@ -231,11 +231,11 @@ func TestHasOpenInvoiceAndBalanceSettled(t *testing.T) {
 		open     bool
 		balanced bool
 	}{
-		{Group{BillingStatus: BillingInvoiced, StripeInvoiceID: &inv}, true, false},
-		{Group{BillingStatus: BillingInvoiced, StripeInvoiceID: &blank}, false, false},
+		{Group{BillingStatus: BillingInvoiced, BalanceInvoiceRef: &inv}, true, false},
+		{Group{BillingStatus: BillingInvoiced, BalanceInvoiceRef: &blank}, false, false},
 		{Group{BillingStatus: BillingInvoiced}, false, false},
-		{Group{BillingStatus: BillingAllocated, StripeInvoiceID: &inv}, false, false},
-		{Group{BillingStatus: BillingBalancePaid, StripeInvoiceID: &inv}, false, true},
+		{Group{BillingStatus: BillingAllocated, BalanceInvoiceRef: &inv}, false, false},
+		{Group{BillingStatus: BillingBalancePaid, BalanceInvoiceRef: &inv}, false, true},
 	}
 	for _, tc := range cases {
 		if got := tc.g.HasOpenInvoice(); got != tc.open {
@@ -266,10 +266,10 @@ func TestRosterChanged(t *testing.T) {
 		wantTo BillingStatus // empty means no billing change
 		void   bool
 	}{
-		"invoiced stale all placed":         {Group{BillingStatus: BillingInvoiced, StripeInvoiceID: &inv}, placed, true, BillingAllocated, true},
-		"invoiced stale full week unplaced": {Group{BillingStatus: BillingInvoiced, StripeInvoiceID: &inv}, unplaced, true, BillingNone, true},
-		"invoiced stale day pass only":      {Group{BillingStatus: BillingInvoiced, StripeInvoiceID: &inv}, dayPassOnly, true, BillingNone, true},
-		"invoiced not stale":                {Group{BillingStatus: BillingInvoiced, StripeInvoiceID: &inv}, unplaced, false, "", false},
+		"invoiced stale all placed":         {Group{BillingStatus: BillingInvoiced, BalanceInvoiceRef: &inv}, placed, true, BillingAllocated, true},
+		"invoiced stale full week unplaced": {Group{BillingStatus: BillingInvoiced, BalanceInvoiceRef: &inv}, unplaced, true, BillingNone, true},
+		"invoiced stale day pass only":      {Group{BillingStatus: BillingInvoiced, BalanceInvoiceRef: &inv}, dayPassOnly, true, BillingNone, true},
+		"invoiced not stale":                {Group{BillingStatus: BillingInvoiced, BalanceInvoiceRef: &inv}, unplaced, false, "", false},
 		"allocated full week unplaced":      {Group{BillingStatus: BillingAllocated}, unplaced, false, BillingNone, false},
 		"allocated all placed":              {Group{BillingStatus: BillingAllocated}, placed, true, "", false},
 		"allocated day pass only":           {Group{BillingStatus: BillingAllocated}, dayPassOnly, false, "", false},

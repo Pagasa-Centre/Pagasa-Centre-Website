@@ -24,10 +24,10 @@ type invoicingRepo interface {
 	DeleteGroupMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error
 	MarkBalancePaidMeta(ctx context.Context, groupID string, meta domain.ActionMeta, tr domain.BillingTransition) error
 	StampOnly(ctx context.Context, groupID string, meta domain.ActionMeta, tr domain.BillingTransition) error
-	SetStripeCustomerID(ctx context.Context, groupID, customerID string) error
+	SetBillingCustomerRef(ctx context.Context, groupID, customerID string) error
 }
 
-type stripeClient interface {
+type invoiceProvider interface {
 	EnsureCustomer(ctx context.Context, existingID, email, name, groupID string) (string, error)
 	CreateInvoice(ctx context.Context, customerID, groupID string, lines []billing.InvoiceLine, daysUntilDue int64, invoiceType string) (billing.InvoiceResult, error)
 	VoidInvoiceIdempotent(ctx context.Context, invoiceID string) error
@@ -45,21 +45,21 @@ type mailer interface {
 }
 
 type Service struct {
-	reads  groupReader
-	repo   invoicingRepo
-	stripe stripeClient
-	mailer mailer
-	sheets sheets.Sync
-	pricer *billing.Pricer
-	cfg    billing.Config
+	reads    groupReader
+	repo     invoicingRepo
+	invoices invoiceProvider
+	mailer   mailer
+	sheets   sheets.Sync
+	pricer   *billing.Pricer
+	cfg      billing.Config
 }
 
-func NewService(reads groupReader, repo invoicingRepo, stripe stripeClient, mail mailer, sheetSync sheets.Sync, pricer *billing.Pricer, cfg billing.Config) *Service {
+func NewService(reads groupReader, repo invoicingRepo, invoices invoiceProvider, mail mailer, sheetSync sheets.Sync, pricer *billing.Pricer, cfg billing.Config) *Service {
 	if cfg.InvoiceDueDays <= 0 {
 		cfg.InvoiceDueDays = 15
 	}
 	if sheetSync == nil {
 		sheetSync = sheets.NewNoopSync()
 	}
-	return &Service{reads: reads, repo: repo, stripe: stripe, mailer: mail, sheets: sheetSync, pricer: pricer, cfg: cfg}
+	return &Service{reads: reads, repo: repo, invoices: invoices, mailer: mail, sheets: sheetSync, pricer: pricer, cfg: cfg}
 }

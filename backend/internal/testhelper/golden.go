@@ -31,6 +31,12 @@ func AssertGoldenMarshal(t *testing.T, name string, v any) {
 	assertGoldenBytes(t, name, b)
 }
 
+// AssertGolden compares raw bytes to testdata/<name> (e.g. CSV exports).
+func AssertGolden(t *testing.T, name string, got []byte) {
+	t.Helper()
+	assertGoldenBytes(t, name, got)
+}
+
 func assertGoldenBytes(t *testing.T, name string, got []byte) {
 	t.Helper()
 	path := goldenPath(t, name)

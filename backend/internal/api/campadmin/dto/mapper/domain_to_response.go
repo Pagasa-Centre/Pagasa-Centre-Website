@@ -22,14 +22,14 @@ func GroupToResponse(g domain.Group, campers []domain.Camper) dto.GroupResponse 
 		ContactEmail:             g.ContactEmail,
 		ContactPhone:             g.ContactPhone,
 		PaymentStatus:            g.PaymentStatus,
-		StripeSessionID:          g.StripeSessionID,
-		StripePaymentIntentID:    g.StripePaymentIntentID,
+		CheckoutSessionRef:       g.CheckoutSessionRef,
+		DepositPaymentRef:        g.DepositPaymentRef,
 		TotalAmountPence:         g.TotalAmountPence,
 		Currency:                 g.Currency,
 		CreatedAt:                g.CreatedAt,
 		PaidAt:                   g.PaidAt,
-		StripeCustomerID:         g.StripeCustomerID,
-		StripeInvoiceID:          g.StripeInvoiceID,
+		BillingCustomerRef:       g.BillingCustomerRef,
+		BalanceInvoiceRef:        g.BalanceInvoiceRef,
 		BillingStatus:            g.BillingStatus,
 		InvoiceDueAt:             g.InvoiceDueAt,
 		BalancePaidAt:            g.BalancePaidAt,
@@ -40,7 +40,7 @@ func GroupToResponse(g domain.Group, campers []domain.Camper) dto.GroupResponse 
 		IsFree:                   g.IsFree,
 		PaidInFullAtRegistration: g.PaidInFullAtRegistration,
 		CoachIncludedInBalance:   g.CoachIncludedInBalance,
-		StripeCoachInvoiceID:     g.StripeCoachInvoiceID,
+		CoachInvoiceRef:          g.CoachInvoiceRef,
 		CoachInvoiceDueAt:        g.CoachInvoiceDueAt,
 		CoachFeePaidAt:           g.CoachFeePaidAt,
 		CoachFeeWaivedAt:         g.CoachFeeWaivedAt,
@@ -82,7 +82,7 @@ func CamperToResponse(c domain.Camper) dto.CamperResponse {
 		DayPassNeedsCatering:       c.DayPassNeedsCatering,
 		AllocatedAccommodationCode: c.AllocatedAccommodationCode,
 		AllocatedUnitCode:          c.AllocatedUnitCode,
-		BilledStripePriceID:        c.BilledStripePriceID,
+		BilledPriceRef:             c.BilledPriceRef,
 		DepositCreditPence:         c.DepositCreditPence,
 		DepositOwedPence:           c.DepositOwedPence,
 		DepositPaidPence:           c.DepositPaidPence,
@@ -112,7 +112,7 @@ func AccommodationTypesToResponse(types []domain.AccommodationType) []dto.Accomm
 	for i, t := range types {
 		out[i] = dto.AccommodationTypeResponse{
 			Code: t.Code, DisplayName: t.DisplayName, Capacity: t.Capacity,
-			StripePriceID: t.StripePriceID, AvailableForRegistration: t.AvailableForRegistration,
+			PriceRef: t.PriceRef, AvailableForRegistration: t.AvailableForRegistration,
 		}
 	}
 	return out

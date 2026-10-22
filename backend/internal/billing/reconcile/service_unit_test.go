@@ -52,7 +52,7 @@ type fakeReconRepo struct {
 	byInvoice *domain.Group
 }
 
-func (f *fakeReconRepo) FindGroupByStripeInvoiceID(_ context.Context, _ string) (*domain.Group, error) {
+func (f *fakeReconRepo) FindGroupByBalanceInvoiceRef(_ context.Context, _ string) (*domain.Group, error) {
 	if f.byInvoice == nil {
 		return nil, nil
 	}
@@ -60,7 +60,7 @@ func (f *fakeReconRepo) FindGroupByStripeInvoiceID(_ context.Context, _ string) 
 	return &cp, nil
 }
 
-func (f *fakeReconRepo) FindGroupByStripeCoachInvoiceID(context.Context, string) (*domain.Group, error) {
+func (f *fakeReconRepo) FindGroupByCoachInvoiceRef(context.Context, string) (*domain.Group, error) {
 	return nil, nil
 }
 
@@ -95,7 +95,7 @@ func TestHandleInvoicePaid_settledNoOp(t *testing.T) {
 	}
 }
 
-func TestHandleInvoicePaid_findGroupByStripeInvoiceIDFallback(t *testing.T) {
+func TestHandleInvoicePaid_findGroupByBalanceInvoiceRefFallback(t *testing.T) {
 	g := &domain.Group{
 		ID:            "g-from-invoice",
 		BillingStatus: domain.BillingInvoiced,

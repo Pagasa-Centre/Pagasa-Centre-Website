@@ -58,7 +58,7 @@ func (r *Repository) GetAccommodationType(ctx context.Context, code string) (*do
 		return nil, fmt.Errorf("get accommodation type: %w", err)
 	}
 	t.Capacity = capacity
-	t.StripePriceID = priceID
+	t.PriceRef = priceID
 	return &t, nil
 }
 
@@ -80,7 +80,7 @@ func (r *Repository) ListAccommodationTypes(ctx context.Context) ([]domain.Accom
 			return nil, err
 		}
 		t.Capacity = capacity
-		t.StripePriceID = priceID
+		t.PriceRef = priceID
 		out = append(out, t)
 	}
 	return out, rows.Err()
@@ -159,8 +159,8 @@ func (r *Repository) GetAccommodationUnit(ctx context.Context, code string) (*do
 	return &u, nil
 }
 
-// UpdateAccommodationStripePrice sets stripe_price_id for a tier (admin/setup).
-func (r *Repository) UpdateAccommodationStripePrice(ctx context.Context, code, priceID string) error {
+// UpdateAccommodationPriceRef sets stripe_price_id for a tier (admin/setup).
+func (r *Repository) UpdateAccommodationPriceRef(ctx context.Context, code, priceID string) error {
 	tag, err := r.db(ctx).Exec(ctx,
 		`UPDATE accommodation_types SET stripe_price_id = $1 WHERE code = $2`,
 		priceID, code)

@@ -53,7 +53,7 @@ func (noopCamperRepo) UpdateDayPassCamperMeta(context.Context, string, string, s
 func (noopCamperRepo) UpdateCamperCoachMeta(context.Context, string, string, bool, bool, domain.ActionMeta) error {
 	return nil
 }
-func (noopCamperRepo) SetStripeCustomerID(context.Context, string, string) error { return nil }
+func (noopCamperRepo) SetBillingCustomerRef(context.Context, string, string) error { return nil }
 
 func TestRemoveCamper_blocksMainContact(t *testing.T) {
 	reads := &fakeReads{

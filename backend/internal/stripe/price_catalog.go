@@ -1,4 +1,4 @@
-package payment
+package stripe
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stripe/stripe-go/v85"
+	stripesdk "github.com/stripe/stripe-go/v85"
 	"github.com/stripe/stripe-go/v85/price"
 )
 
@@ -45,7 +45,7 @@ func (c *PriceCatalog) Amount(ctx context.Context, priceID string) (pence int64,
 	}
 	c.mu.RUnlock()
 
-	params := &stripe.PriceParams{}
+	params := &stripesdk.PriceParams{}
 	params.Context = ctx
 	p, err := price.Get(priceID, params)
 	if err != nil {
@@ -54,7 +54,7 @@ func (c *PriceCatalog) Amount(ctx context.Context, priceID string) (pence int64,
 	if !p.Active {
 		return 0, "", fmt.Errorf("stripe price %s is inactive", priceID)
 	}
-	if p.BillingScheme == stripe.PriceBillingSchemeTiered {
+	if p.BillingScheme == stripesdk.PriceBillingSchemeTiered {
 		return 0, "", fmt.Errorf("stripe price %s has no flat unit_amount (tiered/metered)", priceID)
 	}
 

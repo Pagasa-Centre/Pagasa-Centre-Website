@@ -21,7 +21,7 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-func (r *Repository) FindGroupByStripeInvoiceID(ctx context.Context, invoiceID string) (*domain.Group, error) {
+func (r *Repository) FindGroupByBalanceInvoiceRef(ctx context.Context, invoiceID string) (*domain.Group, error) {
 	const q = `SELECT ` + groupsql.GroupSelectCols + `
 		  FROM registration_groups
 		 WHERE stripe_invoice_id = $1`
@@ -35,7 +35,7 @@ func (r *Repository) FindGroupByStripeInvoiceID(ctx context.Context, invoiceID s
 	return &g, nil
 }
 
-func (r *Repository) FindGroupByStripeCoachInvoiceID(ctx context.Context, invoiceID string) (*domain.Group, error) {
+func (r *Repository) FindGroupByCoachInvoiceRef(ctx context.Context, invoiceID string) (*domain.Group, error) {
 	const q = `SELECT ` + groupsql.GroupSelectCols + `
 		  FROM registration_groups
 		 WHERE stripe_coach_invoice_id = $1`

@@ -26,8 +26,8 @@ func (submitCamp) RegistrationPaymentMode(context.Context) (string, error) {
 
 type submitPrices struct{}
 
-func (submitPrices) GetPrice(context.Context, string) (PriceRow, error) {
-	return PriceRow{AmountPence: 5000, Currency: "GBP"}, nil
+func (submitPrices) GetPrice(context.Context, string) (domain.PriceRow, error) {
+	return domain.PriceRow{AmountPence: 5000, Currency: "GBP"}, nil
 }
 
 type failStripe struct{}

@@ -28,11 +28,11 @@ func ScanGroup(row pgx.Row) (domain.Group, error) {
 	var g domain.Group
 	err := row.Scan(
 		&g.ID, &g.ContactFirstName, &g.ContactLastName, &g.ContactEmail, &g.ContactPhone,
-		&g.PaymentStatus, &g.StripeSessionID, &g.StripePaymentIntentID,
+		&g.PaymentStatus, &g.CheckoutSessionRef, &g.DepositPaymentRef,
 		&g.TotalAmountPence, &g.Currency, &g.CreatedAt, &g.PaidAt,
-		&g.StripeCustomerID, &g.StripeInvoiceID, &g.BillingStatus, &g.InvoiceDueAt, &g.BalancePaidAt,
+		&g.BillingCustomerRef, &g.BalanceInvoiceRef, &g.BillingStatus, &g.InvoiceDueAt, &g.BalancePaidAt,
 		&g.Version, &g.LastAction, &g.LastActionBy, &g.LastActionAt, &g.IsFree,
-		&g.CoachIncludedInBalance, &g.StripeCoachInvoiceID, &g.CoachInvoiceDueAt, &g.CoachFeePaidAt,
+		&g.CoachIncludedInBalance, &g.CoachInvoiceRef, &g.CoachInvoiceDueAt, &g.CoachFeePaidAt,
 		&g.CoachFeeWaivedAt, &g.PaidInFullAtRegistration,
 	)
 	return g, err
@@ -46,7 +46,7 @@ func ScanCamper(row pgx.Row) (domain.Camper, error) {
 		&c.ShirtSize, &c.DietaryRequirements, &c.NeedsCoach,
 		&c.AccommodationFirstChoice, &c.AccommodationSecondChoice, &c.RoommateRequests,
 		&c.DayPassDays, &c.DayPassTshirtOption, &c.DayPassNeedsCatering,
-		&c.AllocatedAccommodationCode, &c.AllocatedUnitCode, &c.BilledStripePriceID,
+		&c.AllocatedAccommodationCode, &c.AllocatedUnitCode, &c.BilledPriceRef,
 		&c.DepositCreditPence, &c.DepositOwedPence, &c.DepositPaidPence, &c.CreatedAt,
 	)
 	return c, err

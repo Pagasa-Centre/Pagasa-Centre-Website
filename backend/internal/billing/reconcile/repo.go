@@ -14,8 +14,8 @@ type groupReader interface {
 }
 
 type reconcileRepo interface {
-	FindGroupByStripeInvoiceID(ctx context.Context, invoiceID string) (*domain.Group, error)
-	FindGroupByStripeCoachInvoiceID(ctx context.Context, invoiceID string) (*domain.Group, error)
+	FindGroupByBalanceInvoiceRef(ctx context.Context, invoiceID string) (*domain.Group, error)
+	FindGroupByCoachInvoiceRef(ctx context.Context, invoiceID string) (*domain.Group, error)
 	MarkCoachFeePaidMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error
 	MarkBalancePaidMeta(ctx context.Context, groupID string, meta domain.ActionMeta, tr domain.BillingTransition) error
 }

@@ -63,7 +63,7 @@ func (noopInvRepo) MarkBalancePaidMeta(context.Context, string, domain.ActionMet
 func (noopInvRepo) StampOnly(context.Context, string, domain.ActionMeta, domain.BillingTransition) error {
 	return nil
 }
-func (noopInvRepo) SetStripeCustomerID(context.Context, string, string) error { return nil }
+func (noopInvRepo) SetBillingCustomerRef(context.Context, string, string) error { return nil }
 
 func TestSendInvoice_UnknownGroup(t *testing.T) {
 	svc := NewService(&fakeReads{}, noopInvRepo{}, nil, nil, nil, billing.NewPricer(nil, billing.Config{}, nil), billing.Config{})
@@ -141,7 +141,7 @@ func TestNewService_sendInvoiceUsesDefaultDueDays(t *testing.T) {
 		groups: map[string]*domain.Group{
 			"g1": {
 				ID: "g1", PaymentStatus: domain.PaymentPaid, BillingStatus: domain.BillingAllocated,
-				StripeCustomerID: strPtr("cus_x"), Currency: "GBP",
+				BillingCustomerRef: strPtr("cus_x"), Currency: "GBP",
 			},
 		},
 	}
@@ -157,11 +157,11 @@ func TestNewService_sendInvoiceUsesDefaultDueDays(t *testing.T) {
 	stub := &recordingStripe{
 		createInv: func(_ context.Context, _, _ string, _ []billing.InvoiceLine, daysUntilDue int64, _ string) (billing.InvoiceResult, error) {
 			gotDue = daysUntilDue
-			return billing.InvoiceResult{ID: "inv_test", StripeEmailed: true, DueAt: time.Now().UTC()}, nil
+			return billing.InvoiceResult{ID: "inv_test", ProviderEmailed: true, DueAt: time.Now().UTC()}, nil
 		},
 	}
-	pricer := billing.NewPricer(&fakeAccReader{priceID: "price_lodge"}, billing.Config{StripePriceChildUnder3: "price_u3"}, nil)
-	svc := NewService(r, noopInvRepo{}, stub, nil, nil, pricer, billing.Config{InvoiceDueDays: 0, StripePriceDayPass: "price_dp"})
+	pricer := billing.NewPricer(&fakeAccReader{priceID: "price_lodge"}, billing.Config{ChildUnder3PriceRef: "price_u3"}, nil)
+	svc := NewService(r, noopInvRepo{}, stub, nil, nil, pricer, billing.Config{InvoiceDueDays: 0, DayPassPriceRef: "price_dp"})
 	if err := svc.SendInvoice(context.Background(), "g1", "admin", domain.SkipVersionCheck); err != nil {
 		t.Fatalf("SendInvoice: %v", err)
 	}
@@ -228,7 +228,7 @@ type fakeAccReader struct {
 
 func (f *fakeAccReader) GetAccommodationType(context.Context, string) (*domain.AccommodationType, error) {
 	p := f.priceID
-	return &domain.AccommodationType{Code: "lodge", StripePriceID: &p}, nil
+	return &domain.AccommodationType{Code: "lodge", PriceRef: &p}, nil
 }
 func (f *fakeAccReader) GetAccommodationUnit(context.Context, string) (*domain.AccommodationUnit, error) {
 	return nil, nil

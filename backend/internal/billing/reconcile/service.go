@@ -18,7 +18,7 @@ func (s *Service) HandleCoachInvoicePaid(ctx context.Context, stripeInvoiceID, g
 		return err
 	}
 	if g == nil {
-		g, err = s.repo.FindGroupByStripeCoachInvoiceID(ctx, stripeInvoiceID)
+		g, err = s.repo.FindGroupByCoachInvoiceRef(ctx, stripeInvoiceID)
 		if err != nil || g == nil {
 			return fmt.Errorf("group not found for coach invoice %s", stripeInvoiceID)
 		}
@@ -39,7 +39,7 @@ func (s *Service) HandleInvoicePaid(ctx context.Context, stripeInvoiceID, groupI
 		return err
 	}
 	if g == nil {
-		g, err = s.repo.FindGroupByStripeInvoiceID(ctx, stripeInvoiceID)
+		g, err = s.repo.FindGroupByBalanceInvoiceRef(ctx, stripeInvoiceID)
 		if err != nil || g == nil {
 			return fmt.Errorf("group not found for invoice %s", stripeInvoiceID)
 		}

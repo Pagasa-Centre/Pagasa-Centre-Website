@@ -34,14 +34,14 @@ type Group struct {
 	ContactEmail             string
 	ContactPhone             string
 	PaymentStatus            PaymentStatus
-	StripeSessionID          *string
-	StripePaymentIntentID    *string
+	CheckoutSessionRef       *string
+	DepositPaymentRef        *string
 	TotalAmountPence         int
 	Currency                 string
 	CreatedAt                time.Time
 	PaidAt                   *time.Time
-	StripeCustomerID         *string
-	StripeInvoiceID          *string
+	BillingCustomerRef       *string
+	BalanceInvoiceRef        *string
 	BillingStatus            BillingStatus
 	InvoiceDueAt             *time.Time
 	BalancePaidAt            *time.Time
@@ -53,7 +53,7 @@ type Group struct {
 	PaidInFullAtRegistration bool
 
 	CoachIncludedInBalance bool
-	StripeCoachInvoiceID   *string
+	CoachInvoiceRef        *string
 	CoachInvoiceDueAt      *time.Time
 	CoachFeePaidAt         *time.Time
 	CoachFeeWaivedAt       *time.Time
@@ -94,7 +94,7 @@ type Camper struct {
 	DayPassNeedsCatering       *bool
 	AllocatedAccommodationCode *string
 	AllocatedUnitCode          *string
-	BilledStripePriceID        *string
+	BilledPriceRef             *string
 	DepositCreditPence         int
 	DepositOwedPence           int
 	DepositPaidPence           int
@@ -121,6 +121,6 @@ type AccommodationType struct {
 	Code                     string
 	DisplayName              string
 	Capacity                 *int
-	StripePriceID            *string
+	PriceRef                 *string
 	AvailableForRegistration bool
 }

@@ -109,8 +109,8 @@ func (r *Repository) InsertCamper(ctx context.Context, groupID string, c domain.
 	return nil
 }
 
-// SetStripeSession records the Stripe Checkout session id on the group.
-func (r *Repository) SetStripeSession(ctx context.Context, groupID, sessionID string) error {
+// SetCheckoutSession records the Stripe Checkout session id on the group.
+func (r *Repository) SetCheckoutSession(ctx context.Context, groupID, sessionID string) error {
 	_, err := r.db(ctx).Exec(ctx,
 		`UPDATE registration_groups SET stripe_session_id = $1 WHERE id = $2`,
 		sessionID, groupID)

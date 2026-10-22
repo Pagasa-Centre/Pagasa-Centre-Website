@@ -20,7 +20,7 @@ type allocationRepo interface {
 	ClearInvoiceAndReleaseMeta(ctx context.Context, groupID string, meta domain.ActionMeta, tr domain.BillingTransition) error
 }
 
-type stripeVoider interface {
+type invoiceVoider interface {
 	VoidInvoice(ctx context.Context, invoiceID string) error
 }
 
@@ -31,14 +31,14 @@ type mailer interface {
 }
 
 type Service struct {
-	reads  groupReader
-	repo   allocationRepo
-	stripe stripeVoider
-	mailer mailer
-	pricer *billing.Pricer
-	cfg    billing.Config
+	reads    groupReader
+	repo     allocationRepo
+	invoices invoiceVoider
+	mailer   mailer
+	pricer   *billing.Pricer
+	cfg      billing.Config
 }
 
-func NewService(reads groupReader, repo allocationRepo, stripe stripeVoider, mail mailer, pricer *billing.Pricer, cfg billing.Config) *Service {
-	return &Service{reads: reads, repo: repo, stripe: stripe, mailer: mail, pricer: pricer, cfg: cfg}
+func NewService(reads groupReader, repo allocationRepo, invoices invoiceVoider, mail mailer, pricer *billing.Pricer, cfg billing.Config) *Service {
+	return &Service{reads: reads, repo: repo, invoices: invoices, mailer: mail, pricer: pricer, cfg: cfg}
 }

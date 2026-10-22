@@ -6,7 +6,6 @@ import (
 	"log"
 	"strings"
 
-	"pagasacentre/backend/internal/registration"
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
@@ -22,10 +21,14 @@ type accommodationReader interface {
 type Pricer struct {
 	read   accommodationReader
 	cfg    Config
-	prices registration.PriceLookup
+	prices PriceLookup
 }
 
-func NewPricer(read accommodationReader, cfg Config, prices registration.PriceLookup) *Pricer {
+type PriceLookup interface {
+	GetPrice(ctx context.Context, code string) (domain.PriceRow, error)
+}
+
+func NewPricer(read accommodationReader, cfg Config, prices PriceLookup) *Pricer {
 	return &Pricer{read: read, cfg: cfg, prices: prices}
 }
 
@@ -62,7 +65,7 @@ func (p *Pricer) ResolvePriceID(ctx context.Context, accommodationCode string, a
 	if err != nil {
 		return "", fmt.Errorf("get accommodation type: %w", err)
 	}
-	priceID, err := registration.AccommodationPriceID(accommodationCode, age, t, p.cfg.StripePriceChildUnder3)
+	priceID, err := domain.AccommodationPriceID(accommodationCode, age, t, p.cfg.ChildUnder3PriceRef)
 	if err != nil {
 		return "", apperr.Invalid(err.Error())
 	}

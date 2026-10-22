@@ -14,14 +14,14 @@ type GroupResponse struct {
 	ContactEmail             string               `json:"contact_email"`
 	ContactPhone             string               `json:"contact_phone"`
 	PaymentStatus            domain.PaymentStatus `json:"payment_status"`
-	StripeSessionID          *string              `json:"stripe_session_id,omitempty"`
-	StripePaymentIntentID    *string              `json:"stripe_payment_intent_id,omitempty"`
+	CheckoutSessionRef       *string              `json:"stripe_session_id,omitempty"`
+	DepositPaymentRef        *string              `json:"stripe_payment_intent_id,omitempty"`
 	TotalAmountPence         int                  `json:"total_amount_pence"`
 	Currency                 string               `json:"currency"`
 	CreatedAt                time.Time            `json:"created_at"`
 	PaidAt                   *time.Time           `json:"paid_at,omitempty"`
-	StripeCustomerID         *string              `json:"stripe_customer_id,omitempty"`
-	StripeInvoiceID          *string              `json:"stripe_invoice_id,omitempty"`
+	BillingCustomerRef       *string              `json:"stripe_customer_id,omitempty"`
+	BalanceInvoiceRef        *string              `json:"stripe_invoice_id,omitempty"`
 	BillingStatus            domain.BillingStatus `json:"billing_status"`
 	InvoiceDueAt             *time.Time           `json:"invoice_due_at,omitempty"`
 	BalancePaidAt            *time.Time           `json:"balance_paid_at,omitempty"`
@@ -32,7 +32,7 @@ type GroupResponse struct {
 	IsFree                   bool                 `json:"is_free"`
 	PaidInFullAtRegistration bool                 `json:"paid_in_full_at_registration"`
 	CoachIncludedInBalance   bool                 `json:"coach_included_in_balance"`
-	StripeCoachInvoiceID     *string              `json:"stripe_coach_invoice_id,omitempty"`
+	CoachInvoiceRef          *string              `json:"stripe_coach_invoice_id,omitempty"`
 	CoachInvoiceDueAt        *time.Time           `json:"coach_invoice_due_at,omitempty"`
 	CoachFeePaidAt           *time.Time           `json:"coach_fee_paid_at,omitempty"`
 	CoachFeeWaivedAt         *time.Time           `json:"coach_fee_waived_at,omitempty"`
@@ -61,7 +61,7 @@ type CamperResponse struct {
 	DayPassNeedsCatering       *bool     `json:"day_pass_needs_catering,omitempty"`
 	AllocatedAccommodationCode *string   `json:"allocated_accommodation_code,omitempty"`
 	AllocatedUnitCode          *string   `json:"allocated_unit_code,omitempty"`
-	BilledStripePriceID        *string   `json:"billed_stripe_price_id,omitempty"`
+	BilledPriceRef             *string   `json:"billed_stripe_price_id,omitempty"`
 	DepositCreditPence         int       `json:"deposit_credit_pence"`
 	DepositOwedPence           int       `json:"deposit_owed_pence"`
 	DepositPaidPence           int       `json:"deposit_paid_pence"`
@@ -83,7 +83,7 @@ type AccommodationTypeResponse struct {
 	Code                     string  `json:"code"`
 	DisplayName              string  `json:"display_name"`
 	Capacity                 *int    `json:"capacity,omitempty"`
-	StripePriceID            *string `json:"stripe_price_id,omitempty"`
+	PriceRef                 *string `json:"stripe_price_id,omitempty"`
 	AvailableForRegistration bool    `json:"available_for_registration"`
 }
 

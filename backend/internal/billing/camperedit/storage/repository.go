@@ -72,7 +72,7 @@ func (r *Repository) UpdateCamperDetailsMeta(
 		d.FirstName, d.LastName, d.Gender, d.Age, d.CellLeaderName, d.IsCellLeader,
 		d.ShirtSize, d.DietaryRequirements,
 		d.AccommodationFirstChoice, d.AccommodationSecondChoice,
-		d.AllocatedAccommodationCode, d.AllocatedUnitCode, d.BilledStripePriceID,
+		d.AllocatedAccommodationCode, d.AllocatedUnitCode, d.BilledPriceRef,
 	)
 	if err != nil {
 		return fmt.Errorf("update camper details: %w", err)
@@ -461,8 +461,8 @@ func (r *Repository) UpdateCamperCoachMeta(
 // via FK. Version is checked before delete so stale dashboards cannot remove a
 // concurrently modified group.
 
-func (r *Repository) SetStripeCustomerID(ctx context.Context, groupID, customerID string) error {
-	return groupsql.SetStripeCustomerID(ctx, r.pool, groupID, customerID)
+func (r *Repository) SetBillingCustomerRef(ctx context.Context, groupID, customerID string) error {
+	return groupsql.SetBillingCustomerRef(ctx, r.pool, groupID, customerID)
 }
 
 func strPtr(s string) *string {

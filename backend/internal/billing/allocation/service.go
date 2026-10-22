@@ -49,7 +49,7 @@ func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedV
 				a.CamperID: "allocated_accommodation_code is required for full-week campers",
 			})
 		}
-		priceID := strings.TrimSpace(a.BilledStripePriceID)
+		priceID := strings.TrimSpace(a.BilledPriceRef)
 		if g.IsFree {
 			priceID = ""
 		} else if priceID == "" {
@@ -66,7 +66,7 @@ func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedV
 			CamperID:                   a.CamperID,
 			AllocatedAccommodationCode: code,
 			AllocatedUnitCode:          unitCode,
-			BilledStripePriceID:        priceID,
+			BilledPriceRef:             priceID,
 		})
 	}
 
@@ -175,10 +175,10 @@ func (s *Service) VoidAndRelease(ctx context.Context, groupID, reason, actor str
 	if g == nil {
 		return domain.ErrGroupNotFound
 	}
-	if g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" &&
+	if g.BalanceInvoiceRef != nil && *g.BalanceInvoiceRef != "" &&
 		g.BillingStatus == domain.BillingInvoiced {
-		if err := s.stripe.VoidInvoice(ctx, *g.StripeInvoiceID); err != nil {
-			log.Printf("billing: void invoice %s for group %s: %v", *g.StripeInvoiceID, groupID, err)
+		if err := s.invoices.VoidInvoice(ctx, *g.BalanceInvoiceRef); err != nil {
+			log.Printf("billing: void invoice %s for group %s: %v", *g.BalanceInvoiceRef, groupID, err)
 			// Continue — DB release still needed if Stripe already void/paid.
 		}
 	}

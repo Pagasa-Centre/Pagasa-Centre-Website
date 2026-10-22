@@ -14,7 +14,7 @@ type AllocateCamperRequest struct {
 	CamperID                   string `json:"camper_id"`
 	AllocatedAccommodationCode string `json:"allocated_accommodation_code"`
 	AllocatedUnitCode          string `json:"allocated_unit_code,omitempty"`
-	BilledStripePriceID        string `json:"billed_stripe_price_id,omitempty"`
+	BilledPriceRef             string `json:"billed_stripe_price_id,omitempty"`
 }
 
 type AllocateRequest struct {

@@ -26,11 +26,11 @@ import (
 
 type fakePrices struct{}
 
-func (fakePrices) GetPrice(_ context.Context, code string) (registration.PriceRow, error) {
+func (fakePrices) GetPrice(_ context.Context, code string) (domain.PriceRow, error) {
 	if code == domain.PriceDeposit {
-		return registration.PriceRow{AmountPence: 5000, Currency: "GBP"}, nil
+		return domain.PriceRow{AmountPence: 5000, Currency: "GBP"}, nil
 	}
-	return registration.PriceRow{}, nil
+	return domain.PriceRow{}, nil
 }
 
 type fakeCheckout struct {

@@ -126,7 +126,7 @@ func TestGolden_allocate_request(t *testing.T) {
 			CamperID:                   "c1",
 			AllocatedAccommodationCode: "tent",
 			AllocatedUnitCode:          "tent-1",
-			BilledStripePriceID:        "price_x",
+			BilledPriceRef:             "price_x",
 		}},
 		ExpectedVersion: testhelper.IntP(v),
 	}

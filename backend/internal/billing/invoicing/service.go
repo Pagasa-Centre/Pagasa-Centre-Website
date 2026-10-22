@@ -55,7 +55,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 			}
 			lines = append(lines, billing.InvoiceLine{PriceID: priceID, Quantity: 1})
 		case domain.AttendanceDayPass:
-			line, ok := dayPassLine(c, s.cfg.StripePriceDayPass)
+			line, ok := dayPassLine(c, s.cfg.DayPassPriceRef)
 			if !ok {
 				continue
 			}
@@ -88,7 +88,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 	coachCount := billing.CoachEligibleCount(campers)
 	coachIncluded := false
 	if g.CoachFeeWaivedAt == nil {
-		if line, ok := coachLine(coachCount, s.cfg.StripePriceCoach); ok {
+		if line, ok := coachLine(coachCount, s.cfg.CoachPriceRef); ok {
 			if line.PriceID == "" {
 				return billing.ErrCoachPriceNotConfigured
 			}
@@ -102,21 +102,21 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 	}
 
 	customerID := ""
-	if g.StripeCustomerID != nil {
-		customerID = *g.StripeCustomerID
+	if g.BillingCustomerRef != nil {
+		customerID = *g.BillingCustomerRef
 	}
 	name := strings.TrimSpace(g.ContactFirstName + " " + g.ContactLastName)
-	customerID, err = s.stripe.EnsureCustomer(ctx, customerID, g.ContactEmail, name, g.ID)
+	customerID, err = s.invoices.EnsureCustomer(ctx, customerID, g.ContactEmail, name, g.ID)
 	if err != nil {
 		return fmt.Errorf("operation: %w", err)
 	}
-	if customerID != "" && (g.StripeCustomerID == nil || *g.StripeCustomerID != customerID) {
-		if err := s.repo.SetStripeCustomerID(ctx, groupID, customerID); err != nil {
+	if customerID != "" && (g.BillingCustomerRef == nil || *g.BillingCustomerRef != customerID) {
+		if err := s.repo.SetBillingCustomerRef(ctx, groupID, customerID); err != nil {
 			return fmt.Errorf("operation: %w", err)
 		}
 	}
 
-	res, err := s.stripe.CreateInvoice(
+	res, err := s.invoices.CreateInvoice(
 		ctx, customerID, g.ID, lines, int64(s.cfg.InvoiceDueDays), "balance")
 	if err != nil {
 		return fmt.Errorf("operation: %w", err)
@@ -134,7 +134,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 	s.sendAccommodationChangedNotice(ctx, g.ContactEmail, g.ContactFirstName, changes, true)
 	// Stripe is the primary sender. Only if Stripe couldn't email the invoice
 	// (e.g. restricted account) do we fall back to emailing the link ourselves.
-	if !res.StripeEmailed {
+	if !res.ProviderEmailed {
 		emailCoachCount := int64(0)
 		if coachIncluded {
 			emailCoachCount = coachCount
@@ -177,7 +177,7 @@ func (s *Service) SendInvoicesBulk(ctx context.Context, actor string, groupIDs [
 
 func coachAlreadyCharged(g *domain.Group) bool {
 	return g.CoachIncludedInBalance ||
-		(g.StripeCoachInvoiceID != nil && strings.TrimSpace(*g.StripeCoachInvoiceID) != "")
+		(g.CoachInvoiceRef != nil && strings.TrimSpace(*g.CoachInvoiceRef) != "")
 }
 
 func (s *Service) SendCoachInvoice(ctx context.Context, groupID, actor string, expectedVersion int) error {
@@ -208,28 +208,28 @@ func (s *Service) SendCoachInvoice(ctx context.Context, groupID, actor string, e
 	if count == 0 {
 		return apperr.Invalid("no coach passengers to charge")
 	}
-	if s.cfg.StripePriceCoach == "" {
+	if s.cfg.CoachPriceRef == "" {
 		return billing.ErrCoachPriceNotConfigured
 	}
 
 	customerID := ""
-	if g.StripeCustomerID != nil {
-		customerID = *g.StripeCustomerID
+	if g.BillingCustomerRef != nil {
+		customerID = *g.BillingCustomerRef
 	}
 	name := strings.TrimSpace(g.ContactFirstName + " " + g.ContactLastName)
-	customerID, err = s.stripe.EnsureCustomer(ctx, customerID, g.ContactEmail, name, g.ID)
+	customerID, err = s.invoices.EnsureCustomer(ctx, customerID, g.ContactEmail, name, g.ID)
 	if err != nil {
 		return fmt.Errorf("operation: %w", err)
 	}
-	if customerID != "" && (g.StripeCustomerID == nil || *g.StripeCustomerID != customerID) {
-		if err := s.repo.SetStripeCustomerID(ctx, groupID, customerID); err != nil {
+	if customerID != "" && (g.BillingCustomerRef == nil || *g.BillingCustomerRef != customerID) {
+		if err := s.repo.SetBillingCustomerRef(ctx, groupID, customerID); err != nil {
 			return fmt.Errorf("operation: %w", err)
 		}
 	}
 
-	res, err := s.stripe.CreateInvoice(
+	res, err := s.invoices.CreateInvoice(
 		ctx, customerID, g.ID,
-		[]billing.InvoiceLine{{PriceID: s.cfg.StripePriceCoach, Quantity: count}},
+		[]billing.InvoiceLine{{PriceID: s.cfg.CoachPriceRef, Quantity: count}},
 		int64(s.cfg.InvoiceDueDays), "coach")
 	if err != nil {
 		return fmt.Errorf("operation: %w", err)
@@ -245,7 +245,7 @@ func (s *Service) SendCoachInvoice(ctx context.Context, groupID, actor string, e
 
 	// Stripe is the primary sender; fall back to our own email only if Stripe
 	// could not email the invoice.
-	if !res.StripeEmailed {
+	if !res.ProviderEmailed {
 		if err := s.mailer.SendCoachInvoice(ctx, email.CoachInvoice{
 			ToEmail:        g.ContactEmail,
 			ToName:         g.ContactFirstName,
@@ -297,8 +297,8 @@ func (s *Service) WaiveCoachFee(ctx context.Context, groupID, actor string, expe
 	if billing.CoachEligibleCount(campers) == 0 {
 		return apperr.Invalid("no coach passengers to waive")
 	}
-	if g.StripeCoachInvoiceID != nil && strings.TrimSpace(*g.StripeCoachInvoiceID) != "" {
-		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeCoachInvoiceID); err != nil {
+	if g.CoachInvoiceRef != nil && strings.TrimSpace(*g.CoachInvoiceRef) != "" {
+		if err := s.invoices.VoidInvoiceIdempotent(ctx, *g.CoachInvoiceRef); err != nil {
 			return apperr.Invalidf("coach invoice void failed; coach fee was not waived: %v", err)
 		}
 	}
@@ -350,14 +350,14 @@ func (s *Service) MarkBalancePaidManually(ctx context.Context, groupID, actor st
 
 	amountLabel := ""
 	if g.BillingStatus == domain.BillingInvoiced &&
-		g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" {
-		res, err := s.stripe.GetInvoice(ctx, *g.StripeInvoiceID)
+		g.BalanceInvoiceRef != nil && *g.BalanceInvoiceRef != "" {
+		res, err := s.invoices.GetInvoice(ctx, *g.BalanceInvoiceRef)
 		if err != nil {
-			log.Printf("billing: read invoice %s before manual mark-paid: %v", *g.StripeInvoiceID, err)
+			log.Printf("billing: read invoice %s before manual mark-paid: %v", *g.BalanceInvoiceRef, err)
 		} else {
 			amountLabel = billing.FormatAmountLabel(res.AmountDuePence, res.Currency)
 		}
-		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeInvoiceID); err != nil {
+		if err := s.invoices.VoidInvoiceIdempotent(ctx, *g.BalanceInvoiceRef); err != nil {
 			return apperr.Invalidf("invoice void failed; group was not marked paid: %v", err)
 		}
 	}
@@ -457,8 +457,8 @@ func (s *Service) DeleteRegistration(ctx context.Context, groupID, actor string,
 
 	var refundTotal int64
 
-	if g.BalanceSettled() && g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" {
-		amt, err := s.stripe.RefundInvoiceKeeping(ctx, *g.StripeInvoiceID, depositOnInvoice)
+	if g.BalanceSettled() && g.BalanceInvoiceRef != nil && *g.BalanceInvoiceRef != "" {
+		amt, err := s.invoices.RefundInvoiceKeeping(ctx, *g.BalanceInvoiceRef, depositOnInvoice)
 		if err != nil {
 			return DeleteSummary{}, apperr.Invalidf("balance refund failed; registration was not deleted: %v", err)
 		}
@@ -466,8 +466,8 @@ func (s *Service) DeleteRegistration(ctx context.Context, groupID, actor string,
 		refundTotal += amt
 	}
 
-	if g.BillingStatus == domain.BillingInvoiced && g.StripeInvoiceID != nil && *g.StripeInvoiceID != "" {
-		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeInvoiceID); err != nil {
+	if g.BillingStatus == domain.BillingInvoiced && g.BalanceInvoiceRef != nil && *g.BalanceInvoiceRef != "" {
+		if err := s.invoices.VoidInvoiceIdempotent(ctx, *g.BalanceInvoiceRef); err != nil {
 			return DeleteSummary{}, apperr.Invalidf("invoice void failed; registration was not deleted: %v", err)
 		}
 		summary.InvoiceVoided = true
@@ -475,8 +475,8 @@ func (s *Service) DeleteRegistration(ctx context.Context, groupID, actor string,
 
 	// Void any open (unpaid) separate coach invoice so it can't be paid after
 	// the registration is gone. Paid coach fees are refunded manually in Stripe.
-	if g.StripeCoachInvoiceID != nil && *g.StripeCoachInvoiceID != "" && g.CoachFeePaidAt == nil {
-		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeCoachInvoiceID); err != nil {
+	if g.CoachInvoiceRef != nil && *g.CoachInvoiceRef != "" && g.CoachFeePaidAt == nil {
+		if err := s.invoices.VoidInvoiceIdempotent(ctx, *g.CoachInvoiceRef); err != nil {
 			return DeleteSummary{}, apperr.Invalidf("coach invoice void failed; registration was not deleted: %v", err)
 		}
 	}
@@ -507,7 +507,7 @@ func (s *Service) ResendInvoice(ctx context.Context, groupID, actor string, expe
 	if g == nil {
 		return domain.ErrGroupNotFound
 	}
-	if g.StripeInvoiceID == nil || *g.StripeInvoiceID == "" {
+	if g.BalanceInvoiceRef == nil || *g.BalanceInvoiceRef == "" {
 		return apperr.Invalid("no invoice on file")
 	}
 	openTR, err := g.RequireOpenInvoice()
@@ -515,7 +515,7 @@ func (s *Service) ResendInvoice(ctx context.Context, groupID, actor string, expe
 		return err
 	}
 	// Primary: ask Stripe to re-email. If it succeeds, stamp and return.
-	if err := s.stripe.SendInvoiceEmail(ctx, *g.StripeInvoiceID); err == nil {
+	if err := s.invoices.SendInvoiceEmail(ctx, *g.BalanceInvoiceRef); err == nil {
 		meta := domain.ActionMeta{
 			Actor:           actor,
 			Action:          "invoice_resent",
@@ -529,7 +529,7 @@ func (s *Service) ResendInvoice(ctx context.Context, groupID, actor string, expe
 		log.Printf("billing: Stripe re-send failed for group %s; falling back to Resend: %v", groupID, err)
 	}
 	// Fallback: email the hosted payment link ourselves.
-	res, err := s.stripe.GetInvoice(ctx, *g.StripeInvoiceID)
+	res, err := s.invoices.GetInvoice(ctx, *g.BalanceInvoiceRef)
 	if err != nil {
 		return fmt.Errorf("operation: %w", err)
 	}

@@ -7,9 +7,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"pagasacentre/backend/internal/admin"
 	admindto "pagasacentre/backend/internal/api/campadmin/dto"
 	"pagasacentre/backend/internal/api/campadmin/dto/mapper"
+	"pagasacentre/backend/internal/auth"
 	"pagasacentre/backend/internal/billing"
 	usecase "pagasacentre/backend/internal/campadmin"
 	"pagasacentre/backend/internal/registration/domain"
@@ -26,7 +26,7 @@ func putAllocation(svc *usecase.Service) http.HandlerFunc {
 			return
 		}
 		groupID := chi.URLParam(r, "groupID")
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		if err := svc.Allocate(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion), mapper.AllocateToDomain(body)); err != nil {
 			commonerrors.WriteError(w, err)
 			return
@@ -40,7 +40,7 @@ func postInvoice(svc *usecase.Service) http.HandlerFunc {
 		var body admindto.VersionedBody
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		if err := svc.SendInvoice(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
 			commonerrors.WriteError(w, err)
 			return
@@ -56,7 +56,7 @@ func postInvoiceBulk(svc *usecase.Service) http.HandlerFunc {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		errs := svc.SendInvoicesBulk(r.Context(), actor, body.GroupIDs)
 		if len(errs) > 0 {
 			render.Json(w, http.StatusMultiStatus, map[string]any{"errors": publicErrors(r, errs)})
@@ -71,7 +71,7 @@ func postCoachInvoice(svc *usecase.Service) http.HandlerFunc {
 		var body admindto.VersionedBody
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		if err := svc.SendCoachInvoice(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
 			commonerrors.WriteError(w, err)
 			return
@@ -87,7 +87,7 @@ func postCoachInvoiceBulk(svc *usecase.Service) http.HandlerFunc {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		errs := svc.SendCoachInvoicesBulk(r.Context(), actor, body.GroupIDs)
 		if len(errs) > 0 {
 			render.Json(w, http.StatusMultiStatus, map[string]any{"errors": publicErrors(r, errs)})
@@ -102,7 +102,7 @@ func postWaiveCoachFee(svc *usecase.Service) http.HandlerFunc {
 		var body admindto.VersionedBody
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		if err := svc.WaiveCoachFee(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
 			commonerrors.WriteError(w, err)
 			return
@@ -116,7 +116,7 @@ func postUnwaiveCoachFee(svc *usecase.Service) http.HandlerFunc {
 		var body admindto.VersionedBody
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		if err := svc.UnwaiveCoachFee(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
 			commonerrors.WriteError(w, err)
 			return
@@ -130,7 +130,7 @@ func postUnallocate(svc *usecase.Service) http.HandlerFunc {
 		var body admindto.VersionedBody
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		if err := svc.Unallocate(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
 			commonerrors.WriteError(w, err)
 			return
@@ -144,7 +144,7 @@ func postRelease(svc *usecase.Service, cancelled bool) http.HandlerFunc {
 		var body admindto.VersionedBody
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		if err := svc.Release(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion), cancelled); err != nil {
 			commonerrors.WriteError(w, err)
 			return
@@ -158,7 +158,7 @@ func postMarkPaid(svc *usecase.Service) http.HandlerFunc {
 		var body admindto.VersionedBody
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		if err := svc.MarkBalancePaidManually(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
 			commonerrors.WriteError(w, err)
 			return
@@ -173,7 +173,7 @@ func deleteCamper(svc *usecase.Service) http.HandlerFunc {
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
 		camperID := chi.URLParam(r, "camperID")
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		if _, err := svc.RemoveCamper(r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
 			commonerrors.WriteError(w, err)
 			return
@@ -191,7 +191,7 @@ func postConvertDayVisitor(svc *usecase.Service) http.HandlerFunc {
 		}
 		groupID := chi.URLParam(r, "groupID")
 		camperID := chi.URLParam(r, "camperID")
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		if _, err := svc.ConvertCamperToDayVisitor(
 			r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion), mapper.ConvertToDayVisitorToDomain(body)); err != nil {
 			commonerrors.WriteError(w, err)
@@ -210,7 +210,7 @@ func patchDayPassCamper(svc *usecase.Service) http.HandlerFunc {
 		}
 		groupID := chi.URLParam(r, "groupID")
 		camperID := chi.URLParam(r, "camperID")
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		if _, err := svc.UpdateDayPassCamper(
 			r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion), mapper.UpdateDayPassToDomain(body)); err != nil {
 			commonerrors.WriteError(w, err)
@@ -229,7 +229,7 @@ func patchCamperCoach(svc *usecase.Service) http.HandlerFunc {
 		}
 		groupID := chi.URLParam(r, "groupID")
 		camperID := chi.URLParam(r, "camperID")
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		if _, err := svc.UpdateCamperCoach(
 			r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion), mapper.UpdateCoachToDomain(body)); err != nil {
 			commonerrors.WriteError(w, err)
@@ -248,7 +248,7 @@ func patchCamper(svc *usecase.Service) http.HandlerFunc {
 		}
 		groupID := chi.URLParam(r, "groupID")
 		camperID := chi.URLParam(r, "camperID")
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		sum, err := svc.EditCamper(
 			r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion), mapper.EditCamperToDomain(body))
 		if err != nil {
@@ -267,7 +267,7 @@ func postAddCamper(svc *usecase.Service) http.HandlerFunc {
 			return
 		}
 		groupID := chi.URLParam(r, "groupID")
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		sum, err := svc.AddCamper(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion), mapper.AddCamperToDomain(body))
 		if err != nil {
 			commonerrors.WriteError(w, err)
@@ -283,7 +283,7 @@ func postMakeMainContact(svc *usecase.Service) http.HandlerFunc {
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
 		camperID := chi.URLParam(r, "camperID")
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		if err := svc.MakeMainContact(r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
 			commonerrors.WriteError(w, err)
 			return
@@ -298,7 +298,7 @@ func postWaiveCamperDeposit(svc *usecase.Service) http.HandlerFunc {
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
 		camperID := chi.URLParam(r, "camperID")
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		if err := svc.WaiveCamperDeposit(r.Context(), groupID, camperID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
 			commonerrors.WriteError(w, err)
 			return
@@ -312,7 +312,7 @@ func deleteRegistration(svc *usecase.Service) http.HandlerFunc {
 		var body admindto.VersionedBody
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		if _, err := svc.DeleteRegistration(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
 			commonerrors.WriteError(w, err)
 			return
@@ -326,7 +326,7 @@ func postResendInvoice(svc *usecase.Service) http.HandlerFunc {
 		var body admindto.VersionedBody
 		_ = request.Decode(r, &body)
 		groupID := chi.URLParam(r, "groupID")
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		if err := svc.ResendInvoice(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion)); err != nil {
 			commonerrors.WriteError(w, err)
 			return
@@ -337,7 +337,7 @@ func postResendInvoice(svc *usecase.Service) http.HandlerFunc {
 
 func postResyncAllSheets(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		synced, errs := svc.ResyncAllSheets(r.Context(), actor)
 		if len(errs) > 0 {
 			render.Json(w, http.StatusMultiStatus, map[string]any{
@@ -363,7 +363,7 @@ func patchInvoiceDue(svc *usecase.Service) http.HandlerFunc {
 			return
 		}
 		groupID := chi.URLParam(r, "groupID")
-		actor := admin.ActorFrom(r.Context())
+		actor := auth.ActorFrom(r.Context())
 		if err := svc.ExtendDueAt(r.Context(), groupID, actor, billing.ExpectedVersion(body.ExpectedVersion), dueAt); err != nil {
 			commonerrors.WriteError(w, err)
 			return
@@ -374,7 +374,7 @@ func patchInvoiceDue(svc *usecase.Service) http.HandlerFunc {
 
 func postBillingSweep(svc *usecase.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		n, err := svc.SweepOverdue(r.Context(), admin.ActorFrom(r.Context()))
+		n, err := svc.SweepOverdue(r.Context(), auth.ActorFrom(r.Context()))
 		if err != nil {
 			commonerrors.WriteError(w, err)
 			return
@@ -424,7 +424,7 @@ func putAccommodationAvailability(setter availabilitySetter) http.HandlerFunc {
 			return
 		}
 		code := chi.URLParam(r, "code")
-		if err := setter.SetAccommodationAvailability(r.Context(), admin.ActorFrom(r.Context()), code, *b.Available); err != nil {
+		if err := setter.SetAccommodationAvailability(r.Context(), auth.ActorFrom(r.Context()), code, *b.Available); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}

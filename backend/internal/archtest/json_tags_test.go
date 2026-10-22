@@ -11,10 +11,10 @@ import (
 )
 
 var jsonTagAllowlist = map[string]bool{
-	"internal/middleware/admin_auth.go": true,
-	"internal/email/resend.go":          true,
-	"internal/sermon/youtube.go":        true,
-	"internal/campadmin/audit_meta.go":  true,
+	"internal/auth/token.go":           true,
+	"internal/email/resend.go":         true,
+	"internal/sermon/youtube.go":       true,
+	"internal/campadmin/audit_meta.go": true,
 }
 
 func TestJSONTagsOnlyInAPILayer(t *testing.T) {

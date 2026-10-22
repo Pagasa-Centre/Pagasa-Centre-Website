@@ -219,7 +219,7 @@ func (s *Service) groupHasCoachEligible(ctx context.Context, groupID string) (bo
 		if c.AttendanceType != domain.AttendanceFullWeek {
 			continue
 		}
-		if c.NeedsCoach != nil && *c.NeedsCoach && c.Age >= 4 {
+		if c.CoachEligible() {
 			return true, nil
 		}
 	}

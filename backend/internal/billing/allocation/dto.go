@@ -4,7 +4,7 @@ type AllocateCamper struct {
 	CamperID                   string
 	AllocatedAccommodationCode string
 	AllocatedUnitCode          string
-	BilledStripePriceID        string
+	BilledPriceRef             string
 }
 
 type AllocateRequest struct {

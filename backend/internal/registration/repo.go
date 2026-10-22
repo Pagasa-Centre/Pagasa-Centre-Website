@@ -18,7 +18,7 @@ type groupRepo interface {
 	MarkFreeCodeUsed(ctx context.Context, codeID, groupID string) error
 	ApplySettlement(ctx context.Context, groupID, paymentIntentID string, coachIncluded bool, s domain.Settlement) error
 	SetPaymentStatus(ctx context.Context, groupID string, tr domain.PaymentTransition) error
-	SetStripeSession(ctx context.Context, groupID, sessionID string) error
+	SetCheckoutSession(ctx context.Context, groupID, sessionID string) error
 	ListAccommodationTypes(ctx context.Context) ([]domain.AccommodationType, error)
 	ListAccommodationUnits(ctx context.Context) ([]domain.AccommodationUnit, error)
 	SetAccommodationAvailableForRegistration(ctx context.Context, code string, available bool) error

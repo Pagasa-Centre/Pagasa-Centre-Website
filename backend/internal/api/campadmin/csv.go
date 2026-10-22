@@ -1,4 +1,4 @@
-package admin
+package campadmin
 
 import (
 	"encoding/csv"
@@ -23,8 +23,6 @@ var csvHeader = []string{
 	"deposit_owed_pence",
 }
 
-// WriteCSV emits a flat CSV — one row per camper — combining group fields and
-// camper fields. Groups without campers are skipped.
 func WriteCSV(w io.Writer, groups []domain.Group, campersByGroup map[string][]domain.Camper) error {
 	cw := csv.NewWriter(w)
 	defer cw.Flush()
@@ -56,17 +54,17 @@ func WriteCSV(w io.Writer, groups []domain.Group, campersByGroup map[string][]do
 				c.CellLeaderName,
 				strconv.FormatBool(c.IsCellLeader),
 				c.AttendanceType,
-				deref(c.ShirtSize),
-				deref(c.DietaryRequirements),
-				formatBoolPtr(c.NeedsCoach),
-				deref(c.AccommodationFirstChoice),
-				deref(c.AccommodationSecondChoice),
-				deref(c.RoommateRequests),
-				deref(c.AllocatedAccommodationCode),
-				deref(c.BilledStripePriceID),
+				derefCSV(c.ShirtSize),
+				derefCSV(c.DietaryRequirements),
+				formatBoolPtrCSV(c.NeedsCoach),
+				derefCSV(c.AccommodationFirstChoice),
+				derefCSV(c.AccommodationSecondChoice),
+				derefCSV(c.RoommateRequests),
+				derefCSV(c.AllocatedAccommodationCode),
+				derefCSV(c.BilledPriceRef),
 				strings.Join(c.DayPassDays, "|"),
-				deref(c.DayPassTshirtOption),
-				formatBoolPtr(c.DayPassNeedsCatering),
+				derefCSV(c.DayPassTshirtOption),
+				formatBoolPtrCSV(c.DayPassNeedsCatering),
 				strconv.Itoa(c.DepositOwedPence),
 			}
 			if err := cw.Write(row); err != nil {
@@ -77,14 +75,14 @@ func WriteCSV(w io.Writer, groups []domain.Group, campersByGroup map[string][]do
 	return cw.Error()
 }
 
-func deref(s *string) string {
+func derefCSV(s *string) string {
 	if s == nil {
 		return ""
 	}
 	return *s
 }
 
-func formatBoolPtr(b *bool) string {
+func formatBoolPtrCSV(b *bool) string {
 	if b == nil {
 		return ""
 	}

@@ -18,11 +18,11 @@ func strPtr(s string) *string { return &s }
 func TestAllocate_persistsUnit(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
-	cfg := billing.Config{StripePriceChildUnder3: "price_child"}
+	cfg := billing.Config{ChildUnder3PriceRef: "price_child"}
 	env := billingtest.NewEnv(t, pool, &billingtest.StubStripe{}, nil, nil, cfg)
 	repo := env.Repo
 	// Allocation auto-resolves the tier's Stripe price, so lodge must have one.
-	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "lodge", "price_lodge"); err != nil {
 		t.Fatalf("seed lodge price: %v", err)
 	}
 
@@ -76,10 +76,10 @@ func TestAllocate_persistsUnit(t *testing.T) {
 func TestAllocate_versionConflict(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
-	cfg := billing.Config{StripePriceChildUnder3: "price_child"}
+	cfg := billing.Config{ChildUnder3PriceRef: "price_child"}
 	env := billingtest.NewEnv(t, pool, &billingtest.StubStripe{}, nil, nil, cfg)
 	repo := env.Repo
-	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "lodge", "price_lodge"); err != nil {
 		t.Fatalf("seed lodge price: %v", err)
 	}
 
@@ -206,7 +206,7 @@ func TestAllocate_prepaidGroupKeepsBalancePaid(t *testing.T) {
 	cfg := billing.Config{}
 	env := billingtest.NewEnv(t, pool, &billingtest.StubStripe{}, nil, nil, cfg)
 	repo := env.Repo
-	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "lodge", "price_lodge"); err != nil {
 		t.Fatalf("seed lodge price: %v", err)
 	}
 
@@ -235,7 +235,7 @@ func TestAllocate_prepaidGroupKeepsBalancePaid(t *testing.T) {
 		Campers: []allocation.AllocateCamper{{
 			CamperID:                   camperID,
 			AllocatedAccommodationCode: "lodge",
-			BilledStripePriceID:        "price_lodge",
+			BilledPriceRef:             "price_lodge",
 		}},
 	}); err != nil {
 		t.Fatalf("Allocate prepaid: %v", err)

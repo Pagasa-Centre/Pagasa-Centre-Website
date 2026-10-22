@@ -5,7 +5,7 @@ type CamperAllocation struct {
 	CamperID                   string
 	AllocatedAccommodationCode string
 	AllocatedUnitCode          string
-	BilledStripePriceID        string
+	BilledPriceRef             string
 }
 
 // CamperDetails is the full set of identity and stay fields an admin can rewrite
@@ -24,7 +24,7 @@ type CamperDetails struct {
 	AccommodationSecondChoice  *string
 	AllocatedAccommodationCode *string
 	AllocatedUnitCode          *string
-	BilledStripePriceID        *string
+	BilledPriceRef             *string
 }
 
 // DayPassFields holds day-visitor details applied during a full-week conversion.

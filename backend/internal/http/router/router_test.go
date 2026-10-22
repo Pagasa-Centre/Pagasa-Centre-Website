@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	authapi "pagasacentre/backend/internal/api/auth"
+	"pagasacentre/backend/internal/auth"
 )
 
 type stubPinger struct{ err error }
@@ -31,7 +34,11 @@ func TestHealth(t *testing.T) {
 }
 
 func TestCampAdminRoutes(t *testing.T) {
-	h := New(Config{})
+	authSvc := auth.NewService(auth.Config{SessionSecret: []byte("test-secret")}, nil)
+	h := New(Config{
+		AuthSvc:     authSvc,
+		AuthHandler: authapi.NewHandler(authSvc, false),
+	})
 	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)
 

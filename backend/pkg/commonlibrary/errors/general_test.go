@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 	"pagasacentre/backend/pkg/commonlibrary/apperr"
+	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 )
 
 func TestWriteError_sanitisesInternalAPIError(t *testing.T) {
@@ -130,6 +130,28 @@ func TestWriteError_domainKinds(t *testing.T) {
 	commonerrors.WriteError(w, wrapped)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("wrapped not found status %d", w.Code)
+	}
+
+	unauth := apperr.Unauthorized("invalid credentials")
+	w = httptest.NewRecorder()
+	commonerrors.WriteError(w, unauth)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status %d", w.Code)
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &parsed)
+	if parsed.Code != "unauthorized" || parsed.Message != "invalid credentials" {
+		t.Fatalf("unauthorized: %+v", parsed)
+	}
+
+	rate := apperr.RateLimited("too many attempts")
+	w = httptest.NewRecorder()
+	commonerrors.WriteError(w, rate)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("rate limited status %d", w.Code)
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &parsed)
+	if parsed.Code != "too_many_requests" || parsed.Message != "too many attempts" {
+		t.Fatalf("rate limited: %+v", parsed)
 	}
 }
 

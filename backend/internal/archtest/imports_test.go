@@ -1,6 +1,7 @@
 package archtest
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
@@ -222,4 +223,148 @@ func TestApperrImportsOnlyStdlib(t *testing.T) {
 	if len(violations) > 0 {
 		t.Fatalf("apperr must be stdlib-only:\n%s", strings.Join(violations, "\n"))
 	}
+}
+
+func TestStripeSDKOnlyInAdapters(t *testing.T) {
+	backend := backendRoot(t)
+	internal := filepath.Join(backend, "internal")
+	fset := token.NewFileSet()
+	const stripeImport = "github.com/stripe/stripe-go"
+	var violations []string
+	err := walkGoFiles(internal, func(path string) {
+		rel := relInternal(path, backend)
+		if rel == "" {
+			return
+		}
+		if strings.HasPrefix(rel, "internal/stripe/") {
+			return
+		}
+		if rel == "internal/api/payment/handler.go" {
+			return
+		}
+		for _, imp := range importPaths(fset, path) {
+			if imp == stripeImport || strings.HasPrefix(imp, stripeImport+"/") {
+				violations = append(violations, rel+" imports "+imp)
+			}
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(violations) > 0 {
+		t.Fatalf("stripe SDK only in internal/stripe and api/payment handler:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
+func TestBillingAndPaymentDoNotImportRegistrationService(t *testing.T) {
+	backend := backendRoot(t)
+	internal := filepath.Join(backend, "internal")
+	fset := token.NewFileSet()
+	const forbidden = "pagasacentre/backend/internal/registration"
+	var violations []string
+	err := walkGoFiles(internal, func(path string) {
+		rel := relInternal(path, backend)
+		if rel == "" {
+			return
+		}
+		if !strings.HasPrefix(rel, "internal/billing/") && !strings.HasPrefix(rel, "internal/payment/") {
+			return
+		}
+		for _, imp := range importPaths(fset, path) {
+			if imp == forbidden {
+				violations = append(violations, rel+" imports "+imp)
+			}
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(violations) > 0 {
+		t.Fatalf("billing/payment must not import registration service package:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
+func TestCoreIdentifiersAreVendorNeutral(t *testing.T) {
+	backend := backendRoot(t)
+	internal := filepath.Join(backend, "internal")
+	fset := token.NewFileSet()
+	prefixes := []string{
+		"internal/registration/",
+		"internal/billing/",
+		"internal/payment/",
+		"internal/campadmin/",
+	}
+	var violations []string
+	err := walkGoFiles(internal, func(path string) {
+		rel := relInternal(path, backend)
+		if rel == "" {
+			return
+		}
+		ok := false
+		for _, p := range prefixes {
+			if strings.HasPrefix(rel, p) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return
+		}
+		if strings.Contains(rel, "/storage/") || strings.Contains(rel, "/billingtest/") {
+			return
+		}
+		f, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", rel, err)
+		}
+		checkNeutralNames(f, rel, &violations)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(violations) > 0 {
+		t.Fatalf("vendor-neutral core identifiers:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
+func checkNeutralNames(f *ast.File, rel string, violations *[]string) {
+	const bad = "stripe"
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case *ast.TypeSpec:
+			if strings.Contains(strings.ToLower(x.Name.Name), bad) {
+				*violations = append(*violations, rel+": type "+x.Name.Name)
+			}
+		case *ast.StructType:
+			for _, fld := range x.Fields.List {
+				for _, nm := range fld.Names {
+					if strings.Contains(strings.ToLower(nm.Name), bad) {
+						*violations = append(*violations, rel+": field "+nm.Name)
+					}
+				}
+			}
+		case *ast.FuncDecl:
+			if x.Recv == nil && strings.Contains(strings.ToLower(x.Name.Name), bad) {
+				*violations = append(*violations, rel+": func "+x.Name.Name)
+			}
+			if x.Recv != nil {
+				for _, r := range x.Recv.List {
+					for _, nm := range r.Names {
+						if strings.Contains(strings.ToLower(nm.Name), bad) {
+							*violations = append(*violations, rel+": method recv "+nm.Name)
+						}
+					}
+				}
+			}
+		case *ast.InterfaceType:
+			for _, m := range x.Methods.List {
+				for _, nm := range m.Names {
+					if strings.Contains(strings.ToLower(nm.Name), bad) {
+						*violations = append(*violations, rel+": iface method "+nm.Name)
+					}
+				}
+			}
+		}
+		return true
+	})
 }

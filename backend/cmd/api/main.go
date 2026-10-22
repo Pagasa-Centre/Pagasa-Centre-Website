@@ -14,10 +14,12 @@ import (
 	"github.com/robfig/cron/v3"
 
 	"pagasacentre/backend/internal/accommodation"
+	"pagasacentre/backend/internal/auth"
 	accomstorage "pagasacentre/backend/internal/accommodation/storage"
 	"pagasacentre/backend/internal/adminlog"
 	adminstorage "pagasacentre/backend/internal/adminlog/storage"
 	accomapi "pagasacentre/backend/internal/api/accommodation"
+	authapi "pagasacentre/backend/internal/api/auth"
 	campapi "pagasacentre/backend/internal/api/camp"
 	consentapi "pagasacentre/backend/internal/api/consent"
 	paymentapi "pagasacentre/backend/internal/api/payment"
@@ -42,9 +44,10 @@ import (
 	"pagasacentre/backend/internal/config"
 	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/http/router"
-	"pagasacentre/backend/internal/middleware"
 	"pagasacentre/backend/internal/payment"
 	"pagasacentre/backend/internal/registration"
+	stripeadapter "pagasacentre/backend/internal/stripe"
+	"pagasacentre/backend/internal/registration/domain"
 	regstorage "pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/sermon"
 	sermonstorage "pagasacentre/backend/internal/sermon/storage"
@@ -120,10 +123,12 @@ func main() {
 
 	applyStripePriceOverrides(ctx, regRepo, cfg)
 
-	stripeCli := payment.NewStripeClient(
+	stripeadapter.Init(cfg.StripeSecretKey)
+	stripeCli := stripeadapter.NewCheckoutClient(
 		cfg.StripeSecretKey, cfg.StripeWebhookSecret,
 		cfg.StripeSuccessURL, cfg.StripeCancelURL,
 	)
+	priceCatalog := stripeadapter.NewPriceCatalog()
 
 	// Optional integrations. If a required client (the database, Stripe) cannot
 	// start, the process should exit. If an optional one cannot, fall back to a
@@ -167,15 +172,15 @@ func main() {
 		txRunner,
 		campPriceAdapter{repo: campRepo},
 		stripeCli,
-		payment.NewPriceCatalog(),
+		priceCatalog,
 		campRepo,
 		mailer,
 		sheetSync,
 		cfg.PublicBaseURL,
 		registration.Config{
-			StripePriceChildUnder3: cfg.StripePriceChildUnder3,
-			StripePriceDayPass:     cfg.StripePriceDayPass,
-			StripePriceCoach:       cfg.StripePriceCoach,
+			ChildUnder3PriceRef: cfg.StripePriceChildUnder3,
+			DayPassPriceRef:     cfg.StripePriceDayPass,
+			CoachPriceRef:       cfg.StripePriceCoach,
 		},
 	)
 
@@ -187,15 +192,15 @@ func main() {
 	}
 
 	billCfg := billing.Config{
-		StripePriceChildUnder3: cfg.StripePriceChildUnder3,
-		StripePriceDayPass:     cfg.StripePriceDayPass,
-		StripePriceCoach:       cfg.StripePriceCoach,
+		ChildUnder3PriceRef: cfg.StripePriceChildUnder3,
+		DayPassPriceRef:     cfg.StripePriceDayPass,
+		CoachPriceRef:       cfg.StripePriceCoach,
 		DepositPricePence:      depositPence,
 		InvoiceDueDays:         cfg.InvoiceDueDays,
 		WhiteTeamEmail:         cfg.WhiteTeamEmail,
 	}
 	pricer := billing.NewPricer(regRepo, billCfg, campPriceAdapter{repo: campRepo})
-	stripeBill := billing.NewStripeBilling()
+	stripeBill := stripeadapter.NewBillingClient()
 	allocRepo := allocstorage.NewRepository(pool)
 	invRepo := invstorage.NewRepository(pool)
 	camperRepo := camperstorage.NewRepository(pool)
@@ -210,12 +215,6 @@ func main() {
 	sweepSvc := sweep.NewService(sweepRepo, allocSvc)
 	sheetSvc := sheetsync.NewService(regRepo, sheetRepo, sheetSync)
 
-	adminAuth := middleware.AuthConfig{
-		Password:         cfg.AdminPassword,
-		SessionSecret:    []byte(cfg.AdminSessionSecret),
-		SecureCookie:     cfg.AdminSecureCookie,
-		FreeCodePassword: cfg.AdminFreeCodePassword,
-	}
 	if cfg.AdminPassword == "" || cfg.AdminSessionSecret == "" {
 		log.Println("admin: WARNING — ADMIN_PASSWORD or ADMIN_SESSION_SECRET unset; login will not work")
 	}
@@ -293,13 +292,19 @@ func main() {
 		Sweep:      sweepSvc,
 		Sheets:     sheetSvc,
 	}, regSvc, campSvc, paySvc, adminRec)
+	authSvc := auth.NewService(auth.Config{
+		Password:         cfg.AdminPassword,
+		SessionSecret:    []byte(cfg.AdminSessionSecret),
+		FreeCodePassword: cfg.AdminFreeCodePassword,
+	}, adminSvc)
 
 	// 6. One HTTP handler. Routes are registered in the router, not here. main
 	// only hands the router the dependencies it needs.
 	handler := router.New(router.Config{
 		AllowedOrigin:        cfg.AllowedOrigin,
 		Commit:               commit,
-		AdminAuth:            adminAuth,
+		AuthSvc:              authSvc,
+		AuthHandler:          authapi.NewHandler(authSvc, cfg.AdminSecureCookie),
 		DB:                   pool,
 		CampHandler:          campapi.NewHandler(campSvc),
 		AccommodationHandler: accomapi.NewHandler(accSvc),
@@ -373,7 +378,7 @@ func applyStripePriceOverrides(ctx context.Context, repo *regstorage.Repository,
 		if priceID == "" {
 			continue
 		}
-		if err := repo.UpdateAccommodationStripePrice(ctx, code, priceID); err != nil {
+		if err := repo.UpdateAccommodationPriceRef(ctx, code, priceID); err != nil {
 			log.Printf("stripe price override %s: %v", code, err)
 		}
 	}
@@ -381,10 +386,10 @@ func applyStripePriceOverrides(ctx context.Context, repo *regstorage.Repository,
 
 type campPriceAdapter struct{ repo *campstorage.Repository }
 
-func (a campPriceAdapter) GetPrice(ctx context.Context, code string) (registration.PriceRow, error) {
+func (a campPriceAdapter) GetPrice(ctx context.Context, code string) (domain.PriceRow, error) {
 	p, err := a.repo.GetPrice(ctx, code)
 	if err != nil {
-		return registration.PriceRow{}, err
+		return domain.PriceRow{}, err
 	}
-	return registration.PriceRow{AmountPence: p.AmountPence, Currency: p.Currency}, nil
+	return domain.PriceRow{AmountPence: p.AmountPence, Currency: p.Currency}, nil
 }

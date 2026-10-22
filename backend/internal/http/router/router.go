@@ -10,12 +10,14 @@ import (
 
 	"pagasacentre/backend/internal/adminlog"
 	accomapi "pagasacentre/backend/internal/api/accommodation"
+	authapi "pagasacentre/backend/internal/api/auth"
 	campapi "pagasacentre/backend/internal/api/camp"
 	campadminapi "pagasacentre/backend/internal/api/campadmin"
 	consentapi "pagasacentre/backend/internal/api/consent"
 	paymentapi "pagasacentre/backend/internal/api/payment"
 	regapi "pagasacentre/backend/internal/api/registration"
 	sermonapi "pagasacentre/backend/internal/api/sermon"
+	"pagasacentre/backend/internal/auth"
 	"pagasacentre/backend/internal/camp"
 	"pagasacentre/backend/internal/campadmin"
 	"pagasacentre/backend/internal/middleware"
@@ -33,7 +35,8 @@ type Config struct {
 	Commit        string
 	DB            Pinger
 
-	AdminAuth middleware.AuthConfig
+	AuthSvc     *auth.Service
+	AuthHandler *authapi.Handler
 
 	CampHandler          *campapi.Handler
 	AccommodationHandler *accomapi.Handler
@@ -70,7 +73,7 @@ func New(cfg Config) http.Handler {
 		render.Json(w, http.StatusOK, map[string]string{"status": "ok", "commit": cfg.Commit})
 	})
 
-	r.Get("/camp-admin/stream", campadminapi.HandleStream(cfg.AdminAuth, cfg.AdminHub))
+	r.Get("/camp-admin/stream", campadminapi.HandleStream(cfg.AuthSvc, cfg.AdminHub))
 
 	r.Route("/api", func(r chi.Router) {
 		middleware.WithRequestTimeout(r)
@@ -88,7 +91,10 @@ func New(cfg Config) http.Handler {
 
 	r.Route("/camp-admin", func(r chi.Router) {
 		middleware.WithRequestTimeout(r)
-		campadminapi.Mount(r, cfg.AdminAuth, cfg.RegSvc, cfg.CampSvc, cfg.AdminSvc)
+		r.Post("/login", cfg.AuthHandler.Login())
+		r.Post("/logout", cfg.AuthHandler.Logout())
+		r.Get("/session", cfg.AuthHandler.Session())
+		campadminapi.Mount(r, cfg.AuthSvc, cfg.RegSvc, cfg.CampSvc, cfg.AdminSvc)
 	})
 
 	return r

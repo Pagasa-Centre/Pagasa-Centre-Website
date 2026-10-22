@@ -148,7 +148,7 @@ func (g *Group) RequireOpenInvoice() (BillingTransition, error) {
 // HasOpenInvoice is true when the group has an open balance invoice in Stripe.
 func (g *Group) HasOpenInvoice() bool {
 	return g.BillingStatus == BillingInvoiced &&
-		g.StripeInvoiceID != nil && strings.TrimSpace(*g.StripeInvoiceID) != ""
+		g.BalanceInvoiceRef != nil && strings.TrimSpace(*g.BalanceInvoiceRef) != ""
 }
 
 // BalanceSettled is true when the balance lifecycle is complete.

@@ -9,9 +9,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"pagasacentre/backend/internal/admin"
 	admindto "pagasacentre/backend/internal/api/campadmin/dto"
 	"pagasacentre/backend/internal/api/campadmin/dto/mapper"
+	"pagasacentre/backend/internal/auth"
 	"pagasacentre/backend/internal/camp"
 	campdomain "pagasacentre/backend/internal/camp/domain"
 	usecase "pagasacentre/backend/internal/campadmin"
@@ -35,18 +35,14 @@ type campConfigReader interface {
 // middleware; everything else requires a valid session cookie.
 func Mount(
 	r chi.Router,
-	auth middleware.AuthConfig,
+	authSvc *auth.Service,
 	regSvc *registration.Service,
 	campSvc *camp.Service,
 	adminSvc *usecase.Service,
 ) {
-	r.Post("/login", middleware.HandleLogin(auth, adminSvc))
-	r.Post("/logout", middleware.HandleLogout(auth))
-	r.Get("/session", middleware.HandleSession(auth))
-
 	r.Group(func(r chi.Router) {
 		r.Use(func(next http.Handler) http.Handler {
-			return middleware.RequireAdmin(auth, next)
+			return middleware.RequireAdmin(authSvc, next)
 		})
 
 		r.Get("/registrations", listRegistrationsJSON(regSvc))
@@ -88,7 +84,7 @@ func Mount(
 		r.Patch("/registrations/{groupID}/invoice-due", patchInvoiceDue(adminSvc))
 		r.Post("/billing/sweep", postBillingSweep(adminSvc))
 
-		r.Post("/free-codes", postGenerateFreeCode(auth, adminSvc))
+		r.Post("/free-codes", postGenerateFreeCode(authSvc, adminSvc))
 		r.Get("/free-codes", getFreeCodes(regSvc))
 		r.Post("/free-codes/{id}/revoke", postRevokeFreeCode(adminSvc))
 		r.Post("/registrations/{groupID}/confirm-free", postConfirmFree(adminSvc))
@@ -133,7 +129,7 @@ func listRegistrationsCSV(svc registrationLister) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 		filename := "registrations-" + time.Now().UTC().Format("20060102-150405") + ".csv"
 		w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
-		if err := admin.WriteCSV(w, groups, byGroup); err != nil {
+		if err := WriteCSV(w, groups, byGroup); err != nil {
 			commonerrors.WriteError(w, err)
 		}
 	}
@@ -149,7 +145,7 @@ func patchRegistration(svc *usecase.Service) http.HandlerFunc {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		if err := svc.SetPaymentStatus(r.Context(), chi.URLParam(r, "groupID"), admin.ActorFrom(r.Context()), b.PaymentStatus); err != nil {
+		if err := svc.SetPaymentStatus(r.Context(), chi.URLParam(r, "groupID"), auth.ActorFrom(r.Context()), b.PaymentStatus); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
@@ -183,7 +179,7 @@ func patchContact(svc *usecase.Service) http.HandlerFunc {
 		if b.LastName == "" {
 			fields["last_name"] = "is required"
 		}
-		if !registration.ValidEmail(b.Email) {
+		if !domain.ValidEmail(b.Email) {
 			fields["email"] = "must be a valid email"
 		}
 		if b.Phone == "" {
@@ -194,7 +190,7 @@ func patchContact(svc *usecase.Service) http.HandlerFunc {
 			return
 		}
 
-		err := svc.UpdateContact(r.Context(), chi.URLParam(r, "groupID"), admin.ActorFrom(r.Context()),
+		err := svc.UpdateContact(r.Context(), chi.URLParam(r, "groupID"), auth.ActorFrom(r.Context()),
 			b.FirstName, b.LastName, b.Email, b.Phone, b.ResendConfirmation)
 		if err != nil {
 			commonerrors.WriteError(w, err)
@@ -229,7 +225,7 @@ func putRegistrationsOpen(svc *usecase.Service) http.HandlerFunc {
 			commonerrors.WriteError(w, commonerrors.BadRequest("missing 'open' boolean", nil))
 			return
 		}
-		if err := svc.SetRegistrationsOpen(r.Context(), admin.ActorFrom(r.Context()), *b.Open); err != nil {
+		if err := svc.SetRegistrationsOpen(r.Context(), auth.ActorFrom(r.Context()), *b.Open); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
@@ -256,7 +252,7 @@ func putRegistrationPaymentMode(svc *usecase.Service) http.HandlerFunc {
 			commonerrors.WriteError(w, commonerrors.BadRequest("mode must be 'deposit' or 'full'", nil))
 			return
 		}
-		if err := svc.SetRegistrationPaymentMode(r.Context(), admin.ActorFrom(r.Context()), mode); err != nil {
+		if err := svc.SetRegistrationPaymentMode(r.Context(), auth.ActorFrom(r.Context()), mode); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}
@@ -279,7 +275,7 @@ func putPrice(svc *usecase.Service) http.HandlerFunc {
 			return
 		}
 		code := chi.URLParam(r, "code")
-		if err := svc.UpdatePrice(r.Context(), admin.ActorFrom(r.Context()), code, b.AmountPence); err != nil {
+		if err := svc.UpdatePrice(r.Context(), auth.ActorFrom(r.Context()), code, b.AmountPence); err != nil {
 			commonerrors.WriteError(w, err)
 			return
 		}

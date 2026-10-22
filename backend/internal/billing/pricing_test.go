@@ -6,22 +6,22 @@ import (
 
 	"pagasacentre/backend/internal/billing"
 	"pagasacentre/backend/internal/billing/billingtest"
-	"pagasacentre/backend/internal/registration"
+	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/internal/testhelper"
 )
 
 func TestChildUnder3UsesConfigPrice(t *testing.T) {
-	cfg := billing.Config{StripePriceChildUnder3: "price_child_0"}
-	if cfg.StripePriceChildUnder3 == "" {
+	cfg := billing.Config{ChildUnder3PriceRef: "price_child_0"}
+	if cfg.ChildUnder3PriceRef == "" {
 		t.Fatal("expected configured under-3 price")
 	}
 	// Documented rule: child accommodation + age < MinDepositAge => under-3 price.
-	age := registration.MinDepositAge - 1
-	code := registration.AccommodationChild
-	if code != "child" || age >= registration.MinDepositAge {
+	age := domain.MinDepositAge - 1
+	code := domain.AccommodationChild
+	if code != "child" || age >= domain.MinDepositAge {
 		t.Fatal("test precondition")
 	}
-	_ = cfg.StripePriceChildUnder3
+	_ = cfg.ChildUnder3PriceRef
 }
 
 func TestResolvePriceID_caravanOverflowMatchesTent(t *testing.T) {
@@ -31,10 +31,10 @@ func TestResolvePriceID_caravanOverflowMatchesTent(t *testing.T) {
 	env := billingtest.NewEnv(t, pool, &billingtest.StubStripe{}, nil, nil, cfg)
 	repo := env.Repo
 	price := "price_shared_tent_overflow"
-	if err := repo.UpdateAccommodationStripePrice(ctx, "tent", price); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "tent", price); err != nil {
 		t.Fatalf("update tent price: %v", err)
 	}
-	if err := repo.UpdateAccommodationStripePrice(ctx, "caravan_overflow", price); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "caravan_overflow", price); err != nil {
 		t.Fatalf("update overflow price: %v", err)
 	}
 	tentID, err := env.Pricer.ResolvePriceID(ctx, "tent", 25)
@@ -74,9 +74,9 @@ func TestValidateAllocatedUnit_rejectsMismatch(t *testing.T) {
 func TestResolvePriceID_childUnder4UsesUnder3Price(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
-	cfg := billing.Config{StripePriceChildUnder3: "price_child_u3"}
+	cfg := billing.Config{ChildUnder3PriceRef: "price_child_u3"}
 	env := billingtest.NewEnv(t, pool, &billingtest.StubStripe{}, nil, nil, cfg)
-	id, err := env.Pricer.ResolvePriceID(ctx, registration.AccommodationChild, 3)
+	id, err := env.Pricer.ResolvePriceID(ctx, domain.AccommodationChild, 3)
 	if err != nil {
 		t.Fatalf("resolve child under 4: %v", err)
 	}
@@ -88,13 +88,13 @@ func TestResolvePriceID_childUnder4UsesUnder3Price(t *testing.T) {
 func TestResolvePriceID_childAge8UsesTierPrice(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
-	cfg := billing.Config{StripePriceChildUnder3: "price_child_u3"}
+	cfg := billing.Config{ChildUnder3PriceRef: "price_child_u3"}
 	env := billingtest.NewEnv(t, pool, &billingtest.StubStripe{}, nil, nil, cfg)
 	repo := env.Repo
-	if err := repo.UpdateAccommodationStripePrice(ctx, "child", "price_child_tier"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "child", "price_child_tier"); err != nil {
 		t.Fatalf("seed child price: %v", err)
 	}
-	id, err := env.Pricer.ResolvePriceID(ctx, registration.AccommodationChild, 8)
+	id, err := env.Pricer.ResolvePriceID(ctx, domain.AccommodationChild, 8)
 	if err != nil {
 		t.Fatalf("resolve child age 8: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestResolvePriceID_tentUsesTierPrice(t *testing.T) {
 	cfg := billing.Config{}
 	env := billingtest.NewEnv(t, pool, &billingtest.StubStripe{}, nil, nil, cfg)
 	repo := env.Repo
-	if err := repo.UpdateAccommodationStripePrice(ctx, "tent", "price_tent"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "tent", "price_tent"); err != nil {
 		t.Fatalf("seed tent price: %v", err)
 	}
 	id, err := env.Pricer.ResolvePriceID(ctx, "tent", 25)
@@ -131,7 +131,7 @@ func TestResolvePriceID_emptyStripePriceErrors(t *testing.T) {
 		t.Fatalf("clear cabin price: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = repo.UpdateAccommodationStripePrice(context.Background(), "cabin", "price_cabin_restore")
+		_ = repo.UpdateAccommodationPriceRef(context.Background(), "cabin", "price_cabin_restore")
 	})
 	_, err := env.Pricer.ResolvePriceID(ctx, "cabin", 25)
 	if err == nil {

@@ -92,6 +92,10 @@ func domainToAPI(de *apperr.Error) APIError {
 			Fields:  de.Fields,
 			status:  http.StatusBadRequest,
 		}
+	case apperr.KindUnauthorized:
+		return APIError{Code: "unauthorized", Message: de.Message, status: http.StatusUnauthorized}
+	case apperr.KindRateLimited:
+		return APIError{Code: "too_many_requests", Message: de.Message, status: http.StatusTooManyRequests}
 	default:
 		return Internal(de.Message)
 	}
@@ -132,6 +136,8 @@ func StatusFor(err error) int {
 		return http.StatusConflict
 	case "unauthorized":
 		return http.StatusUnauthorized
+	case "too_many_requests":
+		return http.StatusTooManyRequests
 	case "forbidden":
 		return http.StatusForbidden
 	default:

@@ -177,6 +177,6 @@ func (r *Repository) MarkBalancePaidMeta(ctx context.Context, groupID string, me
 	return groupsql.MarkBalancePaid(ctx, r.pool, groupID, meta, tr)
 }
 
-func (r *Repository) SetStripeCustomerID(ctx context.Context, groupID, customerID string) error {
-	return groupsql.SetStripeCustomerID(ctx, r.pool, groupID, customerID)
+func (r *Repository) SetBillingCustomerRef(ctx context.Context, groupID, customerID string) error {
+	return groupsql.SetBillingCustomerRef(ctx, r.pool, groupID, customerID)
 }

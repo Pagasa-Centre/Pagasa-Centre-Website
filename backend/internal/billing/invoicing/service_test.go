@@ -11,7 +11,6 @@ import (
 	"pagasacentre/backend/internal/billing/billingtest"
 	"pagasacentre/backend/internal/billing/camperedit"
 	invstorage "pagasacentre/backend/internal/billing/invoicing/storage"
-	"pagasacentre/backend/internal/registration"
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/internal/testhelper"
 	"pagasacentre/backend/pkg/commonlibrary/apperr"
@@ -54,21 +53,21 @@ func editFor(c domain.Camper) camperedit.EditCamperRequest {
 	}
 }
 
-func (f fakePrices) GetPrice(_ context.Context, code string) (registration.PriceRow, error) {
+func (f fakePrices) GetPrice(_ context.Context, code string) (domain.PriceRow, error) {
 	if f.err != nil {
-		return registration.PriceRow{}, f.err
+		return domain.PriceRow{}, f.err
 	}
 	if code != domain.PriceDeposit {
-		return registration.PriceRow{}, errors.New("unexpected price code " + code)
+		return domain.PriceRow{}, errors.New("unexpected price code " + code)
 	}
-	return registration.PriceRow{AmountPence: f.depositPence, Currency: "GBP"}, nil
+	return domain.PriceRow{AmountPence: f.depositPence, Currency: "GBP"}, nil
 }
 
-func (p *mutablePrices) GetPrice(_ context.Context, code string) (registration.PriceRow, error) {
+func (p *mutablePrices) GetPrice(_ context.Context, code string) (domain.PriceRow, error) {
 	if code != domain.PriceDeposit {
-		return registration.PriceRow{}, errors.New("unexpected price code " + code)
+		return domain.PriceRow{}, errors.New("unexpected price code " + code)
 	}
-	return registration.PriceRow{AmountPence: p.depositPence, Currency: "GBP"}, nil
+	return domain.PriceRow{AmountPence: p.depositPence, Currency: "GBP"}, nil
 }
 
 func TestDeleteRegistration_unpaid(t *testing.T) {
@@ -742,7 +741,7 @@ func TestDeleteRegistration_invoicedVoidsAndDeletes(t *testing.T) {
 func TestSendInvoice_foldsCoachLine(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
-	cfg := billing.Config{StripePriceCoach: "price_coach"}
+	cfg := billing.Config{CoachPriceRef: "price_coach"}
 	var captured []billing.InvoiceLine
 	var capturedType string
 	stub := &billingtest.StubStripe{
@@ -752,12 +751,12 @@ func TestSendInvoice_foldsCoachLine(t *testing.T) {
 		CreateInv: func(_ context.Context, _, _ string, lines []billing.InvoiceLine, _ int64, invoiceType string) (billing.InvoiceResult, error) {
 			captured = lines
 			capturedType = invoiceType
-			return billing.InvoiceResult{ID: "in_balance", StripeEmailed: true}, nil
+			return billing.InvoiceResult{ID: "in_balance", ProviderEmailed: true}, nil
 		},
 	}
 	env := billingtest.NewEnv(t, pool, stub, nil, nil, cfg)
 	repo := env.Repo
-	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "lodge", "price_lodge"); err != nil {
 		t.Fatalf("set lodge price: %v", err)
 	}
 
@@ -801,10 +800,10 @@ func TestSendCoachInvoice_paidGroup(t *testing.T) {
 		CreateInv: func(_ context.Context, _, _ string, lines []billing.InvoiceLine, _ int64, invoiceType string) (billing.InvoiceResult, error) {
 			captured = lines
 			capturedType = invoiceType
-			return billing.InvoiceResult{ID: "in_coach", StripeEmailed: true}, nil
+			return billing.InvoiceResult{ID: "in_coach", ProviderEmailed: true}, nil
 		},
 	}
-	cfg := billing.Config{StripePriceCoach: "price_coach"}
+	cfg := billing.Config{CoachPriceRef: "price_coach"}
 	env := billingtest.NewEnv(t, pool, stub, nil, nil, cfg)
 	repo := env.Repo
 
@@ -819,7 +818,7 @@ func TestSendCoachInvoice_paidGroup(t *testing.T) {
 		t.Fatalf("lines = %+v, want single coach line", captured)
 	}
 	g, _ := repo.FindGroupByID(ctx, groupID)
-	if g == nil || g.StripeCoachInvoiceID == nil || *g.StripeCoachInvoiceID != "in_coach" {
+	if g == nil || g.CoachInvoiceRef == nil || *g.CoachInvoiceRef != "in_coach" {
 		t.Fatalf("coach invoice id not stored: %+v", g)
 	}
 	if g.BillingStatus != domain.BillingBalancePaid {
@@ -837,7 +836,7 @@ func TestSendCoachInvoice_paidGroup(t *testing.T) {
 func TestSendCoachInvoice_guards(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
-	cfg := billing.Config{StripePriceCoach: "price_coach"}
+	cfg := billing.Config{CoachPriceRef: "price_coach"}
 	env := billingtest.NewEnv(t, pool, &billingtest.StubStripe{}, nil, nil, cfg)
 
 	// Allocated (not yet invoiced) → coach folds into balance instead.
@@ -886,7 +885,7 @@ func TestWaiveCoachFee_notYetSent(t *testing.T) {
 			return nil
 		},
 	}
-	cfg := billing.Config{StripePriceCoach: "price_coach"}
+	cfg := billing.Config{CoachPriceRef: "price_coach"}
 	env := billingtest.NewEnv(t, pool, stripe, nil, nil, cfg)
 	repo := env.Repo
 
@@ -918,14 +917,14 @@ func TestWaiveCoachFee_voidOpenInvoice(t *testing.T) {
 			if invoiceType != "coach" {
 				t.Fatalf("invoice type = %q, want coach", invoiceType)
 			}
-			return billing.InvoiceResult{ID: "in_coach_open", StripeEmailed: true}, nil
+			return billing.InvoiceResult{ID: "in_coach_open", ProviderEmailed: true}, nil
 		},
 		VoidInvIdem: func(_ context.Context, id string) error {
 			voidedID = id
 			return nil
 		},
 	}
-	cfg := billing.Config{StripePriceCoach: "price_coach"}
+	cfg := billing.Config{CoachPriceRef: "price_coach"}
 	env := billingtest.NewEnv(t, pool, stripe, nil, nil, cfg)
 	repo := env.Repo
 
@@ -943,20 +942,20 @@ func TestWaiveCoachFee_voidOpenInvoice(t *testing.T) {
 	if g == nil || g.CoachFeeWaivedAt == nil {
 		t.Fatalf("coach_fee_waived_at not set: %+v", g)
 	}
-	if g.StripeCoachInvoiceID != nil {
-		t.Fatalf("stripe_coach_invoice_id should be cleared: %+v", g.StripeCoachInvoiceID)
+	if g.CoachInvoiceRef != nil {
+		t.Fatalf("stripe_coach_invoice_id should be cleared: %+v", g.CoachInvoiceRef)
 	}
 }
 
 func TestWaiveCoachFee_guards(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
-	cfg := billing.Config{StripePriceCoach: "price_coach"}
+	cfg := billing.Config{CoachPriceRef: "price_coach"}
 	env := billingtest.NewEnv(t, pool, &billingtest.StubStripe{}, nil, nil, cfg)
 	repo := env.Repo
 
 	t.Run("folded_in_balance", func(t *testing.T) {
-		if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+		if err := repo.UpdateAccommodationPriceRef(ctx, "lodge", "price_lodge"); err != nil {
 			t.Fatalf("set lodge price: %v", err)
 		}
 		stub := &billingtest.StubStripe{
@@ -964,10 +963,10 @@ func TestWaiveCoachFee_guards(t *testing.T) {
 				return "cus_seed", nil
 			},
 			CreateInv: func(_ context.Context, _, _ string, _ []billing.InvoiceLine, _ int64, _ string) (billing.InvoiceResult, error) {
-				return billing.InvoiceResult{ID: "in_balance", StripeEmailed: true}, nil
+				return billing.InvoiceResult{ID: "in_balance", ProviderEmailed: true}, nil
 			},
 		}
-		cfg := billing.Config{StripePriceCoach: "price_coach"}
+		cfg := billing.Config{CoachPriceRef: "price_coach"}
 		env := billingtest.NewEnv(t, pool, stub, nil, nil, cfg)
 		groupID := billingtest.InsertCoachGroup(ctx, t, pool, domain.BillingAllocated, "lodge", false)
 		if err := env.Invoicing.SendInvoice(ctx, groupID, "Admin", domain.SkipVersionCheck); err != nil {
@@ -1001,7 +1000,7 @@ func TestWaiveCoachFee_guards(t *testing.T) {
 func TestSendCoachInvoice_waivedGroup(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
-	cfg := billing.Config{StripePriceCoach: "price_coach"}
+	cfg := billing.Config{CoachPriceRef: "price_coach"}
 	env := billingtest.NewEnv(t, pool, &billingtest.StubStripe{}, nil, nil, cfg)
 
 	groupID := billingtest.InsertCoachGroup(ctx, t, pool, domain.BillingBalancePaid, "lodge", false)
@@ -1018,7 +1017,7 @@ func TestSendCoachInvoice_waivedGroup(t *testing.T) {
 func TestSendInvoice_skipsCoachWhenWaived(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
-	cfg := billing.Config{StripePriceCoach: "price_coach"}
+	cfg := billing.Config{CoachPriceRef: "price_coach"}
 	var captured []billing.InvoiceLine
 	stub := &billingtest.StubStripe{
 		EnsureCust: func(_ context.Context, _, _, _, _ string) (string, error) {
@@ -1029,12 +1028,12 @@ func TestSendInvoice_skipsCoachWhenWaived(t *testing.T) {
 			if invoiceType != "balance" {
 				t.Fatalf("invoice type = %q, want balance", invoiceType)
 			}
-			return billing.InvoiceResult{ID: "in_balance", StripeEmailed: true}, nil
+			return billing.InvoiceResult{ID: "in_balance", ProviderEmailed: true}, nil
 		},
 	}
 	env := billingtest.NewEnv(t, pool, stub, nil, nil, cfg)
 	repo := env.Repo
-	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "lodge", "price_lodge"); err != nil {
 		t.Fatalf("set lodge price: %v", err)
 	}
 
@@ -1067,10 +1066,10 @@ func TestUnwaiveCoachFee(t *testing.T) {
 			if invoiceType != "coach" {
 				t.Fatalf("invoice type = %q, want coach", invoiceType)
 			}
-			return billing.InvoiceResult{ID: "in_coach_after", StripeEmailed: true}, nil
+			return billing.InvoiceResult{ID: "in_coach_after", ProviderEmailed: true}, nil
 		},
 	}
-	cfg := billing.Config{StripePriceCoach: "price_coach"}
+	cfg := billing.Config{CoachPriceRef: "price_coach"}
 	env := billingtest.NewEnv(t, pool, stub, nil, nil, cfg)
 	repo := env.Repo
 
@@ -1089,7 +1088,7 @@ func TestUnwaiveCoachFee(t *testing.T) {
 		t.Fatalf("SendCoachInvoice after unwaive: %v", err)
 	}
 	g, _ = repo.FindGroupByID(ctx, groupID)
-	if g == nil || g.StripeCoachInvoiceID == nil || *g.StripeCoachInvoiceID != "in_coach_after" {
+	if g == nil || g.CoachInvoiceRef == nil || *g.CoachInvoiceRef != "in_coach_after" {
 		t.Fatalf("coach invoice not sent after unwaive: %+v", g)
 	}
 }
@@ -1348,12 +1347,12 @@ func TestSendInvoice_billsOutstandingDeposit(t *testing.T) {
 		},
 		CreateInv: func(_ context.Context, _, _ string, lines []billing.InvoiceLine, _ int64, _ string) (billing.InvoiceResult, error) {
 			captured = lines
-			return billing.InvoiceResult{ID: "in_with_deposit", StripeEmailed: true}, nil
+			return billing.InvoiceResult{ID: "in_with_deposit", ProviderEmailed: true}, nil
 		},
 	}
 	env := billingtest.NewEnv(t, pool, stub, &billingtest.RecordingMailer{}, nil, cfg)
 	repo := env.Repo
-	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "lodge", "price_lodge"); err != nil {
 		t.Fatalf("set lodge price: %v", err)
 	}
 
@@ -1463,8 +1462,8 @@ func TestDepositOwed_clearedWithoutPaymentIsNotRecordedAsPaid(t *testing.T) {
 				},
 			}
 			cfg := billing.Config{
-				DepositPricePence:  5000,
-				StripePriceDayPass: "price_day",
+				DepositPricePence: 5000,
+				DayPassPriceRef:   "price_day",
 			}
 			env := billingtest.NewEnv(t, pool, stub, &billingtest.RecordingMailer{}, nil, cfg)
 			repo := env.Repo

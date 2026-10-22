@@ -15,12 +15,7 @@ import (
 )
 
 type PriceLookup interface {
-	GetPrice(ctx context.Context, code string) (PriceRow, error)
-}
-
-type PriceRow struct {
-	AmountPence int
-	Currency    string
+	GetPrice(ctx context.Context, code string) (domain.PriceRow, error)
 }
 
 type CheckoutCreator interface {
@@ -48,8 +43,8 @@ type Service struct {
 	repo          groupRepo
 	tx            txRunner
 	prices        PriceLookup
-	stripe        CheckoutCreator
-	stripeAmounts StripePriceAmounts
+	checkout      CheckoutCreator
+	priceAmounts  PriceAmounts
 	camp          CampConfigReader
 	mailer        email.Mailer
 	sheets        sheets.Sync
@@ -61,8 +56,8 @@ func NewService(
 	repo groupRepo,
 	tx txRunner,
 	prices PriceLookup,
-	stripe CheckoutCreator,
-	stripeAmounts StripePriceAmounts,
+	checkout CheckoutCreator,
+	priceAmounts PriceAmounts,
 	campCfg CampConfigReader,
 	mailer email.Mailer,
 	sheetSync sheets.Sync,
@@ -76,8 +71,8 @@ func NewService(
 		repo:          repo,
 		tx:            tx,
 		prices:        prices,
-		stripe:        stripe,
-		stripeAmounts: stripeAmounts,
+		checkout:      checkout,
+		priceAmounts:  priceAmounts,
 		camp:          campCfg,
 		mailer:        mailer,
 		sheets:        sheetSync,
@@ -179,7 +174,7 @@ func (s *Service) Submit(ctx context.Context, req domain.Submission) (*domain.Su
 			return nil
 		}
 
-		session, err := s.stripe.CreateCheckoutSession(txCtx, CheckoutParams{
+		session, err := s.checkout.CreateCheckoutSession(txCtx, CheckoutParams{
 			GroupID:  groupID,
 			Email:    req.Contact.Email,
 			Currency: currency,
@@ -188,7 +183,7 @@ func (s *Service) Submit(ctx context.Context, req domain.Submission) (*domain.Su
 		if err != nil {
 			return fmt.Errorf("stripe checkout: %w", err)
 		}
-		if err := s.repo.SetStripeSession(txCtx, groupID, session.ID); err != nil {
+		if err := s.repo.SetCheckoutSession(txCtx, groupID, session.ID); err != nil {
 			return fmt.Errorf("set stripe session: %w", err)
 		}
 		resp.CheckoutURL = session.URL
@@ -328,8 +323,6 @@ func (s *Service) sendConfirmationEmail(ctx context.Context, req domain.Submissi
 	}
 }
 
-const MinDepositAge = 4
-
 func (s *Service) Summary(ctx context.Context, sessionID, groupID string) (*domain.RegistrationSummary, error) {
 	if sessionID == "" && groupID == "" {
 		return nil, ErrMissingIdentifier
@@ -373,7 +366,7 @@ func (s *Service) Summary(ctx context.Context, sessionID, groupID string) (*doma
 func depositPayingCount(req domain.Submission) int {
 	n := 0
 	for _, c := range req.Campers {
-		if c.Attendance.Type == domain.AttendanceFullWeek && c.Age >= MinDepositAge {
+		if c.Attendance.Type == domain.AttendanceFullWeek && c.Age >= domain.MinDepositAge {
 			n++
 		}
 	}

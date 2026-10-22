@@ -25,11 +25,11 @@ func TestApplyStripePriceOverrides_caravanOverflowUsesTentPrice(t *testing.T) {
 	if err != nil || overflow == nil {
 		t.Fatalf("get caravan_overflow tier: err=%v type=%v", err, overflow)
 	}
-	if tent.StripePriceID == nil || *tent.StripePriceID != tentPrice {
-		t.Fatalf("tent stripe_price_id = %v, want %q", tent.StripePriceID, tentPrice)
+	if tent.PriceRef == nil || *tent.PriceRef != tentPrice {
+		t.Fatalf("tent stripe_price_id = %v, want %q", tent.PriceRef, tentPrice)
 	}
-	if overflow.StripePriceID == nil || *overflow.StripePriceID != tentPrice {
-		t.Fatalf("caravan_overflow stripe_price_id = %v, want %q (same as tent)", overflow.StripePriceID, tentPrice)
+	if overflow.PriceRef == nil || *overflow.PriceRef != tentPrice {
+		t.Fatalf("caravan_overflow stripe_price_id = %v, want %q (same as tent)", overflow.PriceRef, tentPrice)
 	}
 	if overflow.Capacity == nil || *overflow.Capacity != 16 {
 		t.Fatalf("caravan_overflow capacity = %v, want 16", overflow.Capacity)

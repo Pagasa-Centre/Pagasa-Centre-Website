@@ -19,11 +19,11 @@ import (
 
 type fakePriceLookup struct{ amount int }
 
-func (f fakePriceLookup) GetPrice(_ context.Context, code string) (PriceRow, error) {
+func (f fakePriceLookup) GetPrice(_ context.Context, code string) (domain.PriceRow, error) {
 	if code != domain.PriceDeposit {
-		return PriceRow{}, nil
+		return domain.PriceRow{}, nil
 	}
-	return PriceRow{AmountPence: f.amount, Currency: "GBP"}, nil
+	return domain.PriceRow{AmountPence: f.amount, Currency: "GBP"}, nil
 }
 
 func TestDepositPayingCount(t *testing.T) {
@@ -521,10 +521,10 @@ func TestComputeCharge_fullModeMixedGroup(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
 	repo := storage.NewRepository(pool)
-	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "lodge", "price_lodge"); err != nil {
 		t.Fatalf("seed lodge price: %v", err)
 	}
-	if err := repo.UpdateAccommodationStripePrice(ctx, "child", "price_child"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "child", "price_child"); err != nil {
 		t.Fatalf("seed child price: %v", err)
 	}
 
@@ -538,13 +538,13 @@ func TestComputeCharge_fullModeMixedGroup(t *testing.T) {
 		"price_coach":        {2000, "GBP"},
 	}}
 	svc := &Service{
-		repo:          repo,
-		prices:        fakePriceLookup{amount: 5000},
-		stripeAmounts: amounts,
+		repo:         repo,
+		prices:       fakePriceLookup{amount: 5000},
+		priceAmounts: amounts,
 		cfg: Config{
-			StripePriceChildUnder3: "price_child_under3",
-			StripePriceDayPass:     "price_daypass",
-			StripePriceCoach:       "price_coach",
+			ChildUnder3PriceRef: "price_child_under3",
+			DayPassPriceRef:     "price_daypass",
+			CoachPriceRef:       "price_coach",
 		},
 	}
 
@@ -580,7 +580,7 @@ func TestComputeCharge_tierCollapse(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
 	repo := storage.NewRepository(pool)
-	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "lodge", "price_lodge"); err != nil {
 		t.Fatalf("seed lodge price: %v", err)
 	}
 	amounts := fakeStripeAmounts{amounts: map[string]struct {
@@ -588,10 +588,10 @@ func TestComputeCharge_tierCollapse(t *testing.T) {
 		currency string
 	}{"price_lodge": {25000, "GBP"}}}
 	svc := &Service{
-		repo:          repo,
-		prices:        fakePriceLookup{amount: 5000},
-		stripeAmounts: amounts,
-		cfg:           Config{},
+		repo:         repo,
+		prices:       fakePriceLookup{amount: 5000},
+		priceAmounts: amounts,
+		cfg:          Config{},
 	}
 	req := domain.Submission{Campers: []domain.NewCamper{
 		{Age: 30, Attendance: domain.Attendance{Type: domain.AttendanceFullWeek, AccommodationFirstChoice: "lodge"}},
@@ -616,7 +616,7 @@ func TestComputeCharge_zeroUnitOmitted(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
 	repo := storage.NewRepository(pool)
-	if err := repo.UpdateAccommodationStripePrice(ctx, "child", "price_child"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "child", "price_child"); err != nil {
 		t.Fatalf("seed child price: %v", err)
 	}
 	amounts := fakeStripeAmounts{amounts: map[string]struct {
@@ -627,10 +627,10 @@ func TestComputeCharge_zeroUnitOmitted(t *testing.T) {
 		"price_child_under3": {0, "GBP"},
 	}}
 	svc := &Service{
-		repo:          repo,
-		prices:        fakePriceLookup{amount: 5000},
-		stripeAmounts: amounts,
-		cfg:           Config{StripePriceChildUnder3: "price_child_under3"},
+		repo:         repo,
+		prices:       fakePriceLookup{amount: 5000},
+		priceAmounts: amounts,
+		cfg:          Config{ChildUnder3PriceRef: "price_child_under3"},
 	}
 	req := domain.Submission{Campers: []domain.NewCamper{
 		{Age: 2, Attendance: domain.Attendance{Type: domain.AttendanceFullWeek, AccommodationFirstChoice: "child"}},
@@ -655,10 +655,10 @@ func TestComputeCharge_dayPassOnlyNonZeroInFullMode(t *testing.T) {
 		currency string
 	}{"price_daypass": {1500, "GBP"}}}
 	svc := &Service{
-		repo:          repo,
-		prices:        fakePriceLookup{amount: 5000},
-		stripeAmounts: amounts,
-		cfg:           Config{StripePriceDayPass: "price_daypass"},
+		repo:         repo,
+		prices:       fakePriceLookup{amount: 5000},
+		priceAmounts: amounts,
+		cfg:          Config{DayPassPriceRef: "price_daypass"},
 	}
 	req := domain.Submission{Campers: []domain.NewCamper{
 		{Age: 25, Attendance: domain.Attendance{Type: domain.AttendanceDayPass, Days: []string{"mon", "tue"}}},
@@ -679,7 +679,7 @@ func TestComputeCharge_missingDayPassPrice(t *testing.T) {
 	svc := &Service{
 		repo:   repo,
 		prices: fakePriceLookup{amount: 5000},
-		stripeAmounts: fakeStripeAmounts{amounts: map[string]struct {
+		priceAmounts: fakeStripeAmounts{amounts: map[string]struct {
 			pence    int64
 			currency string
 		}{}},
@@ -698,7 +698,7 @@ func TestValidateFullPaymentPricing_missingCoach(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
 	repo := storage.NewRepository(pool)
-	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "lodge", "price_lodge"); err != nil {
 		t.Fatalf("seed lodge price: %v", err)
 	}
 	amounts := fakeStripeAmounts{amounts: map[string]struct {
@@ -710,8 +710,8 @@ func TestValidateFullPaymentPricing_missingCoach(t *testing.T) {
 		"price_daypass":      {1500, "GBP"},
 	}}
 	svc := NewService(repo, commondb.NewTxRunner(pool), fakePriceLookup{amount: 5000}, nil, amounts, fakeCampOpen{}, nil, nil, "", Config{
-		StripePriceChildUnder3: "price_child_under3",
-		StripePriceDayPass:     "price_daypass",
+		ChildUnder3PriceRef: "price_child_under3",
+		DayPassPriceRef:     "price_daypass",
 	})
 	err := svc.ValidateFullPaymentPricing(ctx)
 	if err == nil {
@@ -726,7 +726,7 @@ func TestValidateFullPaymentPricing_currencyMismatch(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
 	repo := storage.NewRepository(pool)
-	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "lodge", "price_lodge"); err != nil {
 		t.Fatalf("seed lodge price: %v", err)
 	}
 	amounts := fakeStripeAmounts{amounts: map[string]struct {
@@ -739,9 +739,9 @@ func TestValidateFullPaymentPricing_currencyMismatch(t *testing.T) {
 		"price_coach":        {2000, "GBP"},
 	}}
 	svc := NewService(repo, commondb.NewTxRunner(pool), fakePriceLookup{amount: 5000}, nil, amounts, fakeCampOpen{}, nil, nil, "", Config{
-		StripePriceChildUnder3: "price_child_under3",
-		StripePriceDayPass:     "price_daypass",
-		StripePriceCoach:       "price_coach",
+		ChildUnder3PriceRef: "price_child_under3",
+		DayPassPriceRef:     "price_daypass",
+		CoachPriceRef:       "price_coach",
 	})
 	err := svc.ValidateFullPaymentPricing(ctx)
 	if err == nil {

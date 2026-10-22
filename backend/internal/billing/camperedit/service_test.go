@@ -12,7 +12,6 @@ import (
 	"pagasacentre/backend/internal/billing/billingtest"
 	"pagasacentre/backend/internal/billing/camperedit"
 	"pagasacentre/backend/internal/email"
-	"pagasacentre/backend/internal/registration"
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/internal/testhelper"
 	"pagasacentre/backend/pkg/commonlibrary/apperr"
@@ -60,23 +59,23 @@ type fakePrices struct {
 	err          error
 }
 
-func (f fakePrices) GetPrice(_ context.Context, code string) (registration.PriceRow, error) {
+func (f fakePrices) GetPrice(_ context.Context, code string) (domain.PriceRow, error) {
 	if f.err != nil {
-		return registration.PriceRow{}, f.err
+		return domain.PriceRow{}, f.err
 	}
 	if code != domain.PriceDeposit {
-		return registration.PriceRow{}, errors.New("unexpected price code " + code)
+		return domain.PriceRow{}, errors.New("unexpected price code " + code)
 	}
-	return registration.PriceRow{AmountPence: f.depositPence, Currency: "GBP"}, nil
+	return domain.PriceRow{AmountPence: f.depositPence, Currency: "GBP"}, nil
 }
 
 type mutablePrices struct{ depositPence int }
 
-func (p *mutablePrices) GetPrice(_ context.Context, code string) (registration.PriceRow, error) {
+func (p *mutablePrices) GetPrice(_ context.Context, code string) (domain.PriceRow, error) {
 	if code != domain.PriceDeposit {
-		return registration.PriceRow{}, errors.New("unexpected price code " + code)
+		return domain.PriceRow{}, errors.New("unexpected price code " + code)
 	}
-	return registration.PriceRow{AmountPence: p.depositPence, Currency: "GBP"}, nil
+	return domain.PriceRow{AmountPence: p.depositPence, Currency: "GBP"}, nil
 }
 
 func newFullWeekCamper() camperedit.AddCamperRequest {
@@ -272,8 +271,8 @@ func TestRemoveCamper_invoicedVoidsAndReverts(t *testing.T) {
 	if g.BillingStatus != domain.BillingAllocated {
 		t.Fatalf("billing_status = %q, want allocated", g.BillingStatus)
 	}
-	if g.StripeInvoiceID != nil {
-		t.Fatalf("stripe_invoice_id should be cleared, got %v", g.StripeInvoiceID)
+	if g.BalanceInvoiceRef != nil {
+		t.Fatalf("stripe_invoice_id should be cleared, got %v", g.BalanceInvoiceRef)
 	}
 	if g.InvoiceDueAt != nil {
 		t.Fatal("invoice_due_at should be cleared")
@@ -310,7 +309,7 @@ func TestRemoveCamper_invoicedRevertsToNoneWhenFullWeekUnplaced(t *testing.T) {
 	if g == nil || g.BillingStatus != domain.BillingNone {
 		t.Fatalf("billing_status = %v, want none", g)
 	}
-	if g.StripeInvoiceID != nil {
+	if g.BalanceInvoiceRef != nil {
 		t.Fatal("stripe_invoice_id should be cleared")
 	}
 }
@@ -384,10 +383,10 @@ func TestUpdateCamperCoach_turnOffOneThenInvoice(t *testing.T) {
 			if invoiceType != "coach" {
 				t.Fatalf("invoice type = %q, want coach", invoiceType)
 			}
-			return billing.InvoiceResult{ID: "in_coach_one", StripeEmailed: true}, nil
+			return billing.InvoiceResult{ID: "in_coach_one", ProviderEmailed: true}, nil
 		},
 	}
-	cfg := billing.Config{StripePriceCoach: "price_coach"}
+	cfg := billing.Config{CoachPriceRef: "price_coach"}
 	env := billingtest.NewEnv(t, pool, stub, nil, nil, cfg)
 	repo := env.Repo
 
@@ -423,7 +422,7 @@ func TestUpdateCamperCoach_turnOffOneThenInvoice(t *testing.T) {
 func TestUpdateCamperCoach_guards(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
-	cfg := billing.Config{StripePriceCoach: "price_coach"}
+	cfg := billing.Config{CoachPriceRef: "price_coach"}
 	env := billingtest.NewEnv(t, pool, &billingtest.StubStripe{}, nil, nil, cfg)
 
 	groupID, camper1ID, _ := billingtest.InsertTwoCoachGroup(ctx, t, pool, domain.BillingBalancePaid)
@@ -483,14 +482,14 @@ func TestUpdateCamperCoach_voidOpenInvoice(t *testing.T) {
 			return "cus_two", nil
 		},
 		CreateInv: func(_ context.Context, _, _ string, _ []billing.InvoiceLine, _ int64, _ string) (billing.InvoiceResult, error) {
-			return billing.InvoiceResult{ID: "in_coach_open", StripeEmailed: true}, nil
+			return billing.InvoiceResult{ID: "in_coach_open", ProviderEmailed: true}, nil
 		},
 		VoidInvIdem: func(_ context.Context, id string) error {
 			voided = append(voided, id)
 			return nil
 		},
 	}
-	cfg := billing.Config{StripePriceCoach: "price_coach"}
+	cfg := billing.Config{CoachPriceRef: "price_coach"}
 	env := billingtest.NewEnv(t, pool, stub, nil, nil, cfg)
 	repo := env.Repo
 
@@ -510,7 +509,7 @@ func TestUpdateCamperCoach_voidOpenInvoice(t *testing.T) {
 		t.Fatalf("voided = %v", voided)
 	}
 	g, _ := repo.FindGroupByID(ctx, groupID)
-	if g == nil || g.StripeCoachInvoiceID != nil {
+	if g == nil || g.CoachInvoiceRef != nil {
 		t.Fatalf("coach invoice columns not cleared: %+v", g)
 	}
 }
@@ -555,7 +554,7 @@ func TestUpdateCamperCoach_versionConflict(t *testing.T) {
 func TestUpdateCamperCoach_waivedRemainsWhenLastPassengerRemoved(t *testing.T) {
 	pool := testhelper.MaybePool(t)
 	ctx := context.Background()
-	cfg := billing.Config{StripePriceCoach: "price_coach"}
+	cfg := billing.Config{CoachPriceRef: "price_coach"}
 	env := billingtest.NewEnv(t, pool, &billingtest.StubStripe{}, nil, nil, cfg)
 	repo := env.Repo
 
@@ -740,7 +739,7 @@ func TestConvertCamperToDayVisitor_invoicedVoidsAndReverts(t *testing.T) {
 	if g == nil || g.BillingStatus != domain.BillingAllocated {
 		t.Fatalf("billing_status = %v, want allocated", g)
 	}
-	if g.StripeInvoiceID != nil {
+	if g.BalanceInvoiceRef != nil {
 		t.Fatal("stripe_invoice_id should be cleared")
 	}
 }
@@ -1120,7 +1119,7 @@ func TestEditCamper_swapLeavesOpenInvoiceAlone(t *testing.T) {
 	if g.BillingStatus != domain.BillingInvoiced {
 		t.Fatalf("billing_status = %q, want invoiced", g.BillingStatus)
 	}
-	if g.StripeInvoiceID == nil || *g.StripeInvoiceID != "in_live" {
+	if g.BalanceInvoiceRef == nil || *g.BalanceInvoiceRef != "in_live" {
 		t.Fatal("the live invoice should still be attached")
 	}
 
@@ -1156,10 +1155,10 @@ func TestEditCamper_accommodationChangeVoidsInvoice(t *testing.T) {
 	}}
 	env := billingtest.NewEnv(t, pool, stub, mailer, nil, cfg)
 	repo := env.Repo
-	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "lodge", "price_lodge"); err != nil {
 		t.Fatalf("set lodge price: %v", err)
 	}
-	if err := repo.UpdateAccommodationStripePrice(ctx, "tent", "price_tent"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "tent", "price_tent"); err != nil {
 		t.Fatalf("set tent price: %v", err)
 	}
 
@@ -1189,8 +1188,8 @@ func TestEditCamper_accommodationChangeVoidsInvoice(t *testing.T) {
 	if g.BillingStatus != domain.BillingAllocated {
 		t.Fatalf("billing_status = %q, want allocated", g.BillingStatus)
 	}
-	if g.StripeInvoiceID != nil {
-		t.Fatalf("stripe_invoice_id = %v, want cleared", *g.StripeInvoiceID)
+	if g.BalanceInvoiceRef != nil {
+		t.Fatalf("stripe_invoice_id = %v, want cleared", *g.BalanceInvoiceRef)
 	}
 	if len(mailer.BookingUpdated) != 1 || !mailer.BookingUpdated[0].InvoiceCancelled {
 		t.Fatal("family must be told their invoice was cancelled")
@@ -1203,7 +1202,7 @@ func TestEditCamper_clearingAllocationSendsGroupBackToNeedsAccommodation(t *test
 	cfg := billing.Config{}
 	env := billingtest.NewEnv(t, pool, &billingtest.StubStripe{}, &billingtest.RecordingMailer{}, nil, cfg)
 	repo := env.Repo
-	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "lodge", "price_lodge"); err != nil {
 		t.Fatalf("set lodge price: %v", err)
 	}
 
@@ -1369,10 +1368,10 @@ func TestEditCamper_voidFailureLeavesCamperUnchanged(t *testing.T) {
 	}}
 	env := billingtest.NewEnv(t, pool, stub, &billingtest.RecordingMailer{}, nil, cfg)
 	repo := env.Repo
-	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "lodge", "price_lodge"); err != nil {
 		t.Fatalf("set lodge price: %v", err)
 	}
-	if err := repo.UpdateAccommodationStripePrice(ctx, "tent", "price_tent"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "tent", "price_tent"); err != nil {
 		t.Fatalf("set tent price: %v", err)
 	}
 
@@ -1449,10 +1448,10 @@ func TestEditCamper_repricingWithNoInvoiceStaysAllocated(t *testing.T) {
 	}}
 	env := billingtest.NewEnv(t, pool, stub, &billingtest.RecordingMailer{}, nil, cfg)
 	repo := env.Repo
-	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "lodge", "price_lodge"); err != nil {
 		t.Fatalf("set lodge price: %v", err)
 	}
-	if err := repo.UpdateAccommodationStripePrice(ctx, "tent", "price_tent"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "tent", "price_tent"); err != nil {
 		t.Fatalf("set tent price: %v", err)
 	}
 
@@ -1483,10 +1482,10 @@ func TestEditCamper_repricingRefusedOnPaidBalance(t *testing.T) {
 	cfg := billing.Config{}
 	env := billingtest.NewEnv(t, pool, &billingtest.StubStripe{}, &billingtest.RecordingMailer{}, nil, cfg)
 	repo := env.Repo
-	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "lodge", "price_lodge"); err != nil {
 		t.Fatalf("set lodge price: %v", err)
 	}
-	if err := repo.UpdateAccommodationStripePrice(ctx, "tent", "price_tent"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "tent", "price_tent"); err != nil {
 		t.Fatalf("set tent price: %v", err)
 	}
 
@@ -1525,7 +1524,7 @@ func TestEditCamper_ageingPastCoachThresholdReprices(t *testing.T) {
 	}}
 	env := billingtest.NewEnv(t, pool, stub, &billingtest.RecordingMailer{}, nil, cfg)
 	repo := env.Repo
-	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "lodge", "price_lodge"); err != nil {
 		t.Fatalf("set lodge price: %v", err)
 	}
 
@@ -1538,13 +1537,13 @@ func TestEditCamper_ageingPastCoachThresholdReprices(t *testing.T) {
 	// Put them on the coach, below the age where a seat is charged.
 	if _, err := pool.Exec(ctx, `
 		UPDATE registrations SET needs_coach = true, age = $2 WHERE id = $1`,
-		otherID, registration.MinDepositAge-1); err != nil {
+		otherID, domain.MinDepositAge-1); err != nil {
 		t.Fatalf("seed coach passenger: %v", err)
 	}
 
 	campers, _ := repo.CampersForGroup(ctx, groupID)
 	req := editFor(camperByID(t, campers, otherID))
-	req.Age = registration.MinDepositAge
+	req.Age = domain.MinDepositAge
 
 	sum, err := env.Campers.EditCamper(ctx, groupID, otherID, "Diane", domain.SkipVersionCheck, req)
 	if err != nil {
@@ -1578,7 +1577,7 @@ func TestEditCamper_childAccommodationAgeLimit(t *testing.T) {
 
 	campers, _ := repo.CampersForGroup(ctx, groupID)
 	req := editFor(camperByID(t, campers, otherID))
-	req.Age = registration.MaxChildAccommodationAge + 1
+	req.Age = domain.MaxChildAccommodationAge + 1
 
 	_, err := env.Campers.EditCamper(ctx, groupID, otherID, "Diane", domain.SkipVersionCheck, req)
 	if err == nil {
@@ -1680,7 +1679,7 @@ func TestAddCamper_childUnderDepositAgeOwesNothing(t *testing.T) {
 	sum, err := env.Campers.AddCamper(ctx, groupID, "Diane", domain.SkipVersionCheck, camperedit.AddCamperRequest{
 		Camper: domain.NewCamper{
 			FirstName: "Baby", LastName: "Fundi", Gender: "male",
-			Age:            registration.MinDepositAge - 1,
+			Age:            domain.MinDepositAge - 1,
 			CellLeaderName: "Leader",
 			Attendance: domain.Attendance{
 				Type:                     domain.AttendanceFullWeek,
@@ -1780,10 +1779,10 @@ func TestEditCamper_emailsTheFamilyAndNamesACancelledInvoice(t *testing.T) {
 	cfg := billing.Config{}
 	env := billingtest.NewEnv(t, pool, &billingtest.StubStripe{}, nil, nil, cfg)
 	repo := env.Repo
-	if err := repo.UpdateAccommodationStripePrice(ctx, "lodge", "price_lodge"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "lodge", "price_lodge"); err != nil {
 		t.Fatalf("set lodge price: %v", err)
 	}
-	if err := repo.UpdateAccommodationStripePrice(ctx, "tent", "price_tent"); err != nil {
+	if err := repo.UpdateAccommodationPriceRef(ctx, "tent", "price_tent"); err != nil {
 		t.Fatalf("set tent price: %v", err)
 	}
 
@@ -2010,8 +2009,8 @@ func TestConvertCamper_withOutstandingDepositIssuesNoCredit(t *testing.T) {
 		},
 	}
 	cfg := billing.Config{
-		DepositPricePence:  5000,
-		StripePriceDayPass: "price_day",
+		DepositPricePence: 5000,
+		DayPassPriceRef:   "price_day",
 	}
 	env := billingtest.NewEnv(t, pool, stub, &billingtest.RecordingMailer{}, nil, cfg)
 	repo := env.Repo

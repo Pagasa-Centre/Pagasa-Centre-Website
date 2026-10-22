@@ -61,7 +61,7 @@ func TestAllocate_VersionConflictMapsToStaleState(t *testing.T) {
 	}
 	svc := NewService(reads, &fakeAllocRepo{err: domain.ErrVersionConflict}, nil, nil, nil, billing.Config{})
 	err := svc.Allocate(context.Background(), "g1", "admin", 1, AllocateRequest{
-		Campers: []AllocateCamper{{CamperID: "c1", AllocatedAccommodationCode: "lodge", BilledStripePriceID: "price_test"}},
+		Campers: []AllocateCamper{{CamperID: "c1", AllocatedAccommodationCode: "lodge", BilledPriceRef: "price_test"}},
 	})
 	var ae *apperr.Error
 	if !errors.As(err, &ae) || ae.Code != "stale_state" {
@@ -85,7 +85,7 @@ func TestAllocate_RepositoryErrorWrapped(t *testing.T) {
 	svc := NewService(reads, &fakeAllocRepo{err: cause}, nil, nil, nil, billing.Config{})
 	err := svc.Allocate(context.Background(), "g1", "admin", 1, AllocateRequest{
 		Campers: []AllocateCamper{{
-			CamperID: "c1", AllocatedAccommodationCode: "lodge", BilledStripePriceID: "price_test",
+			CamperID: "c1", AllocatedAccommodationCode: "lodge", BilledPriceRef: "price_test",
 		}},
 	})
 	var ae *apperr.Error

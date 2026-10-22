@@ -8,7 +8,6 @@ import (
 
 	"pagasacentre/backend/internal/billing"
 	"pagasacentre/backend/internal/email"
-	"pagasacentre/backend/internal/registration"
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
@@ -27,34 +26,20 @@ func (s *Service) RemoveCamper(ctx context.Context, groupID, camperID, actor str
 		return RemoveCamperSummary{}, fmt.Errorf("operation: %w", err)
 	}
 
-	var target *domain.Camper
-	for i := range campers {
-		if campers[i].ID == camperID {
-			target = &campers[i]
-			break
-		}
-	}
-	if target == nil {
-		return RemoveCamperSummary{}, domain.ErrCamperNotFound
+	target, err := domain.FindCamper(campers, camperID)
+	if err != nil {
+		return RemoveCamperSummary{}, err
 	}
 
-	summary := RemoveCamperSummary{
-		CamperName: strings.TrimSpace(target.FirstName + " " + target.LastName),
-	}
+	summary := RemoveCamperSummary{CamperName: target.FullName()}
 
-	if target.IsMainContact {
-		return RemoveCamperSummary{}, apperr.Invalid("can't remove the main contact; edit the booking another way")
-	}
-	if len(campers) <= 1 {
-		return RemoveCamperSummary{}, apperr.Invalid("this is the last camper; delete the whole registration instead")
-	}
-	if g.BalanceSettled() {
-		return RemoveCamperSummary{}, apperr.Invalid("balance already paid; refund/handle in Stripe first")
+	if err := g.CanRemoveCamper(*target, campers); err != nil {
+		return RemoveCamperSummary{}, err
 	}
 
 	invoiceStale := false
 	if g.HasOpenInvoice() {
-		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeInvoiceID); err != nil {
+		if err := s.invoices.VoidInvoiceIdempotent(ctx, *g.BalanceInvoiceRef); err != nil {
 			return RemoveCamperSummary{}, apperr.Invalidf("invoice void failed; camper was not removed: %v", err)
 		}
 		summary.InvoiceVoided = true
@@ -70,18 +55,18 @@ func (s *Service) RemoveCamper(ctx context.Context, groupID, camperID, actor str
 
 	// If removing this camper leaves no coach passengers, void any open (unpaid)
 	// separate coach invoice so a departed passenger's fee can't still be paid.
-	if g.StripeCoachInvoiceID != nil && strings.TrimSpace(*g.StripeCoachInvoiceID) != "" && g.CoachFeePaidAt == nil {
+	if g.HasUnpaidCoachInvoice() {
 		remainingCoach := int64(0)
 		for _, c := range campers {
 			if c.ID == camperID {
 				continue
 			}
-			if c.AttendanceType == domain.AttendanceFullWeek && c.NeedsCoach != nil && *c.NeedsCoach && c.Age >= registration.MinDepositAge {
+			if c.CoachEligible() {
 				remainingCoach++
 			}
 		}
 		if remainingCoach == 0 {
-			if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeCoachInvoiceID); err != nil {
+			if err := s.invoices.VoidInvoiceIdempotent(ctx, *g.CoachInvoiceRef); err != nil {
 				log.Printf("billing: void coach invoice after camper remove %s: %v", groupID, err)
 			}
 		}
@@ -138,34 +123,19 @@ func (s *Service) ConvertCamperToDayVisitor(
 		return ConvertSummary{}, fmt.Errorf("operation: %w", err)
 	}
 
-	var target *domain.Camper
-	for i := range campers {
-		if campers[i].ID == camperID {
-			target = &campers[i]
-			break
-		}
-	}
-	if target == nil {
-		return ConvertSummary{}, domain.ErrCamperNotFound
+	target, err := domain.FindCamper(campers, camperID)
+	if err != nil {
+		return ConvertSummary{}, err
 	}
 
-	summary := ConvertSummary{
-		CamperName: strings.TrimSpace(target.FirstName + " " + target.LastName),
-	}
+	summary := ConvertSummary{CamperName: target.FullName()}
 
-	if target.AttendanceType != domain.AttendanceFullWeek {
-		return ConvertSummary{}, apperr.Invalid("only full-week campers can be converted")
-	}
-	if g.IsFree {
-		return ConvertSummary{}, apperr.Invalid(
-			"church-sponsored registrations can't be converted here; handle manually")
-	}
-	if g.BalanceSettled() {
-		return ConvertSummary{}, apperr.Invalid("balance already paid; handle in Stripe first")
+	if err := g.CanConvertToDayVisitor(*target); err != nil {
+		return ConvertSummary{}, err
 	}
 
 	fields := map[string]string{}
-	registration.ValidateDayPass("attendance", domain.Attendance{
+	domain.ValidateDayPass("attendance", domain.Attendance{
 		Type:          domain.AttendanceDayPass,
 		Days:          req.Days,
 		TshirtOption:  req.TshirtOption,
@@ -182,7 +152,7 @@ func (s *Service) ConvertCamperToDayVisitor(
 	// they owe (done in the same write) is the whole of the refund.
 	depositCreditPence := 0
 	if g.PaymentStatus == domain.PaymentPaid &&
-		target.Age >= registration.MinDepositAge &&
+		target.Age >= domain.MinDepositAge &&
 		target.DepositOwedPence == 0 {
 		depositCreditPence = s.cfg.DepositPricePence
 	}
@@ -190,20 +160,20 @@ func (s *Service) ConvertCamperToDayVisitor(
 
 	if depositCreditPence > 0 {
 		customerID := ""
-		if g.StripeCustomerID != nil {
-			customerID = *g.StripeCustomerID
+		if g.BillingCustomerRef != nil {
+			customerID = *g.BillingCustomerRef
 		}
 		name := strings.TrimSpace(g.ContactFirstName + " " + g.ContactLastName)
-		customerID, err = s.stripe.EnsureCustomer(ctx, customerID, g.ContactEmail, name, g.ID)
+		customerID, err = s.invoices.EnsureCustomer(ctx, customerID, g.ContactEmail, name, g.ID)
 		if err != nil {
 			return ConvertSummary{}, fmt.Errorf("operation: %w", err)
 		}
-		if customerID != "" && (g.StripeCustomerID == nil || *g.StripeCustomerID != customerID) {
-			if err := s.repo.SetStripeCustomerID(ctx, groupID, customerID); err != nil {
+		if customerID != "" && (g.BillingCustomerRef == nil || *g.BillingCustomerRef != customerID) {
+			if err := s.repo.SetBillingCustomerRef(ctx, groupID, customerID); err != nil {
 				return ConvertSummary{}, fmt.Errorf("operation: %w", err)
 			}
 		}
-		if err := s.stripe.CreditCustomerBalance(
+		if err := s.invoices.CreditCustomerBalance(
 			ctx, customerID, int64(depositCreditPence), g.Currency,
 			"Deposit credit (converted to day visitor)", "deposit-credit-"+camperID,
 		); err != nil {
@@ -213,7 +183,7 @@ func (s *Service) ConvertCamperToDayVisitor(
 
 	invoiceStale := false
 	if g.HasOpenInvoice() {
-		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeInvoiceID); err != nil {
+		if err := s.invoices.VoidInvoiceIdempotent(ctx, *g.BalanceInvoiceRef); err != nil {
 			return ConvertSummary{}, apperr.Invalidf("invoice void failed; camper was not converted: %v", err)
 		}
 		summary.InvoiceVoided = true
@@ -300,27 +270,19 @@ func (s *Service) UpdateDayPassCamper(
 		return UpdateDayPassSummary{}, fmt.Errorf("operation: %w", err)
 	}
 
-	var target *domain.Camper
-	for i := range campers {
-		if campers[i].ID == camperID {
-			target = &campers[i]
-			break
-		}
-	}
-	if target == nil {
-		return UpdateDayPassSummary{}, domain.ErrCamperNotFound
+	target, err := domain.FindCamper(campers, camperID)
+	if err != nil {
+		return UpdateDayPassSummary{}, err
 	}
 
-	summary := UpdateDayPassSummary{
-		CamperName: strings.TrimSpace(target.FirstName + " " + target.LastName),
-	}
+	summary := UpdateDayPassSummary{CamperName: target.FullName()}
 
-	if target.AttendanceType != domain.AttendanceDayPass {
-		return UpdateDayPassSummary{}, apperr.Invalid("only day-pass campers can be edited here")
+	if err := target.CanEditDayPass(); err != nil {
+		return UpdateDayPassSummary{}, err
 	}
 
 	fields := map[string]string{}
-	registration.ValidateDayPass("attendance", domain.Attendance{
+	domain.ValidateDayPass("attendance", domain.Attendance{
 		Type:          domain.AttendanceDayPass,
 		Days:          target.DayPassDays,
 		TshirtOption:  req.TshirtOption,
@@ -404,45 +366,28 @@ func (s *Service) UpdateCamperCoach(
 		return UpdateCamperCoachSummary{}, fmt.Errorf("operation: %w", err)
 	}
 
-	var target *domain.Camper
-	for i := range campers {
-		if campers[i].ID == camperID {
-			target = &campers[i]
-			break
-		}
-	}
-	if target == nil {
-		return UpdateCamperCoachSummary{}, domain.ErrCamperNotFound
+	target, err := domain.FindCamper(campers, camperID)
+	if err != nil {
+		return UpdateCamperCoachSummary{}, err
 	}
 
 	summary := UpdateCamperCoachSummary{
-		CamperName: strings.TrimSpace(target.FirstName + " " + target.LastName),
+		CamperName: target.FullName(),
 		NeedsCoach: req.NeedsCoach,
 	}
 
-	if target.AttendanceType != domain.AttendanceFullWeek {
-		return UpdateCamperCoachSummary{}, apperr.Invalid("only full-week campers can use the coach")
+	noOp, err := g.CoachChange(*target, req.NeedsCoach)
+	if err != nil {
+		return UpdateCamperCoachSummary{}, err
 	}
-
-	current := target.NeedsCoach != nil && *target.NeedsCoach
-	if current == req.NeedsCoach {
+	if noOp {
 		summary.NoOp = true
 		return summary, nil
 	}
 
-	if g.CoachFeePaidAt != nil ||
-		(g.CoachIncludedInBalance && g.BillingStatus == domain.BillingBalancePaid) {
-		return UpdateCamperCoachSummary{}, apperr.Invalid(
-			"coach fee already paid; handle any refund in Stripe first")
-	}
-	if g.CoachIncludedInBalance {
-		return UpdateCamperCoachSummary{}, apperr.Invalid(
-			"coach fee is included in the balance invoice for this group")
-	}
-
 	invoiceVoided := false
-	if g.StripeCoachInvoiceID != nil && strings.TrimSpace(*g.StripeCoachInvoiceID) != "" && g.CoachFeePaidAt == nil {
-		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeCoachInvoiceID); err != nil {
+	if g.HasUnpaidCoachInvoice() {
+		if err := s.invoices.VoidInvoiceIdempotent(ctx, *g.CoachInvoiceRef); err != nil {
 			return UpdateCamperCoachSummary{}, apperr.Invalidf("coach invoice void failed; coach seat was not updated: %v", err)
 		}
 		invoiceVoided = true
@@ -498,9 +443,9 @@ func (s *Service) EditCamper(
 	if err != nil {
 		return EditCamperSummary{}, fmt.Errorf("operation: %w", err)
 	}
-	target := findCamper(campers, camperID)
-	if target == nil {
-		return EditCamperSummary{}, domain.ErrCamperNotFound
+	target, err := domain.FindCamper(campers, camperID)
+	if err != nil {
+		return EditCamperSummary{}, err
 	}
 
 	fullWeek := target.AttendanceType == domain.AttendanceFullWeek
@@ -525,9 +470,8 @@ func (s *Service) EditCamper(
 			if err := s.pricer.ValidateAllocatedUnit(ctx, allocCode, unitCode); err != nil {
 				return EditCamperSummary{}, err
 			}
-		} else if unitCode != "" {
-			return EditCamperSummary{}, apperr.Invalid(
-				"cannot set a unit without an accommodation")
+		} else if err := domain.ValidateAllocationChoice(allocCode, unitCode); err != nil {
+			return EditCamperSummary{}, err
 		}
 
 		priceBefore, err := s.pricer.PriceFor(ctx, billing.StrVal(target.AllocatedAccommodationCode), target.Age, g.IsFree)
@@ -539,7 +483,7 @@ func (s *Service) EditCamper(
 			return EditCamperSummary{}, err
 		}
 		repriced = priceBefore != priceAfter ||
-			coachEligible(*target) != coachEligibleAtAge(*target, req.Age)
+			target.CoachEligible() != target.CoachEligibleAtAge(req.Age)
 
 		details.ShirtSize = optStr(req.ShirtSize)
 		details.DietaryRequirements = optStr(req.DietaryRequirements)
@@ -547,25 +491,22 @@ func (s *Service) EditCamper(
 		details.AccommodationSecondChoice = optStr(req.AccommodationSecondChoice)
 		details.AllocatedAccommodationCode = optStr(allocCode)
 		details.AllocatedUnitCode = optStr(unitCode)
-		details.BilledStripePriceID = optStr(priceAfter)
+		details.BilledPriceRef = optStr(priceAfter)
 	}
 
-	if repriced && g.BalanceSettled() {
-		return EditCamperSummary{}, apperr.Invalid(
-			"this balance is already paid, so changes that alter what they owe " +
-				"have to be settled in Stripe; details that don't change the price " +
-				"can still be edited")
+	if err := g.CheckReprice(repriced); err != nil {
+		return EditCamperSummary{}, err
 	}
 
 	summary := EditCamperSummary{
 		CamperName:   strings.TrimSpace(details.FirstName + " " + details.LastName),
-		PreviousName: strings.TrimSpace(target.FirstName + " " + target.LastName),
+		PreviousName: target.FullName(),
 		Repriced:     repriced,
 	}
 
 	invoiceStale := false
 	if repriced && g.HasOpenInvoice() {
-		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeInvoiceID); err != nil {
+		if err := s.invoices.VoidInvoiceIdempotent(ctx, *g.BalanceInvoiceRef); err != nil {
 			return EditCamperSummary{}, apperr.Invalidf("invoice void failed; nothing was changed: %v", err)
 		}
 		summary.InvoiceVoided = true
@@ -602,34 +543,20 @@ func (s *Service) AddCamper(
 		return AddCamperSummary{}, domain.ErrGroupNotFound
 	}
 
-	if g.PaymentStatus != domain.PaymentPaid {
-		return AddCamperSummary{}, apperr.Invalid(
-			"this group has not paid their deposit yet; wait for it to clear before adding anyone")
-	}
-	if g.IsFree {
-		return AddCamperSummary{}, apperr.Invalid(
-			"church-sponsored registrations are agreed as a whole; add this person as their own registration")
-	}
-	if g.PaidInFullAtRegistration {
-		return AddCamperSummary{}, apperr.Invalid(
-			"this family paid for camp in full at registration; add this person as their own registration")
-	}
-	if g.BalanceSettled() {
-		return AddCamperSummary{}, apperr.Invalid(
-			"this balance is already paid, so there is no invoice left to charge them on; " +
-				"add this person as their own registration")
+	if err := g.CanAddCamper(); err != nil {
+		return AddCamperSummary{}, err
 	}
 
 	c := req.Camper
 	c.IsMainContact = false
 	fields := map[string]string{}
-	registration.ValidateCamper("camper", c, fields)
+	domain.ValidateCamper("camper", c, fields)
 	if len(fields) > 0 {
 		return AddCamperSummary{}, apperr.Validation(fields)
 	}
 
 	depositOwed := 0
-	if c.Attendance.Type == domain.AttendanceFullWeek && c.Age >= registration.MinDepositAge {
+	if c.Attendance.Type == domain.AttendanceFullWeek && c.Age >= domain.MinDepositAge {
 		depositOwed = s.pricer.DepositAmountPence(ctx)
 	}
 
@@ -649,7 +576,7 @@ func (s *Service) AddCamper(
 	addedFullWeek := c.Attendance.Type == domain.AttendanceFullWeek
 	invoiceStale := false
 	if g.HasOpenInvoice() {
-		if err := s.stripe.VoidInvoiceIdempotent(ctx, *g.StripeInvoiceID); err != nil {
+		if err := s.invoices.VoidInvoiceIdempotent(ctx, *g.BalanceInvoiceRef); err != nil {
 			return AddCamperSummary{}, apperr.Invalidf("invoice void failed; nobody was added: %v", err)
 		}
 		summary.InvoiceVoided = true
@@ -692,11 +619,11 @@ func (s *Service) MakeMainContact(
 	if err != nil {
 		return "", fmt.Errorf("operation: %w", err)
 	}
-	target := findCamper(campers, camperID)
-	if target == nil {
-		return "", domain.ErrCamperNotFound
+	target, err := domain.FindCamper(campers, camperID)
+	if err != nil {
+		return "", err
 	}
-	name := strings.TrimSpace(target.FirstName + " " + target.LastName)
+	name := target.FullName()
 	if target.IsMainContact {
 		return name, nil
 	}
@@ -725,19 +652,18 @@ func (s *Service) WaiveCamperDeposit(
 	if g == nil {
 		return "", domain.ErrGroupNotFound
 	}
-	if g.BalanceSettled() {
-		return "", apperr.Invalid(
-			"this balance is already paid; there is no invoice left to take it off")
+	if err := g.CanWaiveCamperDeposit(); err != nil {
+		return "", err
 	}
 	campers, err := s.reads.CampersForGroup(ctx, groupID)
 	if err != nil {
 		return "", fmt.Errorf("operation: %w", err)
 	}
-	target := findCamper(campers, camperID)
-	if target == nil {
-		return "", domain.ErrCamperNotFound
+	target, err := domain.FindCamper(campers, camperID)
+	if err != nil {
+		return "", err
 	}
-	name := strings.TrimSpace(target.FirstName + " " + target.LastName)
+	name := target.FullName()
 	if target.DepositOwedPence <= 0 {
 		return name, nil
 	}
@@ -786,9 +712,9 @@ func validateEdit(target domain.Camper, req EditCamperRequest, fullWeek bool) er
 	}
 
 	fields := map[string]string{}
-	registration.ValidateCamper("camper", c, fields)
+	domain.ValidateCamper("camper", c, fields)
 	if fullWeek {
-		registration.ValidateAllocatedAccommodation(
+		domain.ValidateAllocatedAccommodation(
 			"camper.allocated_accommodation_code",
 			req.AllocatedAccommodationCode, req.Age, fields)
 	}
@@ -796,16 +722,6 @@ func validateEdit(target domain.Camper, req EditCamperRequest, fullWeek bool) er
 		return apperr.Validation(fields)
 	}
 	return nil
-}
-
-func coachEligible(c domain.Camper) bool {
-	return coachEligibleAtAge(c, c.Age)
-}
-
-func coachEligibleAtAge(c domain.Camper, age int) bool {
-	return c.AttendanceType == domain.AttendanceFullWeek &&
-		c.NeedsCoach != nil && *c.NeedsCoach &&
-		age >= registration.MinDepositAge
 }
 
 func campersAfterEdit(
@@ -826,15 +742,6 @@ func campersAfterEdit(
 		}
 	}
 	return out
-}
-
-func findCamper(campers []domain.Camper, camperID string) *domain.Camper {
-	for i := range campers {
-		if campers[i].ID == camperID {
-			return &campers[i]
-		}
-	}
-	return nil
 }
 
 func optStr(s string) *string {

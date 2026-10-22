@@ -94,7 +94,7 @@ func seedPendingGroup(t *testing.T, ctx context.Context, repo *storage.Repositor
 	if err := repo.InsertCamper(ctx, gid, req.Campers[0]); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.SetStripeSession(ctx, gid, sessID); err != nil {
+	if err := repo.SetCheckoutSession(ctx, gid, sessID); err != nil {
 		t.Fatal(err)
 	}
 	return gid
@@ -126,7 +126,7 @@ func seedPendingPrepaidGroup(t *testing.T, ctx context.Context, repo *storage.Re
 	if err := repo.InsertCamper(ctx, gid, req.Campers[0]); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.SetStripeSession(ctx, gid, sessID); err != nil {
+	if err := repo.SetCheckoutSession(ctx, gid, sessID); err != nil {
 		t.Fatal(err)
 	}
 	return gid
