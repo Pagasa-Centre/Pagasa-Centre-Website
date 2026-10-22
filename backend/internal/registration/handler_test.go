@@ -13,7 +13,7 @@ import (
 
 	regapi "pagasacentre/backend/internal/api/registration"
 	regdto "pagasacentre/backend/internal/api/registration/dto"
-	"pagasacentre/backend/internal/email"
+	"pagasacentre/backend/internal/notify"
 	"pagasacentre/backend/internal/registration"
 	"pagasacentre/backend/internal/registration/domain"
 	regstorage "pagasacentre/backend/internal/registration/storage"
@@ -61,46 +61,10 @@ func (f fakeCamp) RegistrationPaymentMode(_ context.Context) (string, error) {
 
 type recordingMailer struct {
 	mu    sync.Mutex
-	calls []email.DepositConfirmation
+	calls []notify.DepositConfirmation
 }
 
-func (m *recordingMailer) SendAllocationReleased(context.Context, email.AllocationReleased) error {
-	return nil
-}
-
-func (m *recordingMailer) SendWhiteTeamNotification(context.Context, email.WhiteTeamNotification) error {
-	return nil
-}
-
-func (m *recordingMailer) SendBalanceInvoice(context.Context, email.BalanceInvoice) error {
-	return nil
-}
-
-func (m *recordingMailer) SendBalancePaid(context.Context, email.BalancePaid) error {
-	return nil
-}
-
-func (m *recordingMailer) SendBalancePaidConfirmation(context.Context, email.BalancePaidConfirmation) error {
-	return nil
-}
-
-func (m *recordingMailer) SendSponsorshipConfirmed(context.Context, email.SponsorshipConfirmed) error {
-	return nil
-}
-
-func (m *recordingMailer) SendCoachInvoice(context.Context, email.CoachInvoice) error {
-	return nil
-}
-
-func (m *recordingMailer) SendAccommodationChanged(context.Context, email.AccommodationChangedNotice) error {
-	return nil
-}
-
-func (m *recordingMailer) SendBookingUpdated(context.Context, email.BookingUpdated) error {
-	return nil
-}
-
-func (m *recordingMailer) SendDepositConfirmation(_ context.Context, p email.DepositConfirmation) error {
+func (m *recordingMailer) SendDepositConfirmation(_ context.Context, p notify.DepositConfirmation) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, p)

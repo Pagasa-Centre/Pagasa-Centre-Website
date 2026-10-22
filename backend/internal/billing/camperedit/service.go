@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"pagasacentre/backend/internal/billing"
-	"pagasacentre/backend/internal/email"
+	"pagasacentre/backend/internal/notify"
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
@@ -93,7 +93,7 @@ func (s *Service) RemoveCamper(ctx context.Context, groupID, camperID, actor str
 				if err := s.sheets.RemoveByGroupID(ctx, groupID); err != nil {
 					log.Printf("billing: remove group %s from sheet after camper remove: %v", groupID, err)
 				}
-				rows := billing.SheetRowsForGroup(gAfter, remaining)
+				rows := notify.RowsForGroup(gAfter, remaining)
 				if err := s.sheets.AppendPaidAndRemovePending(ctx, groupID, rows); err != nil {
 					log.Printf("billing: re-sync sheet for group %s after camper remove: %v", groupID, err)
 				}
@@ -163,7 +163,7 @@ func (s *Service) ConvertCamperToDayVisitor(
 		if g.BillingCustomerRef != nil {
 			customerID = *g.BillingCustomerRef
 		}
-		name := strings.TrimSpace(g.ContactFirstName + " " + g.ContactLastName)
+		name := g.ContactName()
 		customerID, err = s.invoices.EnsureCustomer(ctx, customerID, g.ContactEmail, name, g.ID)
 		if err != nil {
 			return ConvertSummary{}, fmt.Errorf("operation: %w", err)
@@ -240,7 +240,7 @@ func (s *Service) ConvertCamperToDayVisitor(
 				if err := s.sheets.RemoveByGroupID(ctx, groupID); err != nil {
 					log.Printf("billing: remove group %s from sheet after camper convert: %v", groupID, err)
 				}
-				rows := billing.SheetRowsForGroup(gAfter, remaining)
+				rows := notify.RowsForGroup(gAfter, remaining)
 				if err := s.sheets.AppendPaidAndRemovePending(ctx, groupID, rows); err != nil {
 					log.Printf("billing: re-sync sheet for group %s after camper convert: %v", groupID, err)
 				}
@@ -336,7 +336,7 @@ func (s *Service) UpdateDayPassCamper(
 				if err := s.sheets.RemoveByGroupID(ctx, groupID); err != nil {
 					log.Printf("billing: remove group %s from sheet after day-pass edit: %v", groupID, err)
 				}
-				rows := billing.SheetRowsForGroup(gAfter, remaining)
+				rows := notify.RowsForGroup(gAfter, remaining)
 				if err := s.sheets.AppendPaidAndRemovePending(ctx, groupID, rows); err != nil {
 					log.Printf("billing: re-sync sheet for group %s after day-pass edit: %v", groupID, err)
 				}
@@ -415,7 +415,7 @@ func (s *Service) UpdateCamperCoach(
 				if err := s.sheets.RemoveByGroupID(ctx, groupID); err != nil {
 					log.Printf("billing: remove group %s from sheet after coach edit: %v", groupID, err)
 				}
-				rows := billing.SheetRowsForGroup(gAfter, remaining)
+				rows := notify.RowsForGroup(gAfter, remaining)
 				if err := s.sheets.AppendPaidAndRemovePending(ctx, groupID, rows); err != nil {
 					log.Printf("billing: re-sync sheet for group %s after coach edit: %v", groupID, err)
 				}
@@ -769,7 +769,7 @@ func (s *Service) resyncSheet(ctx context.Context, g *domain.Group, what string)
 	if err := s.sheets.RemoveByGroupID(ctx, g.ID); err != nil {
 		log.Printf("billing: clear sheet rows after %s (group %s): %v", what, g.ID, err)
 	}
-	if err := s.sheets.AppendPaidAndRemovePending(ctx, g.ID, billing.SheetRowsForGroup(gAfter, campers)); err != nil {
+	if err := s.sheets.AppendPaidAndRemovePending(ctx, g.ID, notify.RowsForGroup(gAfter, campers)); err != nil {
 		log.Printf("billing: re-sync sheet after %s (group %s): %v", what, g.ID, err)
 	}
 }
@@ -789,10 +789,10 @@ func (s *Service) sendBookingUpdated(
 		log.Printf("billing: load campers for booking-updated email (group %s): %v", groupID, err)
 		return
 	}
-	if err := s.mailer.SendBookingUpdated(ctx, email.BookingUpdated{
+	if err := s.mailer.SendBookingUpdated(ctx, notify.BookingUpdated{
 		ToEmail:          g.ContactEmail,
 		ToName:           g.ContactFirstName,
-		Campers:          billing.RosterItems(campers, s.pricer.AccommodationNames(ctx), s.pricer.UnitNames(ctx)),
+		Items:            notify.RosterItems(campers, s.pricer.AccommodationNames(ctx), s.pricer.UnitNames(ctx)),
 		AddedName:        addedName,
 		InvoiceCancelled: invoiceVoided,
 	}); err != nil {

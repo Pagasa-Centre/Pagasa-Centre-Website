@@ -11,6 +11,8 @@ import (
 
 	"google.golang.org/api/option"
 	sheetsapi "google.golang.org/api/sheets/v4"
+
+	"pagasacentre/backend/internal/notify"
 )
 
 // GoogleSync is the production Sync implementation, backed by the Google
@@ -112,7 +114,7 @@ func decodeCredentials(s string) ([]byte, error) {
 }
 
 // AppendPending appends rows to the Pending tab.
-func (g *GoogleSync) AppendPending(ctx context.Context, rows []Row) error {
+func (g *GoogleSync) AppendPending(ctx context.Context, rows []notify.SheetRow) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -123,7 +125,7 @@ func (g *GoogleSync) AppendPending(ctx context.Context, rows []Row) error {
 // rows in the Pending tab whose group_id (column A) matches. Order matters:
 // if the second step fails for any reason, the row exists in both tabs —
 // preferable to losing it.
-func (g *GoogleSync) AppendPaidAndRemovePending(ctx context.Context, groupID string, rows []Row) error {
+func (g *GoogleSync) AppendPaidAndRemovePending(ctx context.Context, groupID string, rows []notify.SheetRow) error {
 	if err := g.appendRows(ctx, g.paidTab, rows); err != nil {
 		return fmt.Errorf("append paid: %w", err)
 	}
@@ -139,7 +141,7 @@ func (g *GoogleSync) AppendPaidAndRemovePending(ctx context.Context, groupID str
 // row whose group_id (column A) matches, across both tabs. The Paid tab is the
 // usual target once a deposit is in, but we also scan Pending so a correction
 // made before payment isn't lost.
-func (g *GoogleSync) UpdateContactByGroupID(ctx context.Context, groupID string, c ContactUpdate) error {
+func (g *GoogleSync) UpdateContactByGroupID(ctx context.Context, groupID string, c notify.ContactUpdate) error {
 	for _, tab := range []string{g.paidTab, g.pendingTab} {
 		if err := g.updateContactInTab(ctx, tab, groupID, c); err != nil {
 			return fmt.Errorf("update contact in %s: %w", tab, err)
@@ -151,7 +153,7 @@ func (g *GoogleSync) UpdateContactByGroupID(ctx context.Context, groupID string,
 // updateContactInTab finds matching group rows in one tab and rewrites their
 // contact columns. Columns G:J map to contact_first_name, contact_last_name,
 // contact_email, contact_phone (positions 7-10, matching Headers above).
-func (g *GoogleSync) updateContactInTab(ctx context.Context, tab, groupID string, c ContactUpdate) error {
+func (g *GoogleSync) updateContactInTab(ctx context.Context, tab, groupID string, c notify.ContactUpdate) error {
 	resp, err := g.svc.Spreadsheets.Values.
 		Get(g.spreadsheetID, tab+"!A:A").
 		Context(ctx).
@@ -194,16 +196,16 @@ func (g *GoogleSync) updateContactInTab(ctx context.Context, tab, groupID string
 
 // appendRows lazily writes headers (if the tab is empty) and then appends
 // the row values. Uses USER_ENTERED so Sheet auto-parses dates/numbers.
-func (g *GoogleSync) appendRows(ctx context.Context, tab string, rows []Row) error {
+func (g *GoogleSync) appendRows(ctx context.Context, tab string, rows []notify.SheetRow) error {
 	if err := g.ensureHeaders(ctx, tab); err != nil {
 		return fmt.Errorf("ensure headers: %w", err)
 	}
-	values := make([][]any, 0, len(rows))
+	out := make([][]any, 0, len(rows))
 	for _, r := range rows {
-		values = append(values, r.Values())
+		out = append(out, values(r))
 	}
 	_, err := g.svc.Spreadsheets.Values.
-		Append(g.spreadsheetID, tab+"!A:A", &sheetsapi.ValueRange{Values: values}).
+		Append(g.spreadsheetID, tab+"!A:A", &sheetsapi.ValueRange{Values: out}).
 		ValueInputOption("USER_ENTERED").
 		InsertDataOption("INSERT_ROWS").
 		Context(ctx).

@@ -14,7 +14,6 @@ import (
 	"github.com/robfig/cron/v3"
 
 	"pagasacentre/backend/internal/accommodation"
-	"pagasacentre/backend/internal/auth"
 	accomstorage "pagasacentre/backend/internal/accommodation/storage"
 	"pagasacentre/backend/internal/adminlog"
 	adminstorage "pagasacentre/backend/internal/adminlog/storage"
@@ -25,6 +24,7 @@ import (
 	paymentapi "pagasacentre/backend/internal/api/payment"
 	regapi "pagasacentre/backend/internal/api/registration"
 	sermonapi "pagasacentre/backend/internal/api/sermon"
+	"pagasacentre/backend/internal/auth"
 	"pagasacentre/backend/internal/billing"
 	"pagasacentre/backend/internal/billing/allocation"
 	allocstorage "pagasacentre/backend/internal/billing/allocation/storage"
@@ -44,14 +44,15 @@ import (
 	"pagasacentre/backend/internal/config"
 	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/http/router"
+	"pagasacentre/backend/internal/notify"
 	"pagasacentre/backend/internal/payment"
 	"pagasacentre/backend/internal/registration"
-	stripeadapter "pagasacentre/backend/internal/stripe"
 	"pagasacentre/backend/internal/registration/domain"
 	regstorage "pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/sermon"
 	sermonstorage "pagasacentre/backend/internal/sermon/storage"
 	"pagasacentre/backend/internal/sheets"
+	stripeadapter "pagasacentre/backend/internal/stripe"
 	commondb "pagasacentre/backend/pkg/commonlibrary/db"
 )
 
@@ -133,7 +134,7 @@ func main() {
 	// Optional integrations. If a required client (the database, Stripe) cannot
 	// start, the process should exit. If an optional one cannot, fall back to a
 	// no-op and log it, so one missing integration does not take the API down.
-	var mailer email.Mailer
+	var mailer notify.Mailer
 	switch {
 	case cfg.ResendAPIKey != "" && cfg.EmailFrom != "":
 		mailer = email.NewResendMailer(cfg.ResendAPIKey, cfg.EmailFrom)
@@ -146,7 +147,7 @@ func main() {
 		log.Println("email: no backend configured, using NoopMailer (no real email sent)")
 	}
 
-	var sheetSync sheets.Sync
+	var sheetSync notify.SheetSync
 	if cfg.GoogleServiceAccountJSON != "" && cfg.GoogleSheetsSpreadsheetID != "" {
 		gs, err := sheets.NewGoogleSync(ctx, sheets.GoogleSyncConfig{
 			ServiceAccountJSON: cfg.GoogleServiceAccountJSON,
@@ -156,14 +157,14 @@ func main() {
 		})
 		if err != nil {
 			log.Printf("sheets: init failed, falling back to NoopSync: %v", err)
-			sheetSync = sheets.NewNoopSync()
+			sheetSync = notify.NewNoopSheetSync()
 		} else {
 			sheetSync = gs
 			log.Printf("sheets: GoogleSync enabled (spreadsheet=%s pending=%q paid=%q)",
 				cfg.GoogleSheetsSpreadsheetID, cfg.GoogleSheetsPendingTab, cfg.GoogleSheetsPaidTab)
 		}
 	} else {
-		sheetSync = sheets.NewNoopSync()
+		sheetSync = notify.NewNoopSheetSync()
 		log.Println("sheets: GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SHEETS_SPREADSHEET_ID unset, using NoopSync")
 	}
 
@@ -195,9 +196,9 @@ func main() {
 		ChildUnder3PriceRef: cfg.StripePriceChildUnder3,
 		DayPassPriceRef:     cfg.StripePriceDayPass,
 		CoachPriceRef:       cfg.StripePriceCoach,
-		DepositPricePence:      depositPence,
-		InvoiceDueDays:         cfg.InvoiceDueDays,
-		WhiteTeamEmail:         cfg.WhiteTeamEmail,
+		DepositPricePence:   depositPence,
+		InvoiceDueDays:      cfg.InvoiceDueDays,
+		WhiteTeamEmail:      cfg.WhiteTeamEmail,
 	}
 	pricer := billing.NewPricer(regRepo, billCfg, campPriceAdapter{repo: campRepo})
 	stripeBill := stripeadapter.NewBillingClient()

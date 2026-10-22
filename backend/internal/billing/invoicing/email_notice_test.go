@@ -5,15 +5,15 @@ import (
 	"testing"
 
 	"pagasacentre/backend/internal/billing"
-	"pagasacentre/backend/internal/email"
+	"pagasacentre/backend/internal/notify"
 )
 
 type recordingMailer struct {
-	email.NoopMailer
-	accomChanged []email.AccommodationChangedNotice
+	notify.NopMailer
+	accomChanged []notify.AccommodationChangedNotice
 }
 
-func (m *recordingMailer) SendAccommodationChanged(_ context.Context, p email.AccommodationChangedNotice) error {
+func (m *recordingMailer) SendAccommodationChanged(_ context.Context, p notify.AccommodationChangedNotice) error {
 	m.accomChanged = append(m.accomChanged, p)
 	return nil
 }
@@ -22,7 +22,7 @@ func TestSendAccommodationChangedNotice(t *testing.T) {
 	mailer := &recordingMailer{}
 	svc := NewService(nil, nil, nil, mailer, nil, billing.NewPricer(nil, billing.Config{}, nil), billing.Config{})
 
-	changes := []email.AccommodationChange{{
+	changes := []notify.AccommodationChange{{
 		CamperName:   "Alex Test",
 		FirstChoice:  "Lodge",
 		SecondChoice: "Cabin",

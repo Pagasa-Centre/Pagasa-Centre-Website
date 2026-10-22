@@ -3,10 +3,12 @@ package email
 import (
 	"strings"
 	"testing"
+
+	"pagasacentre/backend/internal/notify"
 )
 
 func TestRenderDepositConfirmation_DepositPath(t *testing.T) {
-	subject, body, err := renderDepositConfirmation(DepositConfirmation{
+	subject, body, err := renderDepositConfirmation(notify.DepositConfirmation{
 		ToEmail:        "parent@example.com",
 		ToName:         "Sarah",
 		AmountPence:    10000,
@@ -40,7 +42,7 @@ func TestRenderDepositConfirmation_DepositPath(t *testing.T) {
 }
 
 func TestRenderDepositConfirmation_DayPassOnlyPath(t *testing.T) {
-	subject, body, err := renderDepositConfirmation(DepositConfirmation{
+	subject, body, err := renderDepositConfirmation(notify.DepositConfirmation{
 		ToEmail:     "visitor@example.com",
 		ToName:      "Alex",
 		AmountPence: 0,
@@ -65,7 +67,7 @@ func TestRenderDepositConfirmation_DayPassOnlyPath(t *testing.T) {
 }
 
 func TestRenderDepositConfirmation_SponsoredPath(t *testing.T) {
-	subject, body, err := renderDepositConfirmation(DepositConfirmation{
+	subject, body, err := renderDepositConfirmation(notify.DepositConfirmation{
 		ToEmail:     "guest@example.com",
 		ToName:      "Sam",
 		AmountPence: 0,
@@ -87,11 +89,11 @@ func TestRenderDepositConfirmation_SponsoredPath(t *testing.T) {
 }
 
 func TestRenderBalancePaidConfirmation(t *testing.T) {
-	subject, body, err := renderBalancePaidConfirmation(BalancePaidConfirmation{
-		ToEmail:     "family@example.com",
-		ToName:      "Sam",
-		AmountLabel: "£250.00",
-		Items:       []string{"Josh Basco — Lodge"},
+	subject, body, err := renderBalancePaidConfirmation(notify.BalancePaidConfirmation{
+		ToEmail: "family@example.com",
+		ToName:  "Sam",
+		Amount:  notify.Amount{Pence: 25000, Currency: "GBP"},
+		Items:   []notify.InvoiceItem{{Kind: notify.ItemAccommodation, CamperName: "Josh Basco", AccommodationName: "Lodge"}},
 	})
 	if err != nil {
 		t.Fatalf("renderBalancePaidConfirmation: %v", err)
@@ -111,10 +113,13 @@ func TestRenderBalancePaidConfirmation(t *testing.T) {
 }
 
 func TestRenderSponsorshipConfirmed(t *testing.T) {
-	subject, body, err := renderSponsorshipConfirmed(SponsorshipConfirmed{
+	subject, body, err := renderSponsorshipConfirmed(notify.SponsorshipConfirmed{
 		ToEmail: "guest@example.com",
 		ToName:  "Sam",
-		Items:   []string{"Josh Basco — Lodge", "Mary Basco — Cabin (Cabin 2)"},
+		Items: []notify.InvoiceItem{
+			{Kind: notify.ItemAccommodation, CamperName: "Josh Basco", AccommodationName: "Lodge"},
+			{Kind: notify.ItemAccommodation, CamperName: "Mary Basco", AccommodationName: "Cabin", UnitName: "Cabin 2"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("renderSponsorshipConfirmed: %v", err)
@@ -132,11 +137,11 @@ func TestRenderSponsorshipConfirmed(t *testing.T) {
 }
 
 func TestRenderSponsorshipConfirmed_withOffPreferenceCallout(t *testing.T) {
-	_, body, err := renderSponsorshipConfirmed(SponsorshipConfirmed{
+	_, body, err := renderSponsorshipConfirmed(notify.SponsorshipConfirmed{
 		ToEmail: "guest@example.com",
 		ToName:  "Sam",
-		Items:   []string{"Alex Test — Tent"},
-		Changes: []AccommodationChange{{
+		Items:   []notify.InvoiceItem{{Kind: notify.ItemAccommodation, CamperName: "Alex Test", AccommodationName: "Tent"}},
+		Changes: []notify.AccommodationChange{{
 			CamperName:   "Alex Test",
 			FirstChoice:  "Lodge",
 			SecondChoice: "Cabin",
@@ -156,10 +161,10 @@ func TestRenderSponsorshipConfirmed_withOffPreferenceCallout(t *testing.T) {
 }
 
 func TestRenderAccommodationChanged(t *testing.T) {
-	subject, body, err := renderAccommodationChanged(AccommodationChangedNotice{
+	subject, body, err := renderAccommodationChanged(notify.AccommodationChangedNotice{
 		ToEmail: "family@example.com",
 		ToName:  "Sam",
-		Items: []AccommodationChange{{
+		Items: []notify.AccommodationChange{{
 			CamperName:   "Alex Test",
 			FirstChoice:  "Lodge",
 			SecondChoice: "Cabin",
@@ -187,10 +192,10 @@ func TestRenderAccommodationChanged(t *testing.T) {
 		t.Errorf("body should warn before paying when AwaitingPayment")
 	}
 
-	_, bodyNoPay, err := renderAccommodationChanged(AccommodationChangedNotice{
+	_, bodyNoPay, err := renderAccommodationChanged(notify.AccommodationChangedNotice{
 		ToEmail: "family@example.com",
 		ToName:  "Sam",
-		Items: []AccommodationChange{{
+		Items: []notify.AccommodationChange{{
 			CamperName:  "Alex Test",
 			FirstChoice: "Lodge",
 			Allocated:   "Cabin",
@@ -206,7 +211,7 @@ func TestRenderAccommodationChanged(t *testing.T) {
 }
 
 func TestRenderAllocationReleased_Cancelled(t *testing.T) {
-	subject, body, err := renderAllocationReleased(AllocationReleased{
+	subject, body, err := renderAllocationReleased(notify.AllocationReleased{
 		ToEmail:     "family@example.com",
 		ToName:      "Bianca",
 		CamperNames: []string{"Bianca Test"},
@@ -234,7 +239,7 @@ func TestRenderAllocationReleased_Cancelled(t *testing.T) {
 }
 
 func TestRenderAllocationReleased_Released(t *testing.T) {
-	subject, body, err := renderAllocationReleased(AllocationReleased{
+	subject, body, err := renderAllocationReleased(notify.AllocationReleased{
 		ToEmail:     "family@example.com",
 		ToName:      "Bianca",
 		CamperNames: []string{"Bianca Test"},

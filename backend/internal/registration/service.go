@@ -9,10 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"pagasacentre/backend/internal/email"
+	"pagasacentre/backend/internal/notify"
 	"pagasacentre/backend/internal/registration/domain"
-	"pagasacentre/backend/internal/sheets"
 )
+
+type depositMailer interface {
+	SendDepositConfirmation(ctx context.Context, p notify.DepositConfirmation) error
+}
 
 type PriceLookup interface {
 	GetPrice(ctx context.Context, code string) (domain.PriceRow, error)
@@ -46,8 +49,8 @@ type Service struct {
 	checkout      CheckoutCreator
 	priceAmounts  PriceAmounts
 	camp          CampConfigReader
-	mailer        email.Mailer
-	sheets        sheets.Sync
+	mailer        depositMailer
+	sheets        notify.SheetSync
 	publicBaseURL string
 	cfg           Config
 }
@@ -59,13 +62,13 @@ func NewService(
 	checkout CheckoutCreator,
 	priceAmounts PriceAmounts,
 	campCfg CampConfigReader,
-	mailer email.Mailer,
-	sheetSync sheets.Sync,
+	mailer depositMailer,
+	sheetSync notify.SheetSync,
 	publicBaseURL string,
 	cfg Config,
 ) *Service {
 	if sheetSync == nil {
-		sheetSync = sheets.NewNoopSync()
+		sheetSync = notify.NewNoopSheetSync()
 	}
 	return &Service{
 		repo:          repo,
@@ -116,7 +119,7 @@ func (s *Service) Submit(ctx context.Context, req domain.Submission) (*domain.Su
 
 	isFree := false
 	var reservedCodeID string
-	hasMinor := HasMinor(req)
+	hasMinor := req.HasMinor()
 	var resp *domain.SubmitResult
 
 	err = s.tx.WithTx(ctx, func(txCtx context.Context) error {
@@ -167,7 +170,7 @@ func (s *Service) Submit(ctx context.Context, req domain.Submission) (*domain.Su
 				PaidInFullAtRegistration: paidInFull,
 			}
 			settlement, _ := pending.SettleCheckout()
-			coachIncluded := paidInFull && coachEligibleCountFromRequest(req) > 0
+			coachIncluded := paidInFull && req.CoachEligibleCount() > 0
 			if err := s.repo.ApplySettlement(txCtx, groupID, "", coachIncluded, settlement); err != nil {
 				return fmt.Errorf("apply settlement: %w", err)
 			}
@@ -196,68 +199,21 @@ func (s *Service) Submit(ctx context.Context, req domain.Submission) (*domain.Su
 	if total == 0 {
 		s.sendConfirmationEmail(ctx, req, total, currency, hasMinor, isFree, paidInFull)
 		now := time.Now().UTC()
-		rows := rowsFromRequest(resp.GroupID, req, domain.PaymentPaid, total, currency, now, &now)
+		g, campers := req.ToGroup(resp.GroupID, domain.PaymentPaid, total, currency, now, &now)
+		rows := notify.RowsForGroup(&g, campers)
 		if err := s.sheets.AppendPaidAndRemovePending(ctx, resp.GroupID, rows); err != nil {
 			log.Printf("sheets append paid (group %s): %v", resp.GroupID, err)
 		}
 		return resp, nil
 	}
 
-	pendingRows := rowsFromRequest(resp.GroupID, req, domain.PaymentPending, total, currency, time.Now().UTC(), nil)
+	submittedAt := time.Now().UTC()
+	g, campers := req.ToGroup(resp.GroupID, domain.PaymentPending, total, currency, submittedAt, nil)
+	pendingRows := notify.RowsForGroup(&g, campers)
 	if err := s.sheets.AppendPending(ctx, pendingRows); err != nil {
 		log.Printf("sheets append pending (group %s): %v", resp.GroupID, err)
 	}
 	return resp, nil
-}
-
-func rowsFromRequest(groupID string, req domain.Submission, status domain.PaymentStatus, totalPence int, currency string, submittedAt time.Time, paidAt *time.Time) []sheets.Row {
-	rows := make([]sheets.Row, 0, len(req.Campers))
-	for _, c := range req.Campers {
-		row := sheets.Row{
-			GroupID:          groupID,
-			PaymentStatus:    string(status),
-			SubmittedAt:      submittedAt,
-			PaidAt:           paidAt,
-			TotalAmountPence: totalPence,
-			Currency:         currency,
-			ContactFirstName: req.Contact.FirstName,
-			ContactLastName:  req.Contact.LastName,
-			ContactEmail:     req.Contact.Email,
-			ContactPhone:     req.Contact.Phone,
-			IsMainContact:    c.IsMainContact,
-			FirstName:        c.FirstName,
-			LastName:         c.LastName,
-			Gender:           c.Gender,
-			Age:              c.Age,
-			CellLeaderName:   c.CellLeaderName,
-			IsCellLeader:     c.IsCellLeader,
-			AttendanceType:   c.Attendance.Type,
-		}
-		switch c.Attendance.Type {
-		case domain.AttendanceFullWeek:
-			row.ShirtSize = ptrIfNotEmpty(c.Attendance.ShirtSize)
-			row.DietaryRequirements = ptrIfNotEmpty(c.Attendance.DietaryRequirements)
-			row.NeedsCoach = c.Attendance.NeedsCoach
-			row.AccommodationFirstChoice = ptrIfNotEmpty(c.Attendance.AccommodationFirstChoice)
-			row.AccommodationSecondChoice = ptrIfNotEmpty(c.Attendance.AccommodationSecondChoice)
-			row.RoommateRequests = ptrIfNotEmpty(c.Attendance.RoommateRequests)
-		case domain.AttendanceDayPass:
-			row.ShirtSize = ptrIfNotEmpty(c.Attendance.ShirtSize)
-			row.DietaryRequirements = ptrIfNotEmpty(c.Attendance.DietaryRequirements)
-			row.DayPassDays = c.Attendance.Days
-			row.DayPassTshirtOption = ptrIfNotEmpty(c.Attendance.TshirtOption)
-			row.DayPassNeedsCatering = c.Attendance.NeedsCatering
-		}
-		rows = append(rows, row)
-	}
-	return rows
-}
-
-func ptrIfNotEmpty(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
 }
 
 // ensureAccommodationAvailable rejects submissions whose 1st/2nd accommodation
@@ -295,7 +251,7 @@ func (s *Service) computeTotal(ctx context.Context, req domain.Submission) (tota
 	if currency == "" {
 		currency = "GBP"
 	}
-	totalPence = deposit.AmountPence * depositPayingCount(req)
+	totalPence = deposit.AmountPence * req.DepositPayingCount()
 	return totalPence, currency, nil
 }
 
@@ -307,7 +263,7 @@ func (s *Service) sendConfirmationEmail(ctx context.Context, req domain.Submissi
 	if hasMinor {
 		consentURL = s.publicBaseURL + "/api/consent-form"
 	}
-	err := s.mailer.SendDepositConfirmation(ctx, email.DepositConfirmation{
+	err := s.mailer.SendDepositConfirmation(ctx, notify.DepositConfirmation{
 		ToEmail:        req.Contact.Email,
 		ToName:         req.Contact.FirstName,
 		AmountPence:    totalPence,
@@ -361,16 +317,6 @@ func (s *Service) Summary(ctx context.Context, sessionID, groupID string) (*doma
 		})
 	}
 	return out, nil
-}
-
-func depositPayingCount(req domain.Submission) int {
-	n := 0
-	for _, c := range req.Campers {
-		if c.Attendance.Type == domain.AttendanceFullWeek && c.Age >= domain.MinDepositAge {
-			n++
-		}
-	}
-	return n
 }
 
 func pluralS(n int) string {

@@ -56,159 +56,37 @@ func (s *Service) computeCharge(ctx context.Context, req domain.Submission, mode
 	if err != nil {
 		return charge{}, fmt.Errorf("lookup deposit price: %w", err)
 	}
-	currency := deposit.Currency
-	if currency == "" {
-		currency = "GBP"
+	lookup := func(priceRef string) (int64, string, error) {
+		return s.priceAmounts.Amount(ctx, priceRef)
 	}
-
-	if mode != domain.PaymentModeFull {
-		paying := depositPayingCount(req)
-		total := deposit.AmountPence * paying
-		var lines []CheckoutLine
-		if total > 0 {
-			lines = []CheckoutLine{{
-				Description: fmt.Sprintf("PC Summer Camp 2026 non-refundable deposit (%d camper%s)", paying, pluralS(paying)),
-				AmountPence: int64(total),
-				Quantity:    1,
-			}}
+	in := domain.ChargeInputs{
+		Mode:                mode,
+		Deposit:             deposit,
+		HasCatalog:          s.priceAmounts != nil,
+		ChildUnder3PriceRef: s.cfg.ChildUnder3PriceRef,
+		DayPassPriceRef:     s.cfg.DayPassPriceRef,
+		CoachPriceRef:       s.cfg.CoachPriceRef,
+	}
+	if mode == domain.PaymentModeFull {
+		tiers, err := s.repo.ListAccommodationTypes(ctx)
+		if err != nil {
+			return charge{}, fmt.Errorf("list accommodation types: %w", err)
 		}
-		return charge{totalPence: total, currency: currency, lines: lines}, nil
+		in.Tiers = tiers
 	}
-
-	if s.priceAmounts == nil {
-		return charge{}, fmt.Errorf("stripe price catalog not configured")
-	}
-
-	var lines []CheckoutLine
-	totalPence := 0
-
-	paying := depositPayingCount(req)
-	if paying > 0 && deposit.AmountPence > 0 {
-		lines = append(lines, CheckoutLine{
-			Description: "PC Summer Camp 2026 non-refundable deposit",
-			AmountPence: int64(deposit.AmountPence),
-			Quantity:    int64(paying),
-		})
-		totalPence += deposit.AmountPence * paying
-	}
-
-	tiers, err := s.repo.ListAccommodationTypes(ctx)
+	ch, err := domain.ComputeCharge(req, in, lookup)
 	if err != nil {
-		return charge{}, fmt.Errorf("list accommodation types: %w", err)
+		return charge{}, err
 	}
-	tierByCode := map[string]domain.AccommodationType{}
-	for _, t := range tiers {
-		tierByCode[t.Code] = t
-	}
-
-	// Aggregate accommodation lines by (priceID, description).
-	type accKey struct {
-		priceID     string
-		description string
-		unitPence   int64
-	}
-	accCounts := map[accKey]int64{}
-
-	for _, c := range req.Campers {
-		if c.Attendance.Type != domain.AttendanceFullWeek {
-			continue
-		}
-		code := strings.TrimSpace(c.Attendance.AccommodationFirstChoice)
-		if code == "" {
-			return charge{}, fmt.Errorf("full-week camper missing accommodation first choice")
-		}
-		tier := tierByCode[code]
-		priceID, err := domain.AccommodationPriceID(code, c.Age, &tier, s.cfg.ChildUnder3PriceRef)
-		if err != nil {
-			return charge{}, err
-		}
-		unit, cur, err := s.priceAmounts.Amount(ctx, priceID)
-		if err != nil {
-			return charge{}, fmt.Errorf("lookup price for %s: %w", code, err)
-		}
-		if err := ensureCurrency(currency, cur); err != nil {
-			return charge{}, err
-		}
-		if unit <= 0 {
-			continue
-		}
-		desc := fmt.Sprintf("%s — full week", tier.DisplayName)
-		k := accKey{priceID: priceID, description: desc, unitPence: unit}
-		accCounts[k]++
-	}
-
-	for k, qty := range accCounts {
-		lines = append(lines, CheckoutLine{
-			Description: k.description,
-			AmountPence: k.unitPence,
-			Quantity:    qty,
+	out := charge{currency: ch.Currency, totalPence: ch.TotalPence}
+	for _, ln := range ch.Lines {
+		out.lines = append(out.lines, CheckoutLine{
+			Description: ln.Description,
+			AmountPence: ln.AmountPence,
+			Quantity:    ln.Quantity,
 		})
-		totalPence += int(k.unitPence * qty)
 	}
-
-	dayPassDays := 0
-	for _, c := range req.Campers {
-		if c.Attendance.Type == domain.AttendanceDayPass {
-			dayPassDays += len(c.Attendance.Days)
-		}
-	}
-	if dayPassDays > 0 {
-		if s.cfg.DayPassPriceRef == "" {
-			return charge{}, fmt.Errorf("STRIPE_PRICE_DAY_PASS is not configured")
-		}
-		unit, cur, err := s.priceAmounts.Amount(ctx, s.cfg.DayPassPriceRef)
-		if err != nil {
-			return charge{}, fmt.Errorf("lookup day pass price: %w", err)
-		}
-		if err := ensureCurrency(currency, cur); err != nil {
-			return charge{}, err
-		}
-		if unit > 0 {
-			lines = append(lines, CheckoutLine{
-				Description: "PC Summer Camp 2026 day pass",
-				AmountPence: unit,
-				Quantity:    int64(dayPassDays),
-			})
-			totalPence += int(unit * int64(dayPassDays))
-		}
-	}
-
-	coachCount := coachEligibleCountFromRequest(req)
-	if coachCount > 0 {
-		if s.cfg.CoachPriceRef == "" {
-			return charge{}, fmt.Errorf("STRIPE_PRICE_COACH is not configured")
-		}
-		unit, cur, err := s.priceAmounts.Amount(ctx, s.cfg.CoachPriceRef)
-		if err != nil {
-			return charge{}, fmt.Errorf("lookup coach price: %w", err)
-		}
-		if err := ensureCurrency(currency, cur); err != nil {
-			return charge{}, err
-		}
-		if unit > 0 {
-			lines = append(lines, CheckoutLine{
-				Description: "PC Summer Camp 2026 coach travel",
-				AmountPence: unit,
-				Quantity:    coachCount,
-			})
-			totalPence += int(unit * coachCount)
-		}
-	}
-
-	return charge{totalPence: totalPence, currency: currency, lines: lines}, nil
-}
-
-func coachEligibleCountFromRequest(req domain.Submission) int64 {
-	var n int64
-	for _, c := range req.Campers {
-		if c.Attendance.Type != domain.AttendanceFullWeek {
-			continue
-		}
-		if c.CoachEligible() {
-			n++
-		}
-	}
-	return n
+	return out, nil
 }
 
 func ensureCurrency(expected, got string) error {

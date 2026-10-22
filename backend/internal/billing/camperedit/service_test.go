@@ -11,7 +11,7 @@ import (
 	"pagasacentre/backend/internal/billing"
 	"pagasacentre/backend/internal/billing/billingtest"
 	"pagasacentre/backend/internal/billing/camperedit"
-	"pagasacentre/backend/internal/email"
+	"pagasacentre/backend/internal/notify"
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/internal/testhelper"
 	"pagasacentre/backend/pkg/commonlibrary/apperr"
@@ -19,9 +19,9 @@ import (
 
 func strPtr(s string) *string { return &s }
 
-type failingMailer struct{ email.NoopMailer }
+type failingMailer struct{ notify.NopMailer }
 
-func (failingMailer) SendBookingUpdated(context.Context, email.BookingUpdated) error {
+func (failingMailer) SendBookingUpdated(context.Context, notify.BookingUpdated) error {
 	return errors.New("smtp is down")
 }
 
@@ -404,8 +404,8 @@ func TestUpdateCamperCoach_turnOffOneThenInvoice(t *testing.T) {
 	}
 
 	campers, _ := repo.CampersForGroup(ctx, groupID)
-	if billing.CoachEligibleCount(campers) != 1 {
-		t.Fatalf("eligible count = %d, want 1", billing.CoachEligibleCount(campers))
+	if domain.CoachEligibleCount(campers) != 1 {
+		t.Fatalf("eligible count = %d, want 1", domain.CoachEligibleCount(campers))
 	}
 
 	if err := env.Invoicing.UnwaiveCoachFee(ctx, groupID, "Admin", domain.SkipVersionCheck); err != nil {
@@ -571,8 +571,8 @@ func TestUpdateCamperCoach_waivedRemainsWhenLastPassengerRemoved(t *testing.T) {
 	}
 
 	campers, _ := repo.CampersForGroup(ctx, groupID)
-	if billing.CoachEligibleCount(campers) != 0 {
-		t.Fatalf("eligible count = %d, want 0", billing.CoachEligibleCount(campers))
+	if domain.CoachEligibleCount(campers) != 0 {
+		t.Fatalf("eligible count = %d, want 0", domain.CoachEligibleCount(campers))
 	}
 	g, _ := repo.FindGroupByID(ctx, groupID)
 	if g == nil || g.CoachFeeWaivedAt == nil {
@@ -583,8 +583,8 @@ func TestUpdateCamperCoach_waivedRemainsWhenLastPassengerRemoved(t *testing.T) {
 		t.Fatalf("UpdateCamperCoach restore camper2: %v", err)
 	}
 	campers, _ = repo.CampersForGroup(ctx, groupID)
-	if billing.CoachEligibleCount(campers) != 1 {
-		t.Fatalf("eligible count after restore = %d, want 1", billing.CoachEligibleCount(campers))
+	if domain.CoachEligibleCount(campers) != 1 {
+		t.Fatalf("eligible count after restore = %d, want 1", domain.CoachEligibleCount(campers))
 	}
 	g, _ = repo.FindGroupByID(ctx, groupID)
 	if g == nil || g.CoachFeeWaivedAt == nil {
@@ -1813,11 +1813,17 @@ func TestEditCamper_emailsTheFamilyAndNamesACancelledInvoice(t *testing.T) {
 		}
 		// The roster is the point of the mail: it must list the booking as it
 		// stands now, including the new name.
-		if len(got.Campers) != 2 {
-			t.Fatalf("roster = %v, want both campers listed", got.Campers)
+		if len(got.Items) != 2 {
+			t.Fatalf("roster = %v, want both campers listed", got.Items)
 		}
-		if !strings.Contains(strings.Join(got.Campers, "|"), "Deborah") {
-			t.Fatalf("roster = %v, want it to show the new name", got.Campers)
+		foundDeborah := false
+		for _, it := range got.Items {
+			if strings.Contains(it.CamperName, "Deborah") {
+				foundDeborah = true
+			}
+		}
+		if !foundDeborah {
+			t.Fatalf("roster = %v, want it to show the new name", got.Items)
 		}
 	})
 
@@ -1885,8 +1891,8 @@ func TestAddCamper_emailsTheFamilyNamingTheNewArrival(t *testing.T) {
 		t.Fatalf("AddedName = %q, want the new arrival named so the charge makes sense",
 			got.AddedName)
 	}
-	if len(got.Campers) != 3 {
-		t.Fatalf("roster = %v, want all three people listed", got.Campers)
+	if len(got.Items) != 3 {
+		t.Fatalf("roster = %v, want all three people listed", got.Items)
 	}
 }
 

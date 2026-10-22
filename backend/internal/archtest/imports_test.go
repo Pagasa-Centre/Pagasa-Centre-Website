@@ -256,6 +256,80 @@ func TestStripeSDKOnlyInAdapters(t *testing.T) {
 	}
 }
 
+func TestCoreDoesNotImportNotificationAdapters(t *testing.T) {
+	backend := backendRoot(t)
+	internal := filepath.Join(backend, "internal")
+	fset := token.NewFileSet()
+	prefixes := []string{
+		"internal/registration/",
+		"internal/billing/",
+		"internal/payment/",
+		"internal/campadmin/",
+		"internal/auth/",
+		"internal/notify/",
+	}
+	forbidden := []string{
+		"pagasacentre/backend/internal/email",
+		"pagasacentre/backend/internal/sheets",
+	}
+	var violations []string
+	err := walkGoFiles(internal, func(path string) {
+		rel := relInternal(path, backend)
+		if rel == "" || strings.HasSuffix(rel, "_test.go") {
+			return
+		}
+		ok := false
+		for _, p := range prefixes {
+			if strings.HasPrefix(rel, p) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return
+		}
+		for _, imp := range importPaths(fset, path) {
+			for _, f := range forbidden {
+				if imp == f {
+					violations = append(violations, rel+" imports "+imp)
+				}
+			}
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(violations) > 0 {
+		t.Fatalf("core must not import notification adapters:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
+func TestNotifyImportsOnlyStdlibAndDomain(t *testing.T) {
+	backend := backendRoot(t)
+	notifyDir := filepath.Join(backend, "internal", "notify")
+	fset := token.NewFileSet()
+	var violations []string
+	err := walkGoFiles(notifyDir, func(path string) {
+		rel, _ := filepath.Rel(backend, path)
+		rel = filepath.ToSlash(rel)
+		for _, imp := range importPaths(fset, path) {
+			if !strings.Contains(imp, "/") {
+				continue
+			}
+			if imp == "pagasacentre/backend/internal/registration/domain" {
+				continue
+			}
+			violations = append(violations, rel+" imports "+imp)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(violations) > 0 {
+		t.Fatalf("notify may only import stdlib and domain:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
 func TestBillingAndPaymentDoNotImportRegistrationService(t *testing.T) {
 	backend := backendRoot(t)
 	internal := filepath.Join(backend, "internal")

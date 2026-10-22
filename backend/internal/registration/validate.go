@@ -47,14 +47,5 @@ func Validate(req domain.Submission) error {
 	return nil
 }
 
-func HasMinor(req domain.Submission) bool {
-	for _, c := range req.Campers {
-		if c.Age < 18 {
-			return true
-		}
-	}
-	return false
-}
-
 // Re-export shirt helpers for API handlers.
 func ListShirtSizes() []domain.ShirtSize { return domain.ListShirtSizes() }

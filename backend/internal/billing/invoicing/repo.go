@@ -5,9 +5,8 @@ import (
 	"time"
 
 	"pagasacentre/backend/internal/billing"
-	"pagasacentre/backend/internal/email"
+	"pagasacentre/backend/internal/notify"
 	"pagasacentre/backend/internal/registration/domain"
-	"pagasacentre/backend/internal/sheets"
 )
 
 type groupReader interface {
@@ -37,11 +36,11 @@ type invoiceProvider interface {
 }
 
 type mailer interface {
-	SendBalanceInvoice(ctx context.Context, p email.BalanceInvoice) error
-	SendCoachInvoice(ctx context.Context, p email.CoachInvoice) error
-	SendBalancePaidConfirmation(ctx context.Context, p email.BalancePaidConfirmation) error
-	SendBalancePaid(ctx context.Context, p email.BalancePaid) error
-	SendAccommodationChanged(ctx context.Context, p email.AccommodationChangedNotice) error
+	SendBalanceInvoice(ctx context.Context, p notify.BalanceInvoice) error
+	SendCoachInvoice(ctx context.Context, p notify.CoachInvoice) error
+	SendBalancePaidConfirmation(ctx context.Context, p notify.BalancePaidConfirmation) error
+	SendBalancePaid(ctx context.Context, p notify.BalancePaid) error
+	SendAccommodationChanged(ctx context.Context, p notify.AccommodationChangedNotice) error
 }
 
 type Service struct {
@@ -49,17 +48,17 @@ type Service struct {
 	repo     invoicingRepo
 	invoices invoiceProvider
 	mailer   mailer
-	sheets   sheets.Sync
+	sheets   notify.SheetSync
 	pricer   *billing.Pricer
 	cfg      billing.Config
 }
 
-func NewService(reads groupReader, repo invoicingRepo, invoices invoiceProvider, mail mailer, sheetSync sheets.Sync, pricer *billing.Pricer, cfg billing.Config) *Service {
+func NewService(reads groupReader, repo invoicingRepo, invoices invoiceProvider, mail mailer, sheetSync notify.SheetSync, pricer *billing.Pricer, cfg billing.Config) *Service {
 	if cfg.InvoiceDueDays <= 0 {
 		cfg.InvoiceDueDays = 15
 	}
 	if sheetSync == nil {
-		sheetSync = sheets.NewNoopSync()
+		sheetSync = notify.NewNoopSheetSync()
 	}
 	return &Service{reads: reads, repo: repo, invoices: invoices, mailer: mail, sheets: sheetSync, pricer: pricer, cfg: cfg}
 }

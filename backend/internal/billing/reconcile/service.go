@@ -4,11 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
-	"pagasacentre/backend/internal/billing"
-	"pagasacentre/backend/internal/email"
+	"pagasacentre/backend/internal/notify"
 	"pagasacentre/backend/internal/registration/domain"
 )
 
@@ -23,7 +21,7 @@ func (s *Service) HandleCoachInvoicePaid(ctx context.Context, stripeInvoiceID, g
 			return fmt.Errorf("group not found for coach invoice %s", stripeInvoiceID)
 		}
 	}
-	if g.CoachFeePaidAt != nil {
+	if g.CoachFeeSettled() {
 		return nil
 	}
 	return s.repo.MarkCoachFeePaidMeta(ctx, g.ID, domain.ActionMeta{
@@ -57,32 +55,28 @@ func (s *Service) HandleInvoicePaid(ctx context.Context, stripeInvoiceID, groupI
 	}
 	campers, _ := s.reads.CampersForGroup(ctx, g.ID)
 	accNames := s.pricer.AccommodationNames(ctx)
-	coachCount := int64(0)
-	if g.CoachIncludedInBalance {
-		coachCount = billing.CoachEligibleCount(campers)
-	}
-	items := billing.BalanceInvoiceItems(campers, accNames, s.pricer.UnitNames(ctx), coachCount)
-	changes := billing.OffPreferenceChanges(campers, accNames)
-	amountLabel := billing.FormatAmountLabel(amountPaidPence, currency)
+	coachCount := g.CoachCountOnBalance(campers)
+	items := notify.BalanceItems(campers, accNames, s.pricer.UnitNames(ctx), coachCount)
+	changes := notify.OffPreferenceChanges(campers, accNames)
+	amount := notify.Amount{Pence: amountPaidPence, Currency: currency}
 
-	// Confirm to the family that their place is fully paid and confirmed.
-	if err := s.mailer.SendBalancePaidConfirmation(ctx, email.BalancePaidConfirmation{
-		ToEmail:     g.ContactEmail,
-		ToName:      g.ContactFirstName,
-		AmountLabel: amountLabel,
-		Items:       items,
-		Changes:     changes,
+	if err := s.mailer.SendBalancePaidConfirmation(ctx, notify.BalancePaidConfirmation{
+		ToEmail: g.ContactEmail,
+		ToName:  g.ContactFirstName,
+		Amount:  amount,
+		Items:   items,
+		Changes: changes,
 	}); err != nil {
 		log.Printf("billing: balance-paid confirmation email to %s: %v", g.ContactEmail, err)
 	}
 
 	if s.cfg.WhiteTeamEmail != "" {
-		_ = s.mailer.SendBalancePaid(ctx, email.BalancePaid{
+		_ = s.mailer.SendBalancePaid(ctx, notify.BalancePaid{
 			ToEmail:      s.cfg.WhiteTeamEmail,
-			ContactName:  strings.TrimSpace(g.ContactFirstName + " " + g.ContactLastName),
+			ContactName:  g.ContactName(),
 			ContactEmail: g.ContactEmail,
-			AmountLabel:  amountLabel,
-			PaidDate:     time.Now().Format("2 Jan 2006"),
+			Amount:       amount,
+			PaidAt:       time.Now(),
 			Items:        items,
 		})
 	}

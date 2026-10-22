@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"pagasacentre/backend/internal/notify"
 	"time"
 )
 
@@ -35,7 +36,7 @@ func NewResendMailer(apiKey, from string) *ResendMailer {
 
 // SendDepositConfirmation renders the deposit/day-pass confirmation template
 // and dispatches it via the Resend HTTP API.
-func (r *ResendMailer) SendDepositConfirmation(ctx context.Context, p DepositConfirmation) error {
+func (r *ResendMailer) SendDepositConfirmation(ctx context.Context, p notify.DepositConfirmation) error {
 	subject, body, err := renderDepositConfirmation(p)
 	if err != nil {
 		return err
@@ -43,7 +44,7 @@ func (r *ResendMailer) SendDepositConfirmation(ctx context.Context, p DepositCon
 	return r.send(ctx, p.ToEmail, subject, body)
 }
 
-func (r *ResendMailer) SendAllocationReleased(ctx context.Context, p AllocationReleased) error {
+func (r *ResendMailer) SendAllocationReleased(ctx context.Context, p notify.AllocationReleased) error {
 	subject, body, err := renderAllocationReleased(p)
 	if err != nil {
 		return err
@@ -51,15 +52,15 @@ func (r *ResendMailer) SendAllocationReleased(ctx context.Context, p AllocationR
 	return r.send(ctx, p.ToEmail, subject, body)
 }
 
-func (r *ResendMailer) SendWhiteTeamNotification(ctx context.Context, p WhiteTeamNotification) error {
-	subject, body, err := renderWhiteTeamNotification(p)
+func (r *ResendMailer) SendStaffAllocationReleased(ctx context.Context, p notify.StaffAllocationReleased) error {
+	subject, body, err := renderStaffAllocationReleased(p)
 	if err != nil {
 		return err
 	}
 	return r.send(ctx, p.ToEmail, subject, body)
 }
 
-func (r *ResendMailer) SendBalanceInvoice(ctx context.Context, p BalanceInvoice) error {
+func (r *ResendMailer) SendBalanceInvoice(ctx context.Context, p notify.BalanceInvoice) error {
 	subject, body, err := renderBalanceInvoice(p)
 	if err != nil {
 		return err
@@ -67,7 +68,7 @@ func (r *ResendMailer) SendBalanceInvoice(ctx context.Context, p BalanceInvoice)
 	return r.send(ctx, p.ToEmail, subject, body)
 }
 
-func (r *ResendMailer) SendCoachInvoice(ctx context.Context, p CoachInvoice) error {
+func (r *ResendMailer) SendCoachInvoice(ctx context.Context, p notify.CoachInvoice) error {
 	subject, body, err := renderCoachInvoice(p)
 	if err != nil {
 		return err
@@ -75,7 +76,7 @@ func (r *ResendMailer) SendCoachInvoice(ctx context.Context, p CoachInvoice) err
 	return r.send(ctx, p.ToEmail, subject, body)
 }
 
-func (r *ResendMailer) SendBalancePaid(ctx context.Context, p BalancePaid) error {
+func (r *ResendMailer) SendBalancePaid(ctx context.Context, p notify.BalancePaid) error {
 	subject, body, err := renderBalancePaid(p)
 	if err != nil {
 		return err
@@ -83,7 +84,7 @@ func (r *ResendMailer) SendBalancePaid(ctx context.Context, p BalancePaid) error
 	return r.send(ctx, p.ToEmail, subject, body)
 }
 
-func (r *ResendMailer) SendBalancePaidConfirmation(ctx context.Context, p BalancePaidConfirmation) error {
+func (r *ResendMailer) SendBalancePaidConfirmation(ctx context.Context, p notify.BalancePaidConfirmation) error {
 	subject, body, err := renderBalancePaidConfirmation(p)
 	if err != nil {
 		return err
@@ -91,7 +92,7 @@ func (r *ResendMailer) SendBalancePaidConfirmation(ctx context.Context, p Balanc
 	return r.send(ctx, p.ToEmail, subject, body)
 }
 
-func (r *ResendMailer) SendSponsorshipConfirmed(ctx context.Context, p SponsorshipConfirmed) error {
+func (r *ResendMailer) SendSponsorshipConfirmed(ctx context.Context, p notify.SponsorshipConfirmed) error {
 	subject, body, err := renderSponsorshipConfirmed(p)
 	if err != nil {
 		return err
@@ -99,7 +100,7 @@ func (r *ResendMailer) SendSponsorshipConfirmed(ctx context.Context, p Sponsorsh
 	return r.send(ctx, p.ToEmail, subject, body)
 }
 
-func (r *ResendMailer) SendAccommodationChanged(ctx context.Context, p AccommodationChangedNotice) error {
+func (r *ResendMailer) SendAccommodationChanged(ctx context.Context, p notify.AccommodationChangedNotice) error {
 	subject, body, err := renderAccommodationChanged(p)
 	if err != nil {
 		return err
@@ -107,7 +108,7 @@ func (r *ResendMailer) SendAccommodationChanged(ctx context.Context, p Accommoda
 	return r.send(ctx, p.ToEmail, subject, body)
 }
 
-func (r *ResendMailer) SendBookingUpdated(ctx context.Context, p BookingUpdated) error {
+func (r *ResendMailer) SendBookingUpdated(ctx context.Context, p notify.BookingUpdated) error {
 	subject, body, err := renderBookingUpdated(p)
 	if err != nil {
 		return err

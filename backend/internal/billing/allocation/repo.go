@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"pagasacentre/backend/internal/billing"
-	"pagasacentre/backend/internal/email"
+	"pagasacentre/backend/internal/notify"
 	"pagasacentre/backend/internal/registration/domain"
 )
 
@@ -25,9 +25,9 @@ type invoiceVoider interface {
 }
 
 type mailer interface {
-	SendAllocationReleased(ctx context.Context, p email.AllocationReleased) error
-	SendWhiteTeamNotification(ctx context.Context, p email.WhiteTeamNotification) error
-	SendSponsorshipConfirmed(ctx context.Context, p email.SponsorshipConfirmed) error
+	SendAllocationReleased(ctx context.Context, p notify.AllocationReleased) error
+	SendStaffAllocationReleased(ctx context.Context, p notify.StaffAllocationReleased) error
+	SendSponsorshipConfirmed(ctx context.Context, p notify.SponsorshipConfirmed) error
 }
 
 type Service struct {

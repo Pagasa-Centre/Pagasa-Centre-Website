@@ -7,11 +7,13 @@ import (
 	"log"
 	"time"
 
-	"pagasacentre/backend/internal/email"
+	"pagasacentre/backend/internal/notify"
 	"pagasacentre/backend/internal/registration/domain"
-	"pagasacentre/backend/internal/sheets"
-	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
+
+type depositMailer interface {
+	SendDepositConfirmation(ctx context.Context, p notify.DepositConfirmation) error
+}
 
 // Service handles Stripe webhook events. As of v2 it is a thin layer that
 // transitions a registration_group to 'paid' and fires the confirmation email.
@@ -19,14 +21,14 @@ import (
 type Service struct {
 	tx            txRunner
 	regRepo       regRepo
-	mailer        email.Mailer
-	sheets        sheets.Sync
+	mailer        depositMailer
+	sheets        notify.SheetSync
 	publicBaseURL string
 }
 
-func NewService(tx txRunner, regRepo regRepo, mailer email.Mailer, sheetSync sheets.Sync, publicBaseURL string) *Service {
+func NewService(tx txRunner, regRepo regRepo, mailer depositMailer, sheetSync notify.SheetSync, publicBaseURL string) *Service {
 	if sheetSync == nil {
-		sheetSync = sheets.NewNoopSync()
+		sheetSync = notify.NewNoopSheetSync()
 	}
 	return &Service{
 		tx:            tx,
@@ -44,9 +46,6 @@ type CheckoutCompleted struct {
 	PaymentIntentID string
 }
 
-// HandleCheckoutCompleted transitions a pending group to paid, then sends the
-// deposit confirmation email. Idempotent: replays after the first successful
-// run are no-ops (email is not re-sent on the same group).
 func (s *Service) HandleCheckoutCompleted(ctx context.Context, evt CheckoutCompleted) error {
 	var group *domain.Group
 	processed := false
@@ -81,17 +80,12 @@ func (s *Service) HandleCheckoutCompleted(ctx context.Context, evt CheckoutCompl
 		return err
 	}
 	now := time.Now().UTC()
-	group.PaymentStatus = domain.PaymentPaid
-	group.PaidAt = &now
+	group.MarkDepositPaid(now)
 	s.sendConfirmationEmail(ctx, group)
 	s.syncToSheet(ctx, group)
 	return nil
 }
 
-// syncToSheet appends the paid group + campers to the Paid tab and deletes
-// any matching Pending rows. Failure is logged, never fatal — the webhook
-// return value of "OK" already triggered DB commit + email; the sheet is a
-// view layer.
 func (s *Service) syncToSheet(ctx context.Context, g *domain.Group) {
 	if s.sheets == nil {
 		return
@@ -101,52 +95,12 @@ func (s *Service) syncToSheet(ctx context.Context, g *domain.Group) {
 		log.Printf("sheets: load campers for group %s: %v", g.ID, err)
 		return
 	}
-	rows := rowsFromGroup(g, campers)
+	rows := notify.RowsForGroup(g, campers)
 	if err := s.sheets.AppendPaidAndRemovePending(ctx, g.ID, rows); err != nil {
 		log.Printf("sheets: append paid for group %s: %v", g.ID, err)
 	}
 }
 
-// rowsFromGroup builds one sheets.Row per camper, denormalising group-level
-// contact fields onto each row to match the CSV export layout.
-func rowsFromGroup(g *domain.Group, campers []domain.Camper) []sheets.Row {
-	rows := make([]sheets.Row, 0, len(campers))
-	for _, c := range campers {
-		rows = append(rows, sheets.Row{
-			GroupID:                   g.ID,
-			PaymentStatus:             string(g.PaymentStatus),
-			SubmittedAt:               g.CreatedAt,
-			PaidAt:                    g.PaidAt,
-			TotalAmountPence:          g.TotalAmountPence,
-			Currency:                  g.Currency,
-			ContactFirstName:          g.ContactFirstName,
-			ContactLastName:           g.ContactLastName,
-			ContactEmail:              g.ContactEmail,
-			ContactPhone:              g.ContactPhone,
-			IsMainContact:             c.IsMainContact,
-			FirstName:                 c.FirstName,
-			LastName:                  c.LastName,
-			Gender:                    c.Gender,
-			Age:                       c.Age,
-			CellLeaderName:            c.CellLeaderName,
-			IsCellLeader:              c.IsCellLeader,
-			AttendanceType:            c.AttendanceType,
-			ShirtSize:                 c.ShirtSize,
-			DietaryRequirements:       c.DietaryRequirements,
-			NeedsCoach:                c.NeedsCoach,
-			AccommodationFirstChoice:  c.AccommodationFirstChoice,
-			AccommodationSecondChoice: c.AccommodationSecondChoice,
-			RoommateRequests:          c.RoommateRequests,
-			DayPassDays:               c.DayPassDays,
-			DayPassTshirtOption:       c.DayPassTshirtOption,
-			DayPassNeedsCatering:      c.DayPassNeedsCatering,
-		})
-	}
-	return rows
-}
-
-// HandleCheckoutExpired marks a group as cancelled when the Stripe session
-// expires without payment.
 func (s *Service) HandleCheckoutExpired(ctx context.Context, sessionID string) error {
 	return s.tx.WithTx(ctx, func(txCtx context.Context) error {
 		group, err := s.regRepo.GetGroupBySession(txCtx, sessionID)
@@ -164,21 +118,12 @@ func (s *Service) HandleCheckoutExpired(ctx context.Context, sessionID string) e
 	})
 }
 
-// sendConfirmationEmail dispatches the deposit confirmation. Failure is
-// logged, never surfaced — the registration is already paid in DB at this
-// point, and a webhook return value of error would cause Stripe to retry the
-// whole HandleCheckoutCompleted (which is fine, but doesn't help if SMTP is
-// down — we'd just rack up retries).
 func (s *Service) sendConfirmationEmail(ctx context.Context, g *domain.Group) {
 	if err := s.sendDepositConfirmation(ctx, g); err != nil {
 		log.Printf("send confirmation email to %s failed: %v", g.ContactEmail, err)
 	}
 }
 
-// sendDepositConfirmation builds and sends the deposit-received email from the
-// group's current data. Returns any error so callers that need to surface
-// failure (e.g. an admin re-send) can, while the webhook path keeps logging
-// and swallowing via sendConfirmationEmail.
 func (s *Service) sendDepositConfirmation(ctx context.Context, g *domain.Group) error {
 	if s.mailer == nil {
 		return nil
@@ -187,18 +132,12 @@ func (s *Service) sendDepositConfirmation(ctx context.Context, g *domain.Group) 
 	if err != nil {
 		return fmt.Errorf("load campers for email (group %s): %w", g.ID, err)
 	}
-	hasMinor := false
-	for _, c := range campers {
-		if c.Age < 18 {
-			hasMinor = true
-			break
-		}
-	}
+	hasMinor := domain.HasMinor(campers)
 	consentURL := ""
 	if hasMinor {
 		consentURL = s.publicBaseURL + "/api/consent-form"
 	}
-	return s.mailer.SendDepositConfirmation(ctx, email.DepositConfirmation{
+	return s.mailer.SendDepositConfirmation(ctx, notify.DepositConfirmation{
 		ToEmail:        g.ContactEmail,
 		ToName:         g.ContactFirstName,
 		AmountPence:    g.TotalAmountPence,
@@ -215,26 +154,9 @@ func (s *Service) groupHasCoachEligible(ctx context.Context, groupID string) (bo
 	if err != nil {
 		return false, err
 	}
-	for _, c := range campers {
-		if c.AttendanceType != domain.AttendanceFullWeek {
-			continue
-		}
-		if c.CoachEligible() {
-			return true, nil
-		}
-	}
-	return false, nil
+	return domain.CoachEligibleCount(campers) > 0, nil
 }
 
-// UpdateGroupContact corrects a group's contact details (e.g. a mistyped email
-// captured at registration). It updates the database, mirrors the change into
-// the Google Sheet, and optionally re-sends the deposit confirmation email to
-// the corrected address.
-//
-// The DB update is the only hard requirement. The sheet update is best-effort
-// (logged, not fatal — the DB is the source of truth). When resend is true the
-// email failure IS surfaced, so the White Team knows whether the family was
-// actually re-notified.
 func (s *Service) UpdateGroupContact(ctx context.Context, groupID, firstName, lastName, emailAddr, phone string, resend bool) error {
 	g, err := s.regRepo.FindGroupByID(ctx, groupID)
 	if err != nil {
@@ -243,8 +165,10 @@ func (s *Service) UpdateGroupContact(ctx context.Context, groupID, firstName, la
 	if g == nil {
 		return domain.ErrRegistrationNotFound
 	}
-	if resend && g.PaymentStatus != domain.PaymentPaid {
-		return apperr.Invalid("the confirmation email can only be re-sent once the deposit is paid")
+	if resend {
+		if err := g.CanResendDepositConfirmation(); err != nil {
+			return err
+		}
 	}
 
 	if err := s.regRepo.UpdateContact(ctx, groupID, firstName, lastName, emailAddr, phone); err != nil {
@@ -252,7 +176,7 @@ func (s *Service) UpdateGroupContact(ctx context.Context, groupID, firstName, la
 	}
 
 	if s.sheets != nil {
-		if err := s.sheets.UpdateContactByGroupID(ctx, groupID, sheets.ContactUpdate{
+		if err := s.sheets.UpdateContactByGroupID(ctx, groupID, notify.ContactUpdate{
 			FirstName: firstName,
 			LastName:  lastName,
 			Email:     emailAddr,
@@ -263,12 +187,7 @@ func (s *Service) UpdateGroupContact(ctx context.Context, groupID, firstName, la
 	}
 
 	if resend {
-		// Reflect the corrected details in-memory so the email is addressed
-		// and personalised correctly.
-		g.ContactFirstName = firstName
-		g.ContactLastName = lastName
-		g.ContactEmail = emailAddr
-		g.ContactPhone = phone
+		g.ChangeContact(firstName, lastName, emailAddr, phone)
 		if err := s.sendDepositConfirmation(ctx, g); err != nil {
 			return fmt.Errorf(
 				"details were updated, but the confirmation email failed to send: %w", err)

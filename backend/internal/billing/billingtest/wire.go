@@ -19,9 +19,8 @@ import (
 	sheetstorage "pagasacentre/backend/internal/billing/sheetsync/storage"
 	"pagasacentre/backend/internal/billing/sweep"
 	sweepstorage "pagasacentre/backend/internal/billing/sweep/storage"
-	"pagasacentre/backend/internal/email"
+	"pagasacentre/backend/internal/notify"
 	regstorage "pagasacentre/backend/internal/registration/storage"
-	"pagasacentre/backend/internal/sheets"
 )
 
 // Env wires all billing use-case services against one registration read repo.
@@ -36,16 +35,16 @@ type Env struct {
 	Sheets     *sheetsync.Service
 }
 
-func NewEnv(t *testing.T, pool *pgxpool.Pool, stripe invoicingStripe, mail email.Mailer, sheetSync sheets.Sync, cfg billing.Config) *Env {
+func NewEnv(t *testing.T, pool *pgxpool.Pool, stripe invoicingStripe, mail notify.Mailer, sheetSync notify.SheetSync, cfg billing.Config) *Env {
 	return newEnv(t, pool, stripe, mail, sheetSync, cfg, nil)
 }
 
 // NewEnvWithPrices is like NewEnv but wires a live deposit price lookup (late-arrival tests).
-func NewEnvWithPrices(t *testing.T, pool *pgxpool.Pool, stripe invoicingStripe, mail email.Mailer, sheetSync sheets.Sync, cfg billing.Config, prices billing.PriceLookup) *Env {
+func NewEnvWithPrices(t *testing.T, pool *pgxpool.Pool, stripe invoicingStripe, mail notify.Mailer, sheetSync notify.SheetSync, cfg billing.Config, prices billing.PriceLookup) *Env {
 	return newEnv(t, pool, stripe, mail, sheetSync, cfg, prices)
 }
 
-func newEnv(t *testing.T, pool *pgxpool.Pool, stripe invoicingStripe, mail email.Mailer, sheetSync sheets.Sync, cfg billing.Config, prices billing.PriceLookup) *Env {
+func newEnv(t *testing.T, pool *pgxpool.Pool, stripe invoicingStripe, mail notify.Mailer, sheetSync notify.SheetSync, cfg billing.Config, prices billing.PriceLookup) *Env {
 	t.Helper()
 	repo := regstorage.NewRepository(pool)
 	pricer := billing.NewPricer(repo, cfg, prices)

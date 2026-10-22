@@ -3,8 +3,8 @@ package sheetsync
 import (
 	"context"
 
+	"pagasacentre/backend/internal/notify"
 	"pagasacentre/backend/internal/registration/domain"
-	"pagasacentre/backend/internal/sheets"
 )
 
 type groupReader interface {
@@ -20,12 +20,12 @@ type sheetRepo interface {
 type Service struct {
 	reads  groupReader
 	repo   sheetRepo
-	sheets sheets.Sync
+	sheets notify.SheetSync
 }
 
-func NewService(reads groupReader, repo sheetRepo, sheetSync sheets.Sync) *Service {
+func NewService(reads groupReader, repo sheetRepo, sheetSync notify.SheetSync) *Service {
 	if sheetSync == nil {
-		sheetSync = sheets.NewNoopSync()
+		sheetSync = notify.NewNoopSheetSync()
 	}
 	return &Service{reads: reads, repo: repo, sheets: sheetSync}
 }

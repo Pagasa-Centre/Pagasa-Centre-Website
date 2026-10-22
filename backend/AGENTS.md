@@ -28,7 +28,7 @@ backend/
     request/                      request.Decode (JSON body)
   internal/
     http/router/router.go         all chi routes
-    middleware/                   CORS, timeouts, admin session auth
+    middleware/                   CORS, timeouts, RequireAdmin token gate
     api/{domain}/
       handler.go                  Handler struct, methods → http.HandlerFunc
       dto/request.go              request structs (JSON tags)
@@ -39,10 +39,11 @@ backend/
       domain/                     domain models + constants
       storage/repository.go       Repository (exported type)
     config/                       env loading
-    email/, sheets/, adminlog/    infra collaborators (no api/ layer)
+    notify/                       notification ports (mailer, sheet sync, message structs)
+    email/, sheets/, adminlog/    infra adapters (no api/ layer)
+    auth/                         camp-admin login use case
     campadmin/                    admin use cases (domain calls + audit)
-    admin/                        shared admin helpers (actor, csv)
-    billing/                        shared kernel (config, stripe, pricing, line items)
+    billing/                        shared kernel (config, pricing, line items)
       allocation/, invoicing/, camperedit/, reconcile/, sweep/, sheetsync/
         service.go + repo.go + storage/repository.go (each use-case group)
       billingtest/                  exported integration-test fixtures (pgx allowed)
@@ -50,7 +51,7 @@ backend/
     payment/                        deposit checkout (no separate api/ yet)
 ```
 
-Existing domains: `camp`, `accommodation`, `registration`, `consent` (api only), `payment`, `admin`, `campadmin`, and billing use-case groups under `internal/billing/`.
+Existing domains: `camp`, `accommodation`, `registration`, `consent` (api only), `payment`, `auth`, `campadmin`, and billing use-case groups under `internal/billing/`.
 
 ## Hard guardrails
 
@@ -74,7 +75,7 @@ Existing domains: `camp`, `accommodation`, `registration`, `consent` (api only),
    - Handlers call `commonerrors.WriteError(w, err)`. `WriteError` maps through `commonerrors.FromError`: `KindInvalid` → 400 (`Code` or `bad_request`), `KindNotFound` → 404, `KindConflict` → 409 (`Code` or `conflict`), `KindValidation` → 400 with `fields`, everything else → sanitised `internal_error` with a ref via `Public`.
    - **Never put raw `err.Error()` in a response.** Optional per-handler overrides: `errors.Is(err, registration.ErrRegistrationsClosed)` when a route needs different copy; otherwise rely on `WriteError`.
 
-9. **Entities own lifecycle rules.** Billing and payment status changes are decided by methods on `domain.Group` that return a `BillingTransition`, `PaymentTransition`, or `Settlement`. Services call those methods and pass the result to storage. Storage persists transitions with compare-and-set (`WHERE billing_status = From` / `payment_status = From`) and never writes status literals or `CASE` logic in SQL. `internal/archtest` (`TestStorageDoesNotDecideStatus`) enforces the storage rule.
+9. **Entities own lifecycle rules.** Billing and payment status changes are decided by methods on `domain.Group` that return a `BillingTransition`, `PaymentTransition`, or `Settlement`. Coach-fee, delete, allocation-choice, and charge rules also live on `domain.Group`, `domain.Camper`, and `domain.Submission`. Services call those methods and pass the result to storage. Storage persists transitions with compare-and-set (`WHERE billing_status = From` / `payment_status = From`) and never writes status literals or `CASE` logic in SQL. `internal/archtest` (`TestStorageDoesNotDecideStatus`) enforces the storage rule.
 
 10. **Admin actions go through use cases.** `internal/campadmin` owns each camp-admin write: call the billing / registration / camp / payment service, then record the audit line (best-effort). Handlers in `internal/api/campadmin` decode, pass `auth.ActorFrom`, call one use-case method, and render. Domain services never record admin audit events. `internal/archtest` (`TestOnlyUseCasesRecordAudit`) forbids audit recording in `internal/api/` and `internal/middleware/`.
 
@@ -83,6 +84,8 @@ Existing domains: `camp`, `accommodation`, `registration`, `consent` (api only),
 12. **JSON lives in `internal/api`.** Domain, service, and use-case types carry **no** `json` tags. Every HTTP contract is a separate DTO struct under `internal/api/{domain}/dto/` with explicit mappers in `dto/mapper/` — never type aliases. Stored audit metadata uses explicit structs in `internal/campadmin/audit_meta.go`. The only other non-API `json` tags are the allowlist in `internal/archtest/json_tags_test.go` (`internal/auth/token.go` session payload, Resend/YouTube clients). Mappers preserve nil vs empty slices: nil stays `null` on the wire unless a handler already substitutes `[]`. Reference: `internal/api/sermon`. Enforced by `TestJSONTagsOnlyInAPILayer`.
 
 13. **Vendors are details.** Stripe SDK imports only in `internal/stripe` and `internal/api/payment` (webhook payloads). Core Go identifiers are vendor-neutral (`CheckoutSessionRef`, `BalanceInvoiceRef`, …); SQL columns and JSON wire names stay `stripe_*`. Shared registration rules live in `registration/domain`. `internal/billing/**` and `internal/payment/` must not import `internal/registration` (the service package). Enforced by `TestStripeSDKOnlyInAdapters`, `TestBillingAndPaymentDoNotImportRegistrationService`, and `TestCoreIdentifiersAreVendorNeutral`.
+
+14. **Notifications are details.** Ports and message structs live in `internal/notify`; money/date formatting and HTML live in `internal/email` and cell values in `internal/sheets`. Core use cases (`registration`, `payment`, `internal/billing/*`) import `notify` only — never `internal/email` or `internal/sheets`. Enforced by `TestCoreDoesNotImportNotificationAdapters` and `TestNotifyImportsOnlyStdlibAndDomain`.
 
 ## Auth
 
@@ -223,7 +226,7 @@ func (r *Repository) FindGroupByID(ctx context.Context, groupID string) (*domain
 | API errors (handlers only) | `pagasacentre/backend/pkg/commonlibrary/errors` |
 | DB pool / migrations / `TxRunner` | `pagasacentre/backend/pkg/commonlibrary/db` |
 | CORS, timeouts | `pagasacentre/backend/internal/middleware` |
-| Admin session | `pagasacentre/backend/internal/middleware` (`AuthConfig`, `RequireAdmin`) |
+| Admin session | `pagasacentre/backend/internal/auth` + `internal/middleware.RequireAdmin` |
 
 ## Tests
 

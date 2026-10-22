@@ -277,11 +277,11 @@ func TestValidate_ContactEmailInvalid(t *testing.T) {
 
 func TestHasMinor(t *testing.T) {
 	req := validRequest()
-	if HasMinor(req) {
+	if req.HasMinor() {
 		t.Fatalf("expected no minor")
 	}
 	req.Campers[0].Age = 12
-	if !HasMinor(req) {
+	if !req.HasMinor() {
 		t.Fatalf("expected minor present")
 	}
 }

@@ -1,0 +1,38 @@
+Your PC Summer Camp 2026 deposit has been received
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>PC Summer Camp 2026</title>
+</head>
+<body style="font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; color: #1a1a1a; line-height: 1.55; max-width: 600px; margin: 0 auto; padding: 24px;">
+  <h1 style="font-size: 22px; margin: 0 0 16px;">Your deposit has been received</h1>
+
+  <p>Hi Pat,</p>
+
+  
+  <p>Thank you for registering for <strong>PC Summer Camp 2026</strong>. We've received your non-refundable deposit of <strong>£50.00</strong> covering 2 campers. A separate payment receipt has been emailed to you by Stripe.</p>
+  
+
+  <h2 style="font-size: 16px; margin: 24px 0 8px;">What happens next</h2>
+  <ol style="padding-left: 20px;">
+    <li><strong>15 - 30 June</strong> — Registration is open.</li>
+    <li><strong>1 - 15 July</strong> — The committee allocates rooms. You'll hear from your cell leader, by email, in person, or at arrival on the day.</li>
+    
+    <li><strong>16 - 31 July</strong> — Final payment window. Once the balance is settled, your accommodation is fully confirmed.</li>
+    
+  </ol>
+
+  
+  <h2 style="font-size: 16px; margin: 24px 0 8px;">Parental consent form</h2>
+  <p>One or more of the campers on your registration is under 18. Please <strong>print and sign</strong> the parental consent form and hand it to Bro Ash before the start of camp. We don't accept email scans.</p>
+  
+  
+
+  <h2 style="font-size: 16px; margin: 24px 0 8px;">Questions?</h2>
+  <p>If anything looks wrong, reply to this email or speak to your cell leader.</p>
+
+  <p style="margin-top: 32px;">God bless,<br>The PC Summer Camp 2026 team</p>
+</body>
+</html>

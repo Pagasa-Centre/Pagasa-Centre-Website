@@ -4,9 +4,8 @@ import (
 	"context"
 
 	"pagasacentre/backend/internal/billing"
-	"pagasacentre/backend/internal/email"
+	"pagasacentre/backend/internal/notify"
 	"pagasacentre/backend/internal/registration/domain"
-	"pagasacentre/backend/internal/sheets"
 )
 
 type groupReader interface {
@@ -33,7 +32,7 @@ type invoiceProvider interface {
 }
 
 type mailer interface {
-	SendBookingUpdated(ctx context.Context, p email.BookingUpdated) error
+	SendBookingUpdated(ctx context.Context, p notify.BookingUpdated) error
 }
 
 type Service struct {
@@ -41,14 +40,14 @@ type Service struct {
 	repo     camperEditRepo
 	invoices invoiceProvider
 	mailer   mailer
-	sheets   sheets.Sync
+	sheets   notify.SheetSync
 	pricer   *billing.Pricer
 	cfg      billing.Config
 }
 
-func NewService(reads groupReader, repo camperEditRepo, invoices invoiceProvider, mail mailer, sheetSync sheets.Sync, pricer *billing.Pricer, cfg billing.Config) *Service {
+func NewService(reads groupReader, repo camperEditRepo, invoices invoiceProvider, mail mailer, sheetSync notify.SheetSync, pricer *billing.Pricer, cfg billing.Config) *Service {
 	if sheetSync == nil {
-		sheetSync = sheets.NewNoopSync()
+		sheetSync = notify.NewNoopSheetSync()
 	}
 	return &Service{reads: reads, repo: repo, invoices: invoices, mailer: mail, sheets: sheetSync, pricer: pricer, cfg: cfg}
 }

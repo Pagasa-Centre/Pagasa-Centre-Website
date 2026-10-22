@@ -3,6 +3,8 @@ package email
 import (
 	"context"
 	"log"
+
+	"pagasacentre/backend/internal/notify"
 )
 
 // NoopMailer is used when SMTP isn't configured (local dev). It renders the
@@ -14,7 +16,7 @@ type NoopMailer struct{}
 func NewNoopMailer() *NoopMailer { return &NoopMailer{} }
 
 // SendDepositConfirmation logs that the email would have been sent.
-func (NoopMailer) SendDepositConfirmation(_ context.Context, p DepositConfirmation) error {
+func (NoopMailer) SendDepositConfirmation(_ context.Context, p notify.DepositConfirmation) error {
 	subject, _, err := renderDepositConfirmation(p)
 	if err != nil {
 		// Template breakage should still bubble up in dev so we catch it before
@@ -26,7 +28,7 @@ func (NoopMailer) SendDepositConfirmation(_ context.Context, p DepositConfirmati
 	return nil
 }
 
-func (NoopMailer) SendAllocationReleased(_ context.Context, p AllocationReleased) error {
+func (NoopMailer) SendAllocationReleased(_ context.Context, p notify.AllocationReleased) error {
 	subject, _, err := renderAllocationReleased(p)
 	if err != nil {
 		return err
@@ -35,12 +37,12 @@ func (NoopMailer) SendAllocationReleased(_ context.Context, p AllocationReleased
 	return nil
 }
 
-func (NoopMailer) SendWhiteTeamNotification(_ context.Context, p WhiteTeamNotification) error {
-	log.Printf("[email noop] to=%s subject=%q (white team)", p.ToEmail, p.Subject)
+func (NoopMailer) SendStaffAllocationReleased(_ context.Context, p notify.StaffAllocationReleased) error {
+	log.Printf("[email noop] to=%s subject=%q (white team)", p.ToEmail, "Camp allocation released (unpaid)")
 	return nil
 }
 
-func (NoopMailer) SendBalanceInvoice(_ context.Context, p BalanceInvoice) error {
+func (NoopMailer) SendBalanceInvoice(_ context.Context, p notify.BalanceInvoice) error {
 	subject, _, err := renderBalanceInvoice(p)
 	if err != nil {
 		return err
@@ -50,7 +52,7 @@ func (NoopMailer) SendBalanceInvoice(_ context.Context, p BalanceInvoice) error 
 	return nil
 }
 
-func (NoopMailer) SendCoachInvoice(_ context.Context, p CoachInvoice) error {
+func (NoopMailer) SendCoachInvoice(_ context.Context, p notify.CoachInvoice) error {
 	subject, _, err := renderCoachInvoice(p)
 	if err != nil {
 		return err
@@ -60,27 +62,27 @@ func (NoopMailer) SendCoachInvoice(_ context.Context, p CoachInvoice) error {
 	return nil
 }
 
-func (NoopMailer) SendBalancePaid(_ context.Context, p BalancePaid) error {
+func (NoopMailer) SendBalancePaid(_ context.Context, p notify.BalancePaid) error {
 	subject, _, err := renderBalancePaid(p)
 	if err != nil {
 		return err
 	}
 	log.Printf("[email noop] to=%s subject=%q amount=%s (balance paid)",
-		p.ToEmail, subject, p.AmountLabel)
+		p.ToEmail, subject, amountLabel(p.Amount))
 	return nil
 }
 
-func (NoopMailer) SendBalancePaidConfirmation(_ context.Context, p BalancePaidConfirmation) error {
+func (NoopMailer) SendBalancePaidConfirmation(_ context.Context, p notify.BalancePaidConfirmation) error {
 	subject, _, err := renderBalancePaidConfirmation(p)
 	if err != nil {
 		return err
 	}
 	log.Printf("[email noop] to=%s subject=%q amount=%s (balance paid confirmation)",
-		p.ToEmail, subject, p.AmountLabel)
+		p.ToEmail, subject, amountLabel(p.Amount))
 	return nil
 }
 
-func (NoopMailer) SendSponsorshipConfirmed(_ context.Context, p SponsorshipConfirmed) error {
+func (NoopMailer) SendSponsorshipConfirmed(_ context.Context, p notify.SponsorshipConfirmed) error {
 	subject, _, err := renderSponsorshipConfirmed(p)
 	if err != nil {
 		return err
@@ -89,7 +91,7 @@ func (NoopMailer) SendSponsorshipConfirmed(_ context.Context, p SponsorshipConfi
 	return nil
 }
 
-func (NoopMailer) SendAccommodationChanged(_ context.Context, p AccommodationChangedNotice) error {
+func (NoopMailer) SendAccommodationChanged(_ context.Context, p notify.AccommodationChangedNotice) error {
 	subject, _, err := renderAccommodationChanged(p)
 	if err != nil {
 		return err
@@ -99,12 +101,12 @@ func (NoopMailer) SendAccommodationChanged(_ context.Context, p AccommodationCha
 	return nil
 }
 
-func (NoopMailer) SendBookingUpdated(_ context.Context, p BookingUpdated) error {
+func (NoopMailer) SendBookingUpdated(_ context.Context, p notify.BookingUpdated) error {
 	subject, _, err := renderBookingUpdated(p)
 	if err != nil {
 		return err
 	}
 	log.Printf("[email noop] to=%s subject=%q campers=%d added=%q (booking updated)",
-		p.ToEmail, subject, len(p.Campers), p.AddedName)
+		p.ToEmail, subject, len(p.Items), p.AddedName)
 	return nil
 }

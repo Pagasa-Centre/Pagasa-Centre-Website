@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
+
+	"pagasacentre/backend/internal/notify"
 )
 
 // Key dates from the leaders' meeting (24 May 2026). Hardcoded for v1 — admins
@@ -33,7 +35,7 @@ type templateData struct {
 
 // renderDepositConfirmation builds the (subject, htmlBody) for a deposit /
 // day-pass confirmation email.
-func renderDepositConfirmation(p DepositConfirmation) (subject, htmlBody string, err error) {
+func renderDepositConfirmation(p notify.DepositConfirmation) (subject, htmlBody string, err error) {
 	td := templateData{
 		ToName:               p.ToName,
 		CamperCount:          p.CamperCount,
@@ -80,7 +82,7 @@ func formatPence(pence int, currency string) string {
 	return fmt.Sprintf("%s%d.%02d", symbol, pence/100, pence%100)
 }
 
-func renderAllocationReleased(p AllocationReleased) (subject, htmlBody string, err error) {
+func renderAllocationReleased(p notify.AllocationReleased) (subject, htmlBody string, err error) {
 	subject = "PC Summer Camp 2026 — accommodation allocation released"
 	names := ""
 	for _, n := range p.CamperNames {
@@ -116,7 +118,7 @@ func renderAllocationReleased(p AllocationReleased) (subject, htmlBody string, e
 // renderAccommodationChangeCallout returns a highlighted warning block when the
 // family was placed outside their accommodation preferences. Used inline in
 // emails we control (invoice fallback, balance-paid, sponsorship confirmed).
-func renderAccommodationChangeCallout(changes []AccommodationChange) string {
+func renderAccommodationChangeCallout(changes []notify.AccommodationChange) string {
 	if len(changes) == 0 {
 		return ""
 	}
@@ -149,7 +151,7 @@ func renderAccommodationChangeCallout(changes []AccommodationChange) string {
 </div>`
 }
 
-func renderAccommodationChanged(p AccommodationChangedNotice) (subject, htmlBody string, err error) {
+func renderAccommodationChanged(p notify.AccommodationChangedNotice) (subject, htmlBody string, err error) {
 	subject = "Important — your PC Summer Camp 2026 accommodation"
 	name := p.ToName
 	if name == "" {
@@ -200,21 +202,21 @@ func renderAccommodationChanged(p AccommodationChangedNotice) (subject, htmlBody
 	return subject, htmlBody, nil
 }
 
-func renderBalanceInvoice(p BalanceInvoice) (subject, htmlBody string, err error) {
+func renderBalanceInvoice(p notify.BalanceInvoice) (subject, htmlBody string, err error) {
 	subject = "Your PC Summer Camp 2026 balance is ready to pay"
 	names := ""
-	for _, n := range p.Items {
+	for _, n := range itemLines(p.Items) {
 		names += "<li>" + template.HTMLEscapeString(n) + "</li>"
 	}
 	due := ""
-	if p.DueDate != "" {
+	if d := formatDate(p.DueAt); d != "" {
 		due = fmt.Sprintf(
 			`<p>Please pay by <strong>%s</strong>. If the balance is unpaid by then, the accommodation may be released.</p>`,
-			template.HTMLEscapeString(p.DueDate))
+			template.HTMLEscapeString(d))
 	}
 	amount := ""
-	if p.AmountLabel != "" {
-		amount = fmt.Sprintf(`<p>Amount due: <strong>%s</strong></p>`, template.HTMLEscapeString(p.AmountLabel))
+	if lbl := amountLabel(p.Amount); lbl != "" {
+		amount = fmt.Sprintf(`<p>Amount due: <strong>%s</strong></p>`, template.HTMLEscapeString(lbl))
 	}
 	camperBlock := ""
 	if names != "" {
@@ -247,17 +249,17 @@ func renderBalanceInvoice(p BalanceInvoice) (subject, htmlBody string, err error
 	return subject, htmlBody, nil
 }
 
-func renderCoachInvoice(p CoachInvoice) (subject, htmlBody string, err error) {
+func renderCoachInvoice(p notify.CoachInvoice) (subject, htmlBody string, err error) {
 	subject = "Your PC Summer Camp 2026 coach fee is ready to pay"
 	due := ""
-	if p.DueDate != "" {
+	if d := formatDate(p.DueAt); d != "" {
 		due = fmt.Sprintf(
 			`<p>Please pay by <strong>%s</strong>.</p>`,
-			template.HTMLEscapeString(p.DueDate))
+			template.HTMLEscapeString(d))
 	}
 	amount := ""
-	if p.AmountLabel != "" {
-		amount = fmt.Sprintf(`<p>Amount due: <strong>%s</strong></p>`, template.HTMLEscapeString(p.AmountLabel))
+	if lbl := amountLabel(p.Amount); lbl != "" {
+		amount = fmt.Sprintf(`<p>Amount due: <strong>%s</strong></p>`, template.HTMLEscapeString(lbl))
 	}
 	passengers := "passenger"
 	if p.PassengerCount != 1 {
@@ -287,14 +289,14 @@ func renderCoachInvoice(p CoachInvoice) (subject, htmlBody string, err error) {
 	return subject, htmlBody, nil
 }
 
-func renderBalancePaid(p BalancePaid) (subject, htmlBody string, err error) {
+func renderBalancePaid(p notify.BalancePaid) (subject, htmlBody string, err error) {
 	name := p.ContactName
 	if name == "" {
 		name = p.ContactEmail
 	}
 	subject = "Camp balance paid — " + name
 	items := ""
-	for _, it := range p.Items {
+	for _, it := range itemLines(p.Items) {
 		items += "<li>" + template.HTMLEscapeString(it) + "</li>"
 	}
 	itemsBlock := ""
@@ -302,14 +304,14 @@ func renderBalancePaid(p BalancePaid) (subject, htmlBody string, err error) {
 		itemsBlock = "<p style=\"margin:0 0 4px;\"><strong>People covered:</strong></p><ul style=\"margin:0 0 16px;\">" + items + "</ul>"
 	}
 	amount := ""
-	if p.AmountLabel != "" {
+	if lbl := amountLabel(p.Amount); lbl != "" {
 		amount = fmt.Sprintf(`<tr><td style="padding:2px 12px 2px 0;color:#555;">Amount paid</td><td style="padding:2px 0;font-weight:bold;">%s</td></tr>`,
-			template.HTMLEscapeString(p.AmountLabel))
+			template.HTMLEscapeString(lbl))
 	}
 	paidDate := ""
-	if p.PaidDate != "" {
+	if d := formatDate(&p.PaidAt); d != "" {
 		paidDate = fmt.Sprintf(`<tr><td style="padding:2px 12px 2px 0;color:#555;">Paid on</td><td style="padding:2px 0;">%s</td></tr>`,
-			template.HTMLEscapeString(p.PaidDate))
+			template.HTMLEscapeString(d))
 	}
 	htmlBody = fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en"><body style="font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; color:#1a1a1a; line-height:1.55; max-width:600px; margin:0 auto; padding:24px;">
@@ -334,14 +336,14 @@ func renderBalancePaid(p BalancePaid) (subject, htmlBody string, err error) {
 	return subject, htmlBody, nil
 }
 
-func renderBalancePaidConfirmation(p BalancePaidConfirmation) (subject, htmlBody string, err error) {
+func renderBalancePaidConfirmation(p notify.BalancePaidConfirmation) (subject, htmlBody string, err error) {
 	subject = "Your PC Summer Camp 2026 place is confirmed"
 	name := p.ToName
 	if name == "" {
 		name = "there"
 	}
 	items := ""
-	for _, it := range p.Items {
+	for _, it := range itemLines(p.Items) {
 		items += "<li>" + template.HTMLEscapeString(it) + "</li>"
 	}
 	accommodationBlock := ""
@@ -349,9 +351,9 @@ func renderBalancePaidConfirmation(p BalancePaidConfirmation) (subject, htmlBody
 		accommodationBlock = `<p style="margin:16px 0 4px;"><strong>Your accommodation:</strong></p><ul style="margin:0 0 16px;">` + items + "</ul>"
 	}
 	amountBlock := ""
-	if p.AmountLabel != "" {
+	if lbl := amountLabel(p.Amount); lbl != "" {
 		amountBlock = fmt.Sprintf(`<p>We've received your balance payment of <strong>%s</strong>.</p>`,
-			template.HTMLEscapeString(p.AmountLabel))
+			template.HTMLEscapeString(lbl))
 	}
 	callout := renderAccommodationChangeCallout(p.Changes)
 	htmlBody = fmt.Sprintf(`<!DOCTYPE html>
@@ -373,14 +375,14 @@ func renderBalancePaidConfirmation(p BalancePaidConfirmation) (subject, htmlBody
 	return subject, htmlBody, nil
 }
 
-func renderSponsorshipConfirmed(p SponsorshipConfirmed) (subject, htmlBody string, err error) {
+func renderSponsorshipConfirmed(p notify.SponsorshipConfirmed) (subject, htmlBody string, err error) {
 	subject = "Your PC Summer Camp 2026 place is confirmed"
 	name := p.ToName
 	if name == "" {
 		name = "there"
 	}
 	items := ""
-	for _, it := range p.Items {
+	for _, it := range itemLines(p.Items) {
 		items += "<li>" + template.HTMLEscapeString(it) + "</li>"
 	}
 	accommodationBlock := ""
@@ -405,14 +407,14 @@ func renderSponsorshipConfirmed(p SponsorshipConfirmed) (subject, htmlBody strin
 	return subject, htmlBody, nil
 }
 
-func renderBookingUpdated(p BookingUpdated) (subject, htmlBody string, err error) {
+func renderBookingUpdated(p notify.BookingUpdated) (subject, htmlBody string, err error) {
 	subject = "Your PC Summer Camp 2026 booking has been updated"
 	name := p.ToName
 	if name == "" {
 		name = "there"
 	}
 	items := ""
-	for _, it := range p.Campers {
+	for _, it := range itemLines(p.Items) {
 		items += "<li>" + template.HTMLEscapeString(it) + "</li>"
 	}
 	rosterBlock := ""
@@ -456,13 +458,6 @@ func renderBookingUpdated(p BookingUpdated) (subject, htmlBody string, err error
 		chargeBlock,
 		invoiceBlock,
 	)
-	return subject, htmlBody, nil
-}
-
-func renderWhiteTeamNotification(p WhiteTeamNotification) (subject, htmlBody string, err error) {
-	subject = p.Subject
-	body := template.HTMLEscapeString(p.Body)
-	htmlBody = fmt.Sprintf(`<!DOCTYPE html><html><body style="font-family:sans-serif;white-space:pre-wrap">%s</body></html>`, body)
 	return subject, htmlBody, nil
 }
 

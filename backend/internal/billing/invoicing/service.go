@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"pagasacentre/backend/internal/billing"
-	"pagasacentre/backend/internal/email"
+	"pagasacentre/backend/internal/notify"
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
@@ -41,15 +41,16 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 	for _, c := range campers {
 		switch c.AttendanceType {
 		case domain.AttendanceFullWeek:
-			if c.AllocatedAccommodationCode == nil || strings.TrimSpace(*c.AllocatedAccommodationCode) == "" {
-				return apperr.Invalidf("camper %s %s is not allocated", c.FirstName, c.LastName)
+			code, err := c.AllocatedForInvoice()
+			if err != nil {
+				return err
 			}
 			// Re-resolve the Stripe Price from the CURRENT accommodation config at
 			// send time rather than replaying the value stored when the allocation
 			// was first saved. This self-heals when Price IDs are corrected after
 			// allocation (e.g. env vars set later), instead of erroring on a stale
 			// "No such price".
-			priceID, err := s.pricer.ResolvePriceID(ctx, strings.TrimSpace(*c.AllocatedAccommodationCode), c.Age)
+			priceID, err := s.pricer.ResolvePriceID(ctx, code, c.Age)
 			if err != nil {
 				return err
 			}
@@ -85,7 +86,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 	// Fold the coach fee into this balance invoice for coach passengers. Only
 	// groups that have not yet been invoiced reach here, so a coach fee that is
 	// folded is always fresh (never double-charged). Skip when admin has waived.
-	coachCount := billing.CoachEligibleCount(campers)
+	coachCount := domain.CoachEligibleCount(campers)
 	coachIncluded := false
 	if g.CoachFeeWaivedAt == nil {
 		if line, ok := coachLine(coachCount, s.cfg.CoachPriceRef); ok {
@@ -105,7 +106,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 	if g.BillingCustomerRef != nil {
 		customerID = *g.BillingCustomerRef
 	}
-	name := strings.TrimSpace(g.ContactFirstName + " " + g.ContactLastName)
+	name := g.ContactName()
 	customerID, err = s.invoices.EnsureCustomer(ctx, customerID, g.ContactEmail, name, g.ID)
 	if err != nil {
 		return fmt.Errorf("operation: %w", err)
@@ -130,7 +131,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 		return billing.MapVersionErr(ctx, s.reads, groupID, err)
 	}
 	accNames := s.pricer.AccommodationNames(ctx)
-	changes := billing.OffPreferenceChanges(campers, accNames)
+	changes := notify.OffPreferenceChanges(campers, accNames)
 	s.sendAccommodationChangedNotice(ctx, g.ContactEmail, g.ContactFirstName, changes, true)
 	// Stripe is the primary sender. Only if Stripe couldn't email the invoice
 	// (e.g. restricted account) do we fall back to emailing the link ourselves.
@@ -139,14 +140,14 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 		if coachIncluded {
 			emailCoachCount = coachCount
 		}
-		if err := s.mailer.SendBalanceInvoice(ctx, email.BalanceInvoice{
-			ToEmail:     g.ContactEmail,
-			ToName:      g.ContactFirstName,
-			PayURL:      res.HostedURL,
-			DueDate:     res.DueAt.Format("2 Jan 2006"),
-			AmountLabel: billing.FormatAmountLabel(res.AmountDuePence, res.Currency),
-			Items:       billing.BalanceInvoiceItems(campers, accNames, s.pricer.UnitNames(ctx), emailCoachCount),
-			Changes:     changes,
+		if err := s.mailer.SendBalanceInvoice(ctx, notify.BalanceInvoice{
+			ToEmail: g.ContactEmail,
+			ToName:  g.ContactFirstName,
+			PayURL:  res.HostedURL,
+			DueAt:   dueAtRef(res.DueAt),
+			Amount:  notifyAmount(res.AmountDuePence, res.Currency),
+			Items:   notify.BalanceItems(campers, accNames, s.pricer.UnitNames(ctx), emailCoachCount),
+			Changes: changes,
 		}); err != nil {
 			log.Printf("billing: fallback balance invoice email to %s: %v", g.ContactEmail, err)
 		}
@@ -162,10 +163,7 @@ func (s *Service) SendInvoicesBulk(ctx context.Context, actor string, groupIDs [
 			errs[id] = err
 			continue
 		}
-		if g != nil && g.IsFree {
-			continue
-		}
-		if g != nil && g.PaidInFullAtRegistration {
+		if g != nil && g.SkipsBulkInvoice() {
 			continue
 		}
 		if err := s.SendInvoice(ctx, id, actor, domain.SkipVersionCheck); err != nil {
@@ -173,11 +171,6 @@ func (s *Service) SendInvoicesBulk(ctx context.Context, actor string, groupIDs [
 		}
 	}
 	return errs
-}
-
-func coachAlreadyCharged(g *domain.Group) bool {
-	return g.CoachIncludedInBalance ||
-		(g.CoachInvoiceRef != nil && strings.TrimSpace(*g.CoachInvoiceRef) != "")
 }
 
 func (s *Service) SendCoachInvoice(ctx context.Context, groupID, actor string, expectedVersion int) error {
@@ -188,25 +181,16 @@ func (s *Service) SendCoachInvoice(ctx context.Context, groupID, actor string, e
 	if g == nil {
 		return domain.ErrGroupNotFound
 	}
-	if g.IsFree {
-		return billing.ErrSponsoredNoCoach
-	}
-	if g.CoachFeeWaivedAt != nil {
-		return apperr.Invalid("coach fee has been waived for this group")
-	}
-	if g.BillingStatus != domain.BillingInvoiced && g.BillingStatus != domain.BillingBalancePaid {
-		return billing.ErrCoachInBalance
-	}
-	if coachAlreadyCharged(g) {
-		return apperr.Invalid("coach fee already charged")
+	if err := g.CanSendCoachInvoice(); err != nil {
+		return err
 	}
 	campers, err := s.reads.CampersForGroup(ctx, groupID)
 	if err != nil {
 		return fmt.Errorf("operation: %w", err)
 	}
-	count := billing.CoachEligibleCount(campers)
-	if count == 0 {
-		return apperr.Invalid("no coach passengers to charge")
+	count := domain.CoachEligibleCount(campers)
+	if err := g.CheckCoachInvoicePassengers(count); err != nil {
+		return err
 	}
 	if s.cfg.CoachPriceRef == "" {
 		return billing.ErrCoachPriceNotConfigured
@@ -216,7 +200,7 @@ func (s *Service) SendCoachInvoice(ctx context.Context, groupID, actor string, e
 	if g.BillingCustomerRef != nil {
 		customerID = *g.BillingCustomerRef
 	}
-	name := strings.TrimSpace(g.ContactFirstName + " " + g.ContactLastName)
+	name := g.ContactName()
 	customerID, err = s.invoices.EnsureCustomer(ctx, customerID, g.ContactEmail, name, g.ID)
 	if err != nil {
 		return fmt.Errorf("operation: %w", err)
@@ -246,12 +230,12 @@ func (s *Service) SendCoachInvoice(ctx context.Context, groupID, actor string, e
 	// Stripe is the primary sender; fall back to our own email only if Stripe
 	// could not email the invoice.
 	if !res.ProviderEmailed {
-		if err := s.mailer.SendCoachInvoice(ctx, email.CoachInvoice{
+		if err := s.mailer.SendCoachInvoice(ctx, notify.CoachInvoice{
 			ToEmail:        g.ContactEmail,
 			ToName:         g.ContactFirstName,
 			PayURL:         res.HostedURL,
-			DueDate:        res.DueAt.Format("2 Jan 2006"),
-			AmountLabel:    billing.FormatAmountLabel(res.AmountDuePence, res.Currency),
+			DueAt:          dueAtRef(res.DueAt),
+			Amount:         notifyAmount(res.AmountDuePence, res.Currency),
 			PassengerCount: int(count),
 		}); err != nil {
 			log.Printf("billing: fallback coach invoice email to %s: %v", g.ContactEmail, err)
@@ -278,24 +262,15 @@ func (s *Service) WaiveCoachFee(ctx context.Context, groupID, actor string, expe
 	if g == nil {
 		return domain.ErrGroupNotFound
 	}
-	if g.IsFree {
-		return billing.ErrSponsoredNoCoach
-	}
-	if g.CoachFeeWaivedAt != nil {
-		return apperr.Invalid("coach fee already waived")
-	}
-	if g.CoachIncludedInBalance {
-		return billing.ErrCoachInBalance
-	}
-	if g.CoachFeePaidAt != nil {
-		return apperr.Invalid("coach fee already paid")
+	if err := g.CanWaiveCoachFee(); err != nil {
+		return err
 	}
 	campers, err := s.reads.CampersForGroup(ctx, groupID)
 	if err != nil {
 		return fmt.Errorf("operation: %w", err)
 	}
-	if billing.CoachEligibleCount(campers) == 0 {
-		return apperr.Invalid("no coach passengers to waive")
+	if err := g.CheckCoachWaivePassengers(domain.CoachEligibleCount(campers)); err != nil {
+		return err
 	}
 	if g.CoachInvoiceRef != nil && strings.TrimSpace(*g.CoachInvoiceRef) != "" {
 		if err := s.invoices.VoidInvoiceIdempotent(ctx, *g.CoachInvoiceRef); err != nil {
@@ -321,8 +296,8 @@ func (s *Service) UnwaiveCoachFee(ctx context.Context, groupID, actor string, ex
 	if g == nil {
 		return domain.ErrGroupNotFound
 	}
-	if g.CoachFeeWaivedAt == nil {
-		return apperr.Invalid("coach fee is not waived for this group")
+	if err := g.CanUnwaiveCoachFee(); err != nil {
+		return err
 	}
 	meta := domain.ActionMeta{
 		Actor:           actor,
@@ -348,14 +323,14 @@ func (s *Service) MarkBalancePaidManually(ctx context.Context, groupID, actor st
 		return err
 	}
 
-	amountLabel := ""
+	var paidAmount notify.Amount
 	if g.BillingStatus == domain.BillingInvoiced &&
 		g.BalanceInvoiceRef != nil && *g.BalanceInvoiceRef != "" {
 		res, err := s.invoices.GetInvoice(ctx, *g.BalanceInvoiceRef)
 		if err != nil {
 			log.Printf("billing: read invoice %s before manual mark-paid: %v", *g.BalanceInvoiceRef, err)
 		} else {
-			amountLabel = billing.FormatAmountLabel(res.AmountDuePence, res.Currency)
+			paidAmount = notifyAmount(res.AmountDuePence, res.Currency)
 		}
 		if err := s.invoices.VoidInvoiceIdempotent(ctx, *g.BalanceInvoiceRef); err != nil {
 			return apperr.Invalidf("invoice void failed; group was not marked paid: %v", err)
@@ -371,11 +346,11 @@ func (s *Service) MarkBalancePaidManually(ctx context.Context, groupID, actor st
 		return billing.MapVersionErr(ctx, s.reads, groupID, err)
 	}
 
-	s.sendManualBalancePaidEmails(ctx, g, amountLabel)
+	s.sendManualBalancePaidEmails(ctx, g, paidAmount)
 	return nil
 }
 
-func (s *Service) sendManualBalancePaidEmails(ctx context.Context, g *domain.Group, amountLabel string) {
+func (s *Service) sendManualBalancePaidEmails(ctx context.Context, g *domain.Group, amount notify.Amount) {
 	if s.mailer == nil {
 		return
 	}
@@ -387,27 +362,27 @@ func (s *Service) sendManualBalancePaidEmails(ctx context.Context, g *domain.Gro
 	accNames := s.pricer.AccommodationNames(ctx)
 	coachCount := int64(0)
 	if g.CoachIncludedInBalance {
-		coachCount = billing.CoachEligibleCount(campers)
+		coachCount = domain.CoachEligibleCount(campers)
 	}
-	items := billing.BalanceInvoiceItems(campers, accNames, s.pricer.UnitNames(ctx), coachCount)
+	items := notify.BalanceItems(campers, accNames, s.pricer.UnitNames(ctx), coachCount)
 
-	if err := s.mailer.SendBalancePaidConfirmation(ctx, email.BalancePaidConfirmation{
-		ToEmail:     g.ContactEmail,
-		ToName:      g.ContactFirstName,
-		AmountLabel: amountLabel,
-		Items:       items,
-		Changes:     billing.OffPreferenceChanges(campers, accNames),
+	if err := s.mailer.SendBalancePaidConfirmation(ctx, notify.BalancePaidConfirmation{
+		ToEmail: g.ContactEmail,
+		ToName:  g.ContactFirstName,
+		Amount:  amount,
+		Items:   items,
+		Changes: notify.OffPreferenceChanges(campers, accNames),
 	}); err != nil {
 		log.Printf("billing: manual balance-paid confirmation to %s: %v", g.ContactEmail, err)
 	}
 
 	if s.cfg.WhiteTeamEmail != "" {
-		_ = s.mailer.SendBalancePaid(ctx, email.BalancePaid{
+		_ = s.mailer.SendBalancePaid(ctx, notify.BalancePaid{
 			ToEmail:      s.cfg.WhiteTeamEmail,
-			ContactName:  strings.TrimSpace(g.ContactFirstName + " " + g.ContactLastName),
+			ContactName:  g.ContactName(),
 			ContactEmail: g.ContactEmail,
-			AmountLabel:  amountLabel,
-			PaidDate:     time.Now().Format("2 Jan 2006"),
+			Amount:       amount,
+			PaidAt:       time.Now(),
 			Items:        items,
 		})
 	}
@@ -426,38 +401,25 @@ func (s *Service) DeleteRegistration(ctx context.Context, groupID, actor string,
 	// else on one charge, and the deposit portion is stored nowhere, so there is
 	// no way to refund the rest without either guessing or refunding money the
 	// church is entitled to keep. Hand that decision to a human in Stripe.
-	if g.PaidInFullAtRegistration && g.PaymentStatus == domain.PaymentPaid {
-		return DeleteSummary{}, apperr.Invalid(
-			"this family paid for everything in one payment, so the deposit cannot be " +
-				"separated from the rest automatically. Refund what they are owed in " +
-				"Stripe first, then delete the registration.")
+	if err := g.CanDelete(); err != nil {
+		return DeleteSummary{}, err
 	}
 
 	summary := DeleteSummary{
-		ContactName:  strings.TrimSpace(g.ContactFirstName + " " + g.ContactLastName),
+		ContactName:  g.ContactName(),
 		ContactEmail: g.ContactEmail,
 	}
 
-	// Deposit money arrives by two routes: the group's checkout at registration,
-	// and a line on the balance invoice for anyone added after that checkout
-	// settled. Both are kept, so both count towards what was retained, and the
-	// invoiced part has to come off the balance refund below.
 	campers, err := s.reads.CampersForGroup(ctx, groupID)
 	if err != nil {
 		return DeleteSummary{}, fmt.Errorf("operation: %w", err)
 	}
 	var depositOnInvoice int64
-	for _, c := range campers {
-		depositOnInvoice += int64(c.DepositPaidPence)
-	}
-	if g.PaymentStatus == domain.PaymentPaid {
-		summary.RetainedPence = int64(g.TotalAmountPence)
-	}
-	summary.RetainedPence += depositOnInvoice
+	summary.RetainedPence, depositOnInvoice = domain.DeleteRetention(g, campers)
 
 	var refundTotal int64
 
-	if g.BalanceSettled() && g.BalanceInvoiceRef != nil && *g.BalanceInvoiceRef != "" {
+	if g.HasSettledBalanceInvoice() {
 		amt, err := s.invoices.RefundInvoiceKeeping(ctx, *g.BalanceInvoiceRef, depositOnInvoice)
 		if err != nil {
 			return DeleteSummary{}, apperr.Invalidf("balance refund failed; registration was not deleted: %v", err)
@@ -466,7 +428,7 @@ func (s *Service) DeleteRegistration(ctx context.Context, groupID, actor string,
 		refundTotal += amt
 	}
 
-	if g.BillingStatus == domain.BillingInvoiced && g.BalanceInvoiceRef != nil && *g.BalanceInvoiceRef != "" {
+	if g.HasOpenInvoice() {
 		if err := s.invoices.VoidInvoiceIdempotent(ctx, *g.BalanceInvoiceRef); err != nil {
 			return DeleteSummary{}, apperr.Invalidf("invoice void failed; registration was not deleted: %v", err)
 		}
@@ -507,14 +469,11 @@ func (s *Service) ResendInvoice(ctx context.Context, groupID, actor string, expe
 	if g == nil {
 		return domain.ErrGroupNotFound
 	}
-	if g.BalanceInvoiceRef == nil || *g.BalanceInvoiceRef == "" {
-		return apperr.Invalid("no invoice on file")
-	}
-	openTR, err := g.RequireOpenInvoice()
+	openTR, err := g.CanResendInvoice()
 	if err != nil {
 		return err
 	}
-	// Primary: ask Stripe to re-email. If it succeeds, stamp and return.
+	// Primary: ask Stripe to re-notify. If it succeeds, stamp and return.
 	if err := s.invoices.SendInvoiceEmail(ctx, *g.BalanceInvoiceRef); err == nil {
 		meta := domain.ActionMeta{
 			Actor:           actor,
@@ -533,24 +492,15 @@ func (s *Service) ResendInvoice(ctx context.Context, groupID, actor string, expe
 	if err != nil {
 		return fmt.Errorf("operation: %w", err)
 	}
-	due := ""
-	if g.InvoiceDueAt != nil {
-		due = g.InvoiceDueAt.Format("2 Jan 2006")
-	} else if !res.DueAt.IsZero() {
-		due = res.DueAt.Format("2 Jan 2006")
-	}
 	campers, _ := s.reads.CampersForGroup(ctx, groupID)
-	coachCount := int64(0)
-	if g.CoachIncludedInBalance {
-		coachCount = billing.CoachEligibleCount(campers)
-	}
-	if err := s.mailer.SendBalanceInvoice(ctx, email.BalanceInvoice{
-		ToEmail:     g.ContactEmail,
-		ToName:      g.ContactFirstName,
-		PayURL:      res.HostedURL,
-		DueDate:     due,
-		AmountLabel: billing.FormatAmountLabel(res.AmountDuePence, res.Currency),
-		Items:       billing.BalanceInvoiceItems(campers, s.pricer.AccommodationNames(ctx), s.pricer.UnitNames(ctx), coachCount),
+	coachCount := g.CoachCountOnBalance(campers)
+	if err := s.mailer.SendBalanceInvoice(ctx, notify.BalanceInvoice{
+		ToEmail: g.ContactEmail,
+		ToName:  g.ContactFirstName,
+		PayURL:  res.HostedURL,
+		DueAt:   resendDueAt(g, res),
+		Amount:  notifyAmount(res.AmountDuePence, res.Currency),
+		Items:   notify.BalanceItems(campers, s.pricer.AccommodationNames(ctx), s.pricer.UnitNames(ctx), coachCount),
 	}); err != nil {
 		return fmt.Errorf("operation: %w", err)
 	}
@@ -605,11 +555,11 @@ func coachLine(count int64, priceID string) (billing.InvoiceLine, bool) {
 	return billing.InvoiceLine{PriceID: priceID, Quantity: count}, true
 }
 
-func (s *Service) sendAccommodationChangedNotice(ctx context.Context, toEmail, toName string, changes []email.AccommodationChange, awaitingPayment bool) {
+func (s *Service) sendAccommodationChangedNotice(ctx context.Context, toEmail, toName string, changes []notify.AccommodationChange, awaitingPayment bool) {
 	if s.mailer == nil || len(changes) == 0 {
 		return
 	}
-	if err := s.mailer.SendAccommodationChanged(ctx, email.AccommodationChangedNotice{
+	if err := s.mailer.SendAccommodationChanged(ctx, notify.AccommodationChangedNotice{
 		ToEmail:         toEmail,
 		ToName:          toName,
 		Items:           changes,

@@ -5,16 +5,16 @@ import (
 	"testing"
 
 	"pagasacentre/backend/internal/billing"
-	"pagasacentre/backend/internal/email"
+	"pagasacentre/backend/internal/notify"
 	"pagasacentre/backend/internal/registration/domain"
 )
 
 type noopMail struct{}
 
-func (noopMail) SendBalancePaidConfirmation(context.Context, email.BalancePaidConfirmation) error {
+func (noopMail) SendBalancePaidConfirmation(context.Context, notify.BalancePaidConfirmation) error {
 	return nil
 }
-func (noopMail) SendBalancePaid(context.Context, email.BalancePaid) error { return nil }
+func (noopMail) SendBalancePaid(context.Context, notify.BalancePaid) error { return nil }
 
 type fakeAcc struct{}
 

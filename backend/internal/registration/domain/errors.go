@@ -3,6 +3,8 @@ package domain
 import "pagasacentre/backend/pkg/commonlibrary/apperr"
 
 var (
+	ErrCoachInBalance       = apperr.Invalid("coach fee is included in the balance invoice for this group")
+	ErrSponsoredNoCoach     = apperr.Invalid("church-sponsored registrations are not charged for the coach")
 	ErrGroupNotFound        = apperr.NotFound("group not found")
 	ErrCamperNotFound       = apperr.NotFound("camper not found")
 	ErrRegistrationNotFound = apperr.NotFound("registration not found")

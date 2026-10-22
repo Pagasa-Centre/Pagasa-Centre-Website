@@ -1177,8 +1177,8 @@ func TestMarkBalancePaidManually_allocatedGroupSkipsStripe(t *testing.T) {
 	if len(mailer.BalancePaid) != 1 {
 		t.Fatalf("confirmation emails = %d, want 1", len(mailer.BalancePaid))
 	}
-	if mailer.BalancePaid[0].AmountLabel != "" {
-		t.Fatalf("amount label = %q, want blank when there is no invoice", mailer.BalancePaid[0].AmountLabel)
+	if mailer.BalancePaid[0].Amount.Pence != 0 {
+		t.Fatalf("amount = %+v, want zero when there is no invoice", mailer.BalancePaid[0].Amount)
 	}
 
 	// The family keeps the beds they were given; marking paid is not a release.
@@ -1226,7 +1226,7 @@ func TestMarkBalancePaidManually_invoicedVoidsInvoice(t *testing.T) {
 	if g.BillingStatus != domain.BillingBalancePaid {
 		t.Fatalf("billing_status = %q, want balance_paid", g.BillingStatus)
 	}
-	if len(mailer.BalancePaid) != 1 || mailer.BalancePaid[0].AmountLabel != "£250.00" {
+	if len(mailer.BalancePaid) != 1 || mailer.BalancePaid[0].Amount.Pence != 25000 {
 		t.Fatalf("confirmation = %+v, want one email showing £250.00", mailer.BalancePaid)
 	}
 }

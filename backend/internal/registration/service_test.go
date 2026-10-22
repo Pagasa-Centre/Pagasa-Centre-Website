@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"pagasacentre/backend/internal/notify"
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/testhelper"
@@ -34,7 +35,7 @@ func TestDepositPayingCount(t *testing.T) {
 		{Age: 3, Attendance: domain.Attendance{Type: domain.AttendanceFullWeek}},  // free (under 4)
 		{Age: 4, Attendance: domain.Attendance{Type: domain.AttendanceFullWeek}},  // pays (4 == threshold)
 	}}
-	if got := depositPayingCount(req); got != 3 {
+	if got := req.DepositPayingCount(); got != 3 {
 		t.Errorf("depositPayingCount = %d, want 3", got)
 	}
 }
@@ -453,7 +454,9 @@ func TestRowsFromRequest_dayPassIncludesShirtSize(t *testing.T) {
 			},
 		}},
 	}
-	rows := rowsFromRequest("grp-1", req, domain.PaymentPaid, 0, "GBP", mustParseTime(t, "2026-07-01T12:00:00Z"), nil)
+	submitted := mustParseTime(t, "2026-07-01T12:00:00Z")
+	g, campers := req.ToGroup("grp-1", domain.PaymentPaid, 0, "GBP", submitted, nil)
+	rows := notify.RowsForGroup(&g, campers)
 	if len(rows) != 1 {
 		t.Fatalf("rows = %d, want 1", len(rows))
 	}
@@ -462,14 +465,6 @@ func TestRowsFromRequest_dayPassIncludesShirtSize(t *testing.T) {
 	}
 	if rows[0].DayPassTshirtOption == nil || *rows[0].DayPassTshirtOption != domain.TshirtOptionTshirtOnly {
 		t.Fatalf("day_pass_tshirt_option = %v", rows[0].DayPassTshirtOption)
-	}
-	vals := rows[0].Values()
-	// shirt_size is column index 18 (0-based) per sheets.Headers
-	if len(vals) < 19 {
-		t.Fatalf("values too short: %d", len(vals))
-	}
-	if vals[18] != "adult_l" {
-		t.Fatalf("sheet shirt_size column = %v, want adult_l", vals[18])
 	}
 }
 

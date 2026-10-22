@@ -3,6 +3,7 @@ package sheetsync
 import (
 	"context"
 	"fmt"
+	"pagasacentre/backend/internal/notify"
 
 	"pagasacentre/backend/internal/billing"
 	"pagasacentre/backend/internal/registration/domain"
@@ -32,7 +33,7 @@ func (s *Service) ResyncSheet(ctx context.Context, groupID, actor string, expect
 		return apperr.Invalid("registration has no campers")
 	}
 
-	rows := billing.SheetRowsForGroup(g, campers)
+	rows := notify.RowsForGroup(g, campers)
 	if err := s.sheets.RemoveByGroupID(ctx, groupID); err != nil {
 		return fmt.Errorf("operation: %w", err)
 	}

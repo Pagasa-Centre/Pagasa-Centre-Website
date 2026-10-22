@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"pagasacentre/backend/internal/billing"
-	"pagasacentre/backend/internal/email"
+	"pagasacentre/backend/internal/notify"
 	"pagasacentre/backend/internal/registration/domain"
 )
 
@@ -21,8 +21,8 @@ type reconcileRepo interface {
 }
 
 type mailer interface {
-	SendBalancePaidConfirmation(ctx context.Context, p email.BalancePaidConfirmation) error
-	SendBalancePaid(ctx context.Context, p email.BalancePaid) error
+	SendBalancePaidConfirmation(ctx context.Context, p notify.BalancePaidConfirmation) error
+	SendBalancePaid(ctx context.Context, p notify.BalancePaid) error
 }
 
 type Service struct {

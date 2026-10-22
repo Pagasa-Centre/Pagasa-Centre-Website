@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"pagasacentre/backend/internal/notify"
 	"pagasacentre/backend/internal/registration/domain"
-	"pagasacentre/backend/internal/sheets"
 	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
 
@@ -42,7 +42,7 @@ func TestResyncSheet_rejectsBadPaymentStatus(t *testing.T) {
 		group:   &domain.Group{ID: "g1", PaymentStatus: domain.PaymentStatus("refunded")},
 		campers: []domain.Camper{{ID: "c1", FirstName: "A", LastName: "B"}},
 	}
-	svc := NewService(reads, noopSheetRepo{}, sheets.NoopSync{})
+	svc := NewService(reads, noopSheetRepo{}, notify.NoopSheetSync{})
 	err := svc.ResyncSheet(context.Background(), "g1", "admin", 1)
 	var ae *apperr.Error
 	if !errors.As(err, &ae) || ae.Kind != apperr.KindInvalid {

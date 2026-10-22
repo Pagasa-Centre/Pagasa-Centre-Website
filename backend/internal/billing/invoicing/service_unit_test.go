@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"pagasacentre/backend/internal/billing"
+	"pagasacentre/backend/internal/notify"
 	"pagasacentre/backend/internal/registration/domain"
-	"pagasacentre/backend/internal/sheets"
 	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
 
@@ -115,7 +115,7 @@ func TestNewService_constructorDefaults(t *testing.T) {
 	if svc.sheets == nil {
 		t.Fatal("expected noop sheet sync default")
 	}
-	if _, ok := svc.sheets.(*sheets.NoopSync); !ok {
+	if _, ok := svc.sheets.(*notify.NoopSheetSync); !ok {
 		t.Fatalf("sheets = %T, want *NoopSync", svc.sheets)
 	}
 }

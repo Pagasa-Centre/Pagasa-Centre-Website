@@ -2,6 +2,7 @@ package domain
 
 import (
 	"strings"
+	"time"
 
 	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
@@ -244,4 +245,23 @@ func (g *Group) ExpireCheckout() (tr PaymentTransition, ok bool) {
 // OverridePaymentStatus is the admin PATCH with no transition rules.
 func (g *Group) OverridePaymentStatus(to PaymentStatus) PaymentTransition {
 	return PaymentTransition{From: g.PaymentStatus, To: to}
+}
+
+func (g *Group) MarkDepositPaid(at time.Time) {
+	g.PaymentStatus = PaymentPaid
+	g.PaidAt = &at
+}
+
+func (g *Group) ChangeContact(first, last, email, phone string) {
+	g.ContactFirstName = first
+	g.ContactLastName = last
+	g.ContactEmail = email
+	g.ContactPhone = phone
+}
+
+func (g *Group) CanResendDepositConfirmation() error {
+	if g.PaymentStatus != PaymentPaid {
+		return apperr.Invalid("the confirmation email can only be re-sent once the deposit is paid")
+	}
+	return nil
 }

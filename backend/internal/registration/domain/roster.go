@@ -117,6 +117,34 @@ func (g *Group) CanAddCamper() error {
 	return nil
 }
 
+func HasMinor(campers []Camper) bool {
+	for _, c := range campers {
+		if c.Age < 18 {
+			return true
+		}
+	}
+	return false
+}
+
+func (c Camper) OffPreference() (first, second, allocated string, ok bool) {
+	if c.AttendanceType != AttendanceFullWeek {
+		return "", "", "", false
+	}
+	alloc := strVal(c.AllocatedAccommodationCode)
+	if alloc == "" {
+		return "", "", "", false
+	}
+	first = strVal(c.AccommodationFirstChoice)
+	second = strVal(c.AccommodationSecondChoice)
+	if first == "" && second == "" {
+		return "", "", "", false
+	}
+	if alloc == first || alloc == second {
+		return "", "", "", false
+	}
+	return first, second, alloc, true
+}
+
 func (g *Group) CanWaiveCamperDeposit() error {
 	if g.BalanceSettled() {
 		return apperr.Invalid(

@@ -23,7 +23,7 @@ type Config struct {
 	//      that block outbound SMTP (Railway, Fly, etc.).
 	//   2. SMTP (SMTP_HOST + SMTP_* + SMTP_FROM) — works locally and on hosts
 	//      that allow port 465/587 out.
-	// If neither is configured, a NoopMailer is used (template still renders,
+	// If neither is configured, email.NoopMailer is used (template still renders,
 	// just logs instead of sending).
 	ResendAPIKey string
 	EmailFrom    string
@@ -34,7 +34,7 @@ type Config struct {
 	SMTPFrom     string
 
 	// Google Sheets live sync. All three required to enable; if any is
-	// empty the app boots with a NoopSync (no rows written).
+	// empty the app boots with notify.NoopSheetSync (no rows written).
 	GoogleServiceAccountJSON  string
 	GoogleSheetsSpreadsheetID string
 	GoogleSheetsPendingTab    string // defaults to "Pending"

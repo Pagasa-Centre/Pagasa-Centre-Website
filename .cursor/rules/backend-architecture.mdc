@@ -29,6 +29,7 @@ Before editing Go under `backend/`, read [backend/AGENTS.md](backend/AGENTS.md).
 - Billing use cases live in `internal/billing/{allocation,invoicing,camperedit,reconcile,sweep,sheetsync}`; sibling groups must not import each other (see AGENTS.md guardrail 11)
 - Domain and use-case types have no JSON tags; HTTP contracts are separate DTOs with explicit mappers, never aliases (see AGENTS.md guardrail 12)
 - Vendor SDKs stay in adapters; core identifiers are vendor-neutral (see AGENTS.md guardrail 13)
+- Notifications use `internal/notify` only in core; never import `internal/email` or `internal/sheets` outside adapters (see AGENTS.md guardrail 14)
 - No sqlboiler/goose/viper/zap unless explicitly requested
 - `/camp-admin/stream` stays outside request-timeout middleware
 
