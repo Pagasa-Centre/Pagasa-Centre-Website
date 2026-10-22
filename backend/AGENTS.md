@@ -48,7 +48,7 @@ Existing domains: `camp`, `accommodation`, `registration`, `consent` (api only),
 
 ## Hard guardrails
 
-1. **Error JSON shape is frozen.** The frontend parses `{ "code", "message", "fields"? }`. Always use `pkg/commonlibrary/errors` (`APIError`, `BadRequest`, `ValidationFailed`, `WriteError`). Never return a simplified `{ "error": "..." }` body.
+1. **Error JSON shape is frozen.** The frontend parses `{ "code", "message", "fields"? }`. Handlers always write errors with `pkg/commonlibrary/errors` (`APIError`, `BadRequest`, `ValidationFailed`, `WriteError`); services never import it (guardrail 8). Never return a simplified `{ "error": "..." }` body.
 
 2. **Logging:** stdlib `log` only. Do not add zap or structured logging libraries unless explicitly requested.
 
@@ -61,6 +61,13 @@ Existing domains: `camp`, `accommodation`, `registration`, `consent` (api only),
 6. **No flat feature packages.** Do not put handlers, services, repos, and domain types in one `internal/foo/` package. Do not reintroduce `Mount()` per feature — add routes in `internal/http/router/router.go`.
 
 7. **SSE `/camp-admin/stream`** must stay **outside** the request-timeout middleware group (see router).
+
+8. **Errors cross layers as domain errors; only handlers speak HTTP.**
+   - Services and storage do not import `pkg/commonlibrary/errors`. Business failures are sentinel or typed errors declared in the service or `domain/` package (e.g. `var ErrRegistrationsClosed = errors.New("registrations closed")`, see `sermon.ErrNotFound`). Field validation returns a domain `ValidationError` carrying `Fields map[string]string`. Unexpected failures are wrapped with context: `fmt.Errorf("insert group: %w", err)`.
+   - Storage translates driver errors (e.g. `pgx.ErrNoRows`, unique violations) into domain errors, so services never match on SQL error text.
+   - Each handler package maps service errors to an `APIError` in one function, keeping the existing `code` strings — the frontend branches on some of them (e.g. `invalid_free_code` in `CampRegisterForm.tsx`).
+   - **Never put `err.Error()` in a response.** For anything unmapped, `log.Printf` the full error with the route, then write `commonerrors.Internal("Something went wrong. Please try again.")`. Do not pass a raw error to `WriteError` either; it copies the error text into the body.
+   - Existing services still return `APIError` and `commonerrors.Internal(err.Error())` (about 100 call sites). Migrate them when you touch them; do not add new ones.
 
 ## Model types (no entity layer)
 
@@ -83,7 +90,7 @@ type SubmitRequest = domain.SubmitRequest
 ## Adding a new endpoint (existing domain)
 
 1. Add or extend domain types in `internal/{domain}/domain/`.
-2. Add service method in `internal/{domain}/service.go` (return domain types or `errors.APIError`).
+2. Add service method in `internal/{domain}/service.go` (return domain types and domain errors — guardrail 8).
 3. Add storage method in `internal/{domain}/storage/repository.go` if DB access is needed.
 4. Add DTOs + mappers in `internal/api/{domain}/dto/`.
 5. Add `Handler` method in `internal/api/{domain}/handler.go`.
@@ -119,15 +126,31 @@ func (h *Handler) Submit() http.HandlerFunc {
 		}
 		result, err := h.service.Submit(r.Context(), mapper.RequestToDomain(req))
 		if err != nil {
-			commonerrors.WriteError(w, err)
+			commonerrors.WriteError(w, toAPIError(r, err))
 			return
 		}
 		render.Json(w, http.StatusOK, mapper.SubmitToResponse(result))
 	}
 }
+
+// toAPIError is the only place this package turns service errors into HTTP errors.
+func toAPIError(r *http.Request, err error) commonerrors.APIError {
+	var verr registration.ValidationError
+	switch {
+	case errors.As(err, &verr):
+		return commonerrors.ValidationFailed(verr.Fields)
+	case errors.Is(err, registration.ErrRegistrationsClosed):
+		return commonerrors.APIError{Code: "registrations_closed", Message: "Camp registrations are currently closed"}
+	case errors.Is(err, registration.ErrInvalidFreeCode):
+		return commonerrors.APIError{Code: "invalid_free_code", Message: "That sponsorship code is not valid or has already been used."}
+	default:
+		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
+		return commonerrors.Internal("Something went wrong. Please try again.")
+	}
+}
 ```
 
-Map service errors to HTTP status via `errors.StatusFor` or explicit `APIError` codes. Validation uses `errors.ValidationFailed(fields)` so the frontend can show per-field messages.
+`errors.StatusFor` turns the `APIError` code into the HTTP status. Validation maps to `errors.ValidationFailed(fields)` so the frontend can show per-field messages.
 
 ## Service pattern
 
@@ -160,7 +183,7 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 		return nil
 	})
 	if err != nil {
-		return nil, commonerrors.Internal(err.Error())
+		return nil, fmt.Errorf("submit registration: %w", err)
 	}
 	return resp, nil
 }
