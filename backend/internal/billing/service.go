@@ -118,7 +118,7 @@ func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedV
 		} else if priceID == "" {
 			priceID, err = s.resolvePriceID(ctx, code, c.Age)
 			if err != nil {
-				return commonerrors.BadRequest(err.Error(), nil)
+				return err
 			}
 		}
 		unitCode := strings.TrimSpace(a.AllocatedUnitCode)
@@ -218,9 +218,13 @@ func (s *Service) validateAllocatedUnit(ctx context.Context, tierCode, unitCode 
 func (s *Service) resolvePriceID(ctx context.Context, accommodationCode string, age int) (string, error) {
 	t, err := s.repo.GetAccommodationType(ctx, accommodationCode)
 	if err != nil {
-		return "", err
+		return "", commonerrors.Internal(err.Error())
 	}
-	return registration.AccommodationPriceID(accommodationCode, age, t, s.cfg.StripePriceChildUnder3)
+	priceID, err := registration.AccommodationPriceID(accommodationCode, age, t, s.cfg.StripePriceChildUnder3)
+	if err != nil {
+		return "", commonerrors.BadRequest(err.Error(), nil)
+	}
+	return priceID, nil
 }
 
 // SendInvoice creates and emails a Stripe Invoice for an allocated group.
@@ -281,7 +285,7 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 			// "No such price".
 			priceID, err := s.resolvePriceID(ctx, strings.TrimSpace(*c.AllocatedAccommodationCode), c.Age)
 			if err != nil {
-				return commonerrors.BadRequest(err.Error(), nil)
+				return err
 			}
 			lines = append(lines, InvoiceLine{PriceID: priceID, Quantity: 1})
 		case domain.AttendanceDayPass:
@@ -385,12 +389,12 @@ func (s *Service) SendInvoice(ctx context.Context, groupID, actor string, expect
 }
 
 // SendInvoicesBulk sends invoices for many groups; collects per-group errors.
-func (s *Service) SendInvoicesBulk(ctx context.Context, actor string, groupIDs []string) map[string]string {
-	errs := map[string]string{}
+func (s *Service) SendInvoicesBulk(ctx context.Context, actor string, groupIDs []string) map[string]error {
+	errs := map[string]error{}
 	for _, id := range groupIDs {
 		g, err := s.repo.FindGroupByID(ctx, id)
 		if err != nil {
-			errs[id] = err.Error()
+			errs[id] = err
 			continue
 		}
 		if g != nil && g.IsFree {
@@ -400,7 +404,7 @@ func (s *Service) SendInvoicesBulk(ctx context.Context, actor string, groupIDs [
 			continue
 		}
 		if err := s.SendInvoice(ctx, id, actor, domain.SkipVersionCheck); err != nil {
-			errs[id] = err.Error()
+			errs[id] = err
 		}
 	}
 	return errs
@@ -500,11 +504,11 @@ func (s *Service) SendCoachInvoice(ctx context.Context, groupID, actor string, e
 
 // SendCoachInvoicesBulk sends coach invoices for many groups; collects per-group
 // errors (skips groups that don't qualify without erroring).
-func (s *Service) SendCoachInvoicesBulk(ctx context.Context, actor string, groupIDs []string) map[string]string {
-	errs := map[string]string{}
+func (s *Service) SendCoachInvoicesBulk(ctx context.Context, actor string, groupIDs []string) map[string]error {
+	errs := map[string]error{}
 	for _, id := range groupIDs {
 		if err := s.SendCoachInvoice(ctx, id, actor, domain.SkipVersionCheck); err != nil {
-			errs[id] = err.Error()
+			errs[id] = err
 		}
 	}
 	return errs
@@ -1400,18 +1404,18 @@ func (s *Service) ResyncSheet(ctx context.Context, groupID, actor string, expect
 
 // ResyncAllSheets re-syncs every paid and pending registration to the Google
 // Sheet from current DB state. Returns the success count and per-group errors.
-func (s *Service) ResyncAllSheets(ctx context.Context, actor string) (int, map[string]string) {
-	errs := map[string]string{}
+func (s *Service) ResyncAllSheets(ctx context.Context, actor string) (int, map[string]error) {
+	errs := map[string]error{}
 	synced := 0
 	for _, status := range []string{domain.PaymentPaid, domain.PaymentPending} {
 		groups, err := s.repo.ListWithBilling(ctx, domain.ListFilterBilling{PaymentStatus: status})
 		if err != nil {
-			errs["_list"] = err.Error()
+			errs["_list"] = err
 			return synced, errs
 		}
 		for _, g := range groups {
 			if err := s.ResyncSheet(ctx, g.ID, actor, domain.SkipVersionCheck); err != nil {
-				errs[g.ID] = err.Error()
+				errs[g.ID] = err
 				continue
 			}
 			synced++

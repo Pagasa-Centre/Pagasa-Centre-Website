@@ -415,7 +415,7 @@ func (s *Service) priceFor(ctx context.Context, accommodationCode string, age in
 	}
 	priceID, err := s.resolvePriceID(ctx, code, age)
 	if err != nil {
-		return "", commonerrors.BadRequest(err.Error(), nil)
+		return "", err
 	}
 	return priceID, nil
 }

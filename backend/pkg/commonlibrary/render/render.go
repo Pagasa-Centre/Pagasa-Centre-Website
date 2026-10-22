@@ -26,13 +26,21 @@ type ErrorMapFn func(err error) (status int, message string)
 // The frozen {code, message, fields?} shape is preserved for the frontend.
 func HandleServiceErrorResponse(w http.ResponseWriter, r *http.Request, op string, err error, mapFn ErrorMapFn) {
 	status, msg := mapFn(err)
-	if status >= http.StatusInternalServerError {
-		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
-	}
 	var apiErr commonerrors.APIError
 	if errors.As(err, &apiErr) {
-		Json(w, status, apiErr)
+		pub, ref := commonerrors.Public(apiErr)
+		if status >= http.StatusInternalServerError {
+			if ref != "" {
+				log.Printf("%s %s: internal error ref=%s: %v", r.Method, r.URL.Path, ref, err)
+			} else {
+				log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
+			}
+		}
+		Json(w, status, pub)
 		return
+	}
+	if status >= http.StatusInternalServerError {
+		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
 	}
 	Json(w, status, commonerrors.APIError{
 		Code:    statusToCode(status),

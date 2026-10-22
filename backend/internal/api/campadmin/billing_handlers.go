@@ -100,7 +100,7 @@ func postInvoiceBulk(svc *billing.Service, rec *adminlog.Recorder, regRepo *regs
 				"Sent balance invoice to "+admin.GroupSummary(g), nil)
 		}
 		if len(errs) > 0 {
-			render.Json(w, http.StatusMultiStatus, map[string]any{"errors": errs})
+			render.Json(w, http.StatusMultiStatus, map[string]any{"errors": publicErrors(r, errs)})
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -144,7 +144,7 @@ func postCoachInvoiceBulk(svc *billing.Service, rec *adminlog.Recorder, regRepo 
 				"Sent coach invoice to "+admin.GroupSummary(g), nil)
 		}
 		if len(errs) > 0 {
-			render.Json(w, http.StatusMultiStatus, map[string]any{"errors": errs})
+			render.Json(w, http.StatusMultiStatus, map[string]any{"errors": publicErrors(r, errs)})
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -519,7 +519,7 @@ func postResyncAllSheets(svc *billing.Service, rec *adminlog.Recorder) http.Hand
 		if len(errs) > 0 {
 			render.Json(w, http.StatusMultiStatus, map[string]any{
 				"synced": synced,
-				"errors": errs,
+				"errors": publicErrors(r, errs),
 			})
 			return
 		}

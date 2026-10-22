@@ -2,8 +2,9 @@ package request
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
+	"log"
 	"net/http"
 
 	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
@@ -21,7 +22,13 @@ func Decode(r *http.Request, v any) error {
 		if err == io.EOF {
 			return commonerrors.BadRequest("Request body is empty", nil)
 		}
-		return commonerrors.BadRequest(fmt.Sprintf("Invalid JSON body: %s", err.Error()), nil)
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			log.Printf("%s %s: invalid JSON body: %v", r.Method, r.URL.Path, err)
+			return commonerrors.BadRequest("Request body is too large", nil)
+		}
+		log.Printf("%s %s: invalid JSON body: %v", r.Method, r.URL.Path, err)
+		return commonerrors.BadRequest("Invalid JSON body", nil)
 	}
 	if dec.More() {
 		return commonerrors.BadRequest("Request body must contain a single JSON object", nil)

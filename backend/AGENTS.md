@@ -66,8 +66,8 @@ Existing domains: `camp`, `accommodation`, `registration`, `consent` (api only),
    - Services and storage do not import `pkg/commonlibrary/errors`. Business failures are sentinel or typed errors declared in the service or `domain/` package (e.g. `var ErrRegistrationsClosed = errors.New("registrations closed")`, see `sermon.ErrNotFound`). Field validation returns a domain `ValidationError` carrying `Fields map[string]string`. Unexpected failures are wrapped with context: `fmt.Errorf("insert group: %w", err)`.
    - Storage translates driver errors (e.g. `pgx.ErrNoRows`, unique violations) into domain errors, so services never match on SQL error text.
    - Each handler package maps service errors to an `APIError` in one function, keeping the existing `code` strings — the frontend branches on some of them (e.g. `invalid_free_code` in `CampRegisterForm.tsx`).
-   - **Never put `err.Error()` in a response.** For anything unmapped, `log.Printf` the full error with the route, then write `commonerrors.Internal("Something went wrong. Please try again.")`. Do not pass a raw error to `WriteError` either; it copies the error text into the body.
-   - Existing services still return `APIError` and `commonerrors.Internal(err.Error())` (about 100 call sites). Migrate them when you touch them; do not add new ones.
+   - **Never put `err.Error()` in a response.** For anything unmapped, `log.Printf` the full error with the route (include the ref when present), then return the result of `commonerrors.Public(err)`. `WriteError` calls `Public` automatically: `internal_error` and non-`APIError` values become a generic message plus `(ref xxxxxx)` while the full cause is logged once. Explicit handler mapping is still preferred; `WriteError` is the backstop.
+   - Legacy services still return `APIError` and `commonerrors.Internal(err.Error())` (~100 call sites). Those no longer leak in responses; migrate them to domain errors when you touch them; do not add new ones.
 
 ## Model types (no entity layer)
 
@@ -144,8 +144,11 @@ func toAPIError(r *http.Request, err error) commonerrors.APIError {
 	case errors.Is(err, registration.ErrInvalidFreeCode):
 		return commonerrors.APIError{Code: "invalid_free_code", Message: "That sponsorship code is not valid or has already been used."}
 	default:
-		log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
-		return commonerrors.Internal("Something went wrong. Please try again.")
+		pub, ref := commonerrors.Public(err)
+		if ref != "" {
+			log.Printf("%s %s: internal error ref=%s: %v", r.Method, r.URL.Path, ref, err)
+		}
+		return pub
 	}
 }
 ```

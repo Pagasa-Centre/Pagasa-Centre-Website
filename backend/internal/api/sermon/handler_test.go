@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	sermonapi "pagasacentre/backend/internal/api/sermon"
@@ -62,5 +63,18 @@ func TestGetLatest_Internal(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status %d", w.Code)
+	}
+	var body struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Code != "internal_error" {
+		t.Fatalf("code %q", body.Code)
+	}
+	if strings.Contains(body.Message, "db down") {
+		t.Fatalf("message leaked internal text: %q", body.Message)
 	}
 }
