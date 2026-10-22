@@ -29,7 +29,7 @@ type Settlement struct {
 	Billing BillingTransition
 }
 
-func (g *Group) billingTR(to BillingStatus) BillingTransition {
+func (g *Group) transitionBillingStatusTo(to BillingStatus) BillingTransition {
 	return BillingTransition{From: g.BillingStatus, To: to}
 }
 
@@ -45,9 +45,9 @@ func (g *Group) Allocate() (BillingTransition, error) {
 		return BillingTransition{}, ErrBalancePaid
 	}
 	if g.PaidInFullAtRegistration {
-		return g.billingTR(g.BillingStatus), nil
+		return g.transitionBillingStatusTo(g.BillingStatus), nil
 	}
-	return g.billingTR(BillingAllocated), nil
+	return g.transitionBillingStatusTo(BillingAllocated), nil
 }
 
 // Unallocate validates and returns the billing transition for clearing placements.
@@ -61,9 +61,9 @@ func (g *Group) Unallocate() (BillingTransition, error) {
 		}
 	}
 	if g.PaidInFullAtRegistration {
-		return g.billingTR(g.BillingStatus), nil
+		return g.transitionBillingStatusTo(g.BillingStatus), nil
 	}
-	return g.billingTR(BillingNone), nil
+	return g.transitionBillingStatusTo(BillingNone), nil
 }
 
 // Invoice validates and returns the transition to invoiced.
@@ -87,7 +87,7 @@ func (g *Group) Invoice(hasFullWeek bool) (BillingTransition, error) {
 			return BillingTransition{}, apperr.Invalid("group must be allocated before invoicing")
 		}
 	}
-	return g.billingTR(BillingInvoiced), nil
+	return g.transitionBillingStatusTo(BillingInvoiced), nil
 }
 
 // ConfirmSponsorship validates and returns the transition to free_confirmed.
@@ -101,7 +101,7 @@ func (g *Group) ConfirmSponsorship() (BillingTransition, error) {
 	if g.BillingStatus != BillingAllocated {
 		return BillingTransition{}, apperr.Invalid("group must be allocated before confirming sponsorship")
 	}
-	return g.billingTR(BillingFreeConfirmed), nil
+	return g.transitionBillingStatusTo(BillingFreeConfirmed), nil
 }
 
 // MarkBalancePaidManually validates and returns the transition to balance_paid.
@@ -120,12 +120,12 @@ func (g *Group) MarkBalancePaidManually() (BillingTransition, error) {
 			"only allocated or invoiced groups can be marked paid; this group is " +
 				g.BillingStatus.Label())
 	}
-	return g.billingTR(BillingBalancePaid), nil
+	return g.transitionBillingStatusTo(BillingBalancePaid), nil
 }
 
 // Release returns the transition to released (permissive — any starting status).
 func (g *Group) Release() BillingTransition {
-	return g.billingTR(BillingReleased)
+	return g.transitionBillingStatusTo(BillingReleased)
 }
 
 // SettleBalance returns the transition for an invoice.paid webhook. already is
@@ -134,7 +134,7 @@ func (g *Group) SettleBalance() (tr BillingTransition, already bool) {
 	if g.BillingStatus == BillingBalancePaid {
 		return BillingTransition{}, true
 	}
-	return g.billingTR(BillingBalancePaid), false
+	return g.transitionBillingStatusTo(BillingBalancePaid), false
 }
 
 // RequireOpenInvoice returns a CAS transition that requires invoiced status.
@@ -142,7 +142,7 @@ func (g *Group) RequireOpenInvoice() (BillingTransition, error) {
 	if g.BillingStatus != BillingInvoiced {
 		return BillingTransition{}, apperr.Invalid("invoice is not open")
 	}
-	return g.billingTR(BillingInvoiced), nil
+	return g.transitionBillingStatusTo(BillingInvoiced), nil
 }
 
 // HasOpenInvoice is true when the group has an open balance invoice in Stripe.
@@ -195,10 +195,10 @@ func (g *Group) RosterChanged(after []Camper, invoiceStale bool) (tr BillingTran
 	if g.HasOpenInvoice() && invoiceStale {
 		voidInvoice = true
 		to := allocatedOrNone(after)
-		return g.billingTR(to), voidInvoice
+		return g.transitionBillingStatusTo(to), voidInvoice
 	}
 	if g.BillingStatus == BillingAllocated && hasUnplacedFullWeek(after) {
-		return g.billingTR(BillingNone), false
+		return g.transitionBillingStatusTo(BillingNone), false
 	}
 	return BillingTransition{}, false
 }
@@ -228,7 +228,7 @@ func (g *Group) SettleCheckout() (s Settlement, ok bool) {
 	}
 	s.Payment = PaymentTransition{From: PaymentPending, To: PaymentPaid}
 	if g.PaidInFullAtRegistration {
-		s.Billing = g.billingTR(BillingBalancePaid)
+		s.Billing = g.transitionBillingStatusTo(BillingBalancePaid)
 	}
 	return s, true
 }
