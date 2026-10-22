@@ -9,7 +9,6 @@ import (
 	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/registration"
 	"pagasacentre/backend/internal/registration/domain"
-	"pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
 
@@ -98,7 +97,7 @@ func (s *Service) EditCamper(
 		return EditCamperSummary{}, err
 	}
 
-	details := storage.CamperDetails{
+	details := domain.CamperDetails{
 		FirstName:      strings.TrimSpace(req.FirstName),
 		LastName:       strings.TrimSpace(req.LastName),
 		Gender:         req.Gender,
@@ -459,7 +458,7 @@ func allocatedOrNone(campers []domain.Camper) string {
 func campersAfterEdit(
 	campers []domain.Camper,
 	camperID string,
-	details storage.CamperDetails,
+	details domain.CamperDetails,
 ) []domain.Camper {
 	out := make([]domain.Camper, len(campers))
 	copy(out, campers)

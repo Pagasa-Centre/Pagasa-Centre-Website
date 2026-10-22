@@ -21,11 +21,11 @@ func backendRoot(t *testing.T) string {
 
 var (
 	httpPackages = map[string]bool{
-		"internal/api":       true,
-		"internal/http":      true,
+		"internal/api":        true,
+		"internal/http":       true,
 		"internal/middleware": true,
 		"internal/testhelper": true,
-		"internal/archtest":  true,
+		"internal/archtest":   true,
 	}
 )
 
@@ -72,6 +72,57 @@ func importPaths(fset *token.FileSet, path string) []string {
 		out = append(out, p)
 	}
 	return out
+}
+
+func pgxImportForbidden(imp string) bool {
+	return imp == "github.com/jackc/pgx/v5" || strings.HasPrefix(imp, "github.com/jackc/pgx/")
+}
+
+func storageImportForbidden(imp string) bool {
+	return strings.HasPrefix(imp, "pagasacentre/backend/internal/") && strings.HasSuffix(imp, "/storage")
+}
+
+func exemptFromPgxRule(rel string) bool {
+	if strings.Contains(rel, "/storage/") {
+		return true
+	}
+	switch {
+	case rel == "internal/testhelper/db.go",
+		strings.HasPrefix(rel, "internal/testhelper/") && strings.HasSuffix(rel, "_test.go"):
+		return true
+	case strings.HasPrefix(rel, "internal/archtest/"):
+		return true
+	default:
+		return false
+	}
+}
+
+func TestOnlyStorageTouchesPgx(t *testing.T) {
+	backend := backendRoot(t)
+	internal := filepath.Join(backend, "internal")
+	fset := token.NewFileSet()
+
+	var violations []string
+	err := walkGoFiles(internal, func(path string) {
+		rel := relInternal(path, backend)
+		if rel == "" || exemptFromPgxRule(rel) {
+			return
+		}
+		for _, imp := range importPaths(fset, path) {
+			if pgxImportForbidden(imp) {
+				violations = append(violations, rel+" imports "+imp)
+			}
+			if storageImportForbidden(imp) {
+				violations = append(violations, rel+" imports "+imp)
+			}
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(violations) > 0 {
+		t.Fatalf("only */storage and testhelper may import pgx or */storage:\n%s", strings.Join(violations, "\n"))
+	}
 }
 
 func TestServicesDoNotImportHTTPErrorPackage(t *testing.T) {

@@ -9,11 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/registration/domain"
-	"pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/sheets"
 )
 
@@ -48,7 +45,8 @@ type CampConfigReader interface {
 }
 
 type Service struct {
-	repo          *storage.Repository
+	repo          groupRepo
+	tx            txRunner
 	prices        PriceLookup
 	stripe        CheckoutCreator
 	stripeAmounts StripePriceAmounts
@@ -60,7 +58,8 @@ type Service struct {
 }
 
 func NewService(
-	repo *storage.Repository,
+	repo groupRepo,
+	tx txRunner,
 	prices PriceLookup,
 	stripe CheckoutCreator,
 	stripeAmounts StripePriceAmounts,
@@ -75,6 +74,7 @@ func NewService(
 	}
 	return &Service{
 		repo:          repo,
+		tx:            tx,
 		prices:        prices,
 		stripe:        stripe,
 		stripeAmounts: stripeAmounts,
@@ -121,98 +121,95 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 
 	isFree := false
 	var reservedCodeID string
-
-	tx, err := s.repo.Pool().BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("operation: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	freeCode := strings.ToUpper(strings.TrimSpace(req.FreeCode))
-	if freeCode != "" {
-		codeID, err := s.repo.ReserveFreeCode(ctx, tx, freeCode)
-		if err != nil {
-			if errors.Is(err, storage.ErrFreeCodeInvalid) {
-				return nil, ErrInvalidFreeCode
-			}
-			return nil, fmt.Errorf("operation: %w", err)
-		}
-		reservedCodeID = codeID
-		isFree = true
-		total = 0
-		paidInFull = false
-		charge.lines = nil
-	}
-
-	groupID, err := s.repo.InsertGroup(ctx, tx, req, total, currency, isFree, paidInFull)
-	if err != nil {
-		return nil, fmt.Errorf("operation: %w", err)
-	}
-	for _, c := range req.Campers {
-		if err := s.repo.InsertCamper(ctx, tx, groupID, c); err != nil {
-			return nil, fmt.Errorf("operation: %w", err)
-		}
-	}
-	if reservedCodeID != "" {
-		if err := s.repo.MarkFreeCodeUsed(ctx, tx, reservedCodeID, groupID); err != nil {
-			return nil, fmt.Errorf("operation: %w", err)
-		}
-	}
-
 	hasMinor := HasMinor(req)
-	resp := &domain.SubmitResponse{
-		GroupID:          groupID,
-		TotalAmountPence: total,
-		HasMinor:         hasMinor,
-	}
-	if hasMinor {
-		resp.ConsentFormURL = s.publicBaseURL + "/api/consent-form"
+	var resp *domain.SubmitResponse
+
+	err = s.tx.WithTx(ctx, func(txCtx context.Context) error {
+		freeCode := strings.ToUpper(strings.TrimSpace(req.FreeCode))
+		if freeCode != "" {
+			codeID, err := s.repo.ReserveFreeCode(txCtx, freeCode)
+			if err != nil {
+				if errors.Is(err, domain.ErrFreeCodeInvalid) {
+					return ErrInvalidFreeCode
+				}
+				return fmt.Errorf("reserve free code: %w", err)
+			}
+			reservedCodeID = codeID
+			isFree = true
+			total = 0
+			paidInFull = false
+			charge.lines = nil
+		}
+
+		groupID, err := s.repo.InsertGroup(txCtx, req, total, currency, isFree, paidInFull)
+		if err != nil {
+			return fmt.Errorf("insert group: %w", err)
+		}
+		for _, c := range req.Campers {
+			if err := s.repo.InsertCamper(txCtx, groupID, c); err != nil {
+				return fmt.Errorf("insert camper: %w", err)
+			}
+		}
+		if reservedCodeID != "" {
+			if err := s.repo.MarkFreeCodeUsed(txCtx, reservedCodeID, groupID); err != nil {
+				return fmt.Errorf("mark free code used: %w", err)
+			}
+		}
+
+		resp = &domain.SubmitResponse{
+			GroupID:          groupID,
+			TotalAmountPence: total,
+			HasMinor:         hasMinor,
+		}
+		if hasMinor {
+			resp.ConsentFormURL = s.publicBaseURL + "/api/consent-form"
+		}
+
+		if total == 0 {
+			if paidInFull {
+				coachIncluded := coachEligibleCountFromRequest(req) > 0
+				if err := s.repo.MarkPaidInFull(txCtx, groupID, "", coachIncluded); err != nil {
+					return fmt.Errorf("mark paid in full: %w", err)
+				}
+			} else if err := s.repo.MarkPaid(txCtx, groupID, ""); err != nil {
+				return fmt.Errorf("mark paid: %w", err)
+			}
+			return nil
+		}
+
+		session, err := s.stripe.CreateCheckoutSession(txCtx, CheckoutParams{
+			GroupID:  groupID,
+			Email:    req.Contact.Email,
+			Currency: currency,
+			Lines:    charge.lines,
+		})
+		if err != nil {
+			return fmt.Errorf("stripe checkout: %w", err)
+		}
+		if err := s.repo.SetStripeSession(txCtx, groupID, session.ID); err != nil {
+			return fmt.Errorf("set stripe session: %w", err)
+		}
+		resp.CheckoutURL = session.URL
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	if total == 0 {
-		if paidInFull {
-			coachIncluded := coachEligibleCountFromRequest(req) > 0
-			if err := s.repo.MarkPaidInFull(ctx, tx, groupID, "", coachIncluded); err != nil {
-				return nil, fmt.Errorf("operation: %w", err)
-			}
-		} else if err := s.repo.MarkPaid(ctx, tx, groupID, ""); err != nil {
-			return nil, fmt.Errorf("operation: %w", err)
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return nil, fmt.Errorf("operation: %w", err)
-		}
 		s.sendConfirmationEmail(ctx, req, total, currency, hasMinor, isFree, paidInFull)
 		now := time.Now().UTC()
-		rows := rowsFromRequest(groupID, req, domain.PaymentPaid, total, currency, now, &now)
-		if err := s.sheets.AppendPaidAndRemovePending(ctx, groupID, rows); err != nil {
-			log.Printf("sheets append paid (group %s): %v", groupID, err)
+		rows := rowsFromRequest(resp.GroupID, req, domain.PaymentPaid, total, currency, now, &now)
+		if err := s.sheets.AppendPaidAndRemovePending(ctx, resp.GroupID, rows); err != nil {
+			log.Printf("sheets append paid (group %s): %v", resp.GroupID, err)
 		}
 		return resp, nil
 	}
 
-	session, err := s.stripe.CreateCheckoutSession(ctx, CheckoutParams{
-		GroupID:  groupID,
-		Email:    req.Contact.Email,
-		Currency: currency,
-		Lines:    charge.lines,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("stripe checkout: %w", err)
-	}
-	if err := s.repo.SetStripeSession(ctx, tx, groupID, session.ID); err != nil {
-		return nil, fmt.Errorf("operation: %w", err)
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("operation: %w", err)
-	}
-
-	pendingRows := rowsFromRequest(groupID, req, domain.PaymentPending, total, currency, time.Now().UTC(), nil)
+	pendingRows := rowsFromRequest(resp.GroupID, req, domain.PaymentPending, total, currency, time.Now().UTC(), nil)
 	if err := s.sheets.AppendPending(ctx, pendingRows); err != nil {
-		log.Printf("sheets append pending (group %s): %v", groupID, err)
+		log.Printf("sheets append pending (group %s): %v", resp.GroupID, err)
 	}
-
-	resp.CheckoutURL = session.URL
 	return resp, nil
 }
 
@@ -457,7 +454,7 @@ func MaskFreeCode(code string) string {
 // RevokeFreeCode disables an unused code.
 func (s *Service) RevokeFreeCode(ctx context.Context, id string) error {
 	if err := s.repo.RevokeFreeCode(ctx, id); err != nil {
-		if errors.Is(err, storage.ErrFreeCodeNotRevocable) {
+		if errors.Is(err, domain.ErrFreeCodeNotRevocable) {
 			return ErrCodeNotRevocable
 		}
 		return fmt.Errorf("revoke free code: %w", err)

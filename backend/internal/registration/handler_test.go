@@ -17,6 +17,7 @@ regapi "pagasacentre/backend/internal/api/registration"
 	"pagasacentre/backend/internal/registration/domain"
 	regstorage "pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/testhelper"
+	commondb "pagasacentre/backend/pkg/commonlibrary/db"
 )
 
 // Handler tests need real DB writes so they're gated on TEST_DATABASE_URL via
@@ -116,7 +117,7 @@ func newHarness(t *testing.T) *harness {
 	repo := regstorage.NewRepository(pool)
 	stripe := &fakeCheckout{id: "sess_test", url: "https://checkout.stripe.com/test"}
 	mailer := &recordingMailer{}
-	svc := registration.NewService(repo, fakePrices{}, stripe, nil, fakeCamp{open: true}, mailer, nil, "http://localhost:8080", registration.Config{})
+	svc := registration.NewService(repo, commondb.NewTxRunner(pool), fakePrices{}, stripe, nil, fakeCamp{open: true}, mailer, nil, "http://localhost:8080", registration.Config{})
 	r := chi.NewRouter()
 	h := regapi.NewHandler(svc)
 	r.Post("/registrations", h.Submit())

@@ -13,6 +13,7 @@ import (
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/testhelper"
+	commondb "pagasacentre/backend/pkg/commonlibrary/db"
 	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
 
@@ -120,7 +121,7 @@ func (f fakeCampOpen) RegistrationPaymentMode(context.Context) (string, error) {
 }
 
 func newIntegrationService(pool *pgxpool.Pool) *Service {
-	return NewService(storage.NewRepository(pool), fakePriceLookup{amount: 5000}, nil, nil, fakeCampOpen{}, nil, nil, "", Config{})
+	return NewService(storage.NewRepository(pool), commondb.NewTxRunner(pool), fakePriceLookup{amount: 5000}, nil, nil, fakeCampOpen{}, nil, nil, "", Config{})
 }
 
 func seedUnusedFreeCode(t *testing.T, ctx context.Context, pool *pgxpool.Pool, code string) {
@@ -708,7 +709,7 @@ func TestValidateFullPaymentPricing_missingCoach(t *testing.T) {
 		"price_child_under3":  {5000, "GBP"},
 		"price_daypass":       {1500, "GBP"},
 	}}
-	svc := NewService(repo, fakePriceLookup{amount: 5000}, nil, amounts, fakeCampOpen{}, nil, nil, "", Config{
+	svc := NewService(repo, commondb.NewTxRunner(pool), fakePriceLookup{amount: 5000}, nil, amounts, fakeCampOpen{}, nil, nil, "", Config{
 		StripePriceChildUnder3: "price_child_under3",
 		StripePriceDayPass:     "price_daypass",
 	})
@@ -737,7 +738,7 @@ func TestValidateFullPaymentPricing_currencyMismatch(t *testing.T) {
 		"price_daypass":      {1500, "GBP"},
 		"price_coach":        {2000, "GBP"},
 	}}
-	svc := NewService(repo, fakePriceLookup{amount: 5000}, nil, amounts, fakeCampOpen{}, nil, nil, "", Config{
+	svc := NewService(repo, commondb.NewTxRunner(pool), fakePriceLookup{amount: 5000}, nil, amounts, fakeCampOpen{}, nil, nil, "", Config{
 		StripePriceChildUnder3: "price_child_under3",
 		StripePriceDayPass:     "price_daypass",
 		StripePriceCoach:       "price_coach",

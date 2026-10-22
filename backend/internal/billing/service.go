@@ -10,7 +10,6 @@ import (
 	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/registration"
 	"pagasacentre/backend/internal/registration/domain"
-	"pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/sheets"
 	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
@@ -29,7 +28,7 @@ type stripeClient interface {
 
 // Service coordinates allocation, Stripe Invoices, and release sweeps.
 type Service struct {
-	repo   *storage.Repository
+	repo   billingRepo
 	stripe stripeClient
 	mailer email.Mailer
 	sheets sheets.Sync
@@ -37,7 +36,7 @@ type Service struct {
 	cfg    Config
 }
 
-func NewService(repo *storage.Repository, stripe stripeClient, mailer email.Mailer, sheetSync sheets.Sync, cfg Config) *Service {
+func NewService(repo billingRepo, stripe stripeClient, mailer email.Mailer, sheetSync sheets.Sync, cfg Config) *Service {
 	if cfg.InvoiceDueDays <= 0 {
 		cfg.InvoiceDueDays = 15
 	}
@@ -97,7 +96,7 @@ func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedV
 		byID[c.ID] = c
 	}
 
-	var allocs []storage.CamperAllocation
+	var allocs []domain.CamperAllocation
 	for _, a := range req.Campers {
 		c, ok := byID[a.CamperID]
 		if !ok {
@@ -125,7 +124,7 @@ func (s *Service) Allocate(ctx context.Context, groupID, actor string, expectedV
 		if err := s.validateAllocatedUnit(ctx, code, unitCode); err != nil {
 			return err
 		}
-		allocs = append(allocs, storage.CamperAllocation{
+		allocs = append(allocs, domain.CamperAllocation{
 			CamperID:                   a.CamperID,
 			AllocatedAccommodationCode: code,
 			AllocatedUnitCode:          unitCode,
@@ -1052,7 +1051,7 @@ func (s *Service) ConvertCamperToDayVisitor(
 		needsCatering = *req.NeedsCatering
 	}
 
-	dp := storage.DayPassFields{
+	dp := domain.DayPassFields{
 		Days:          req.Days,
 		TshirtOption:  req.TshirtOption,
 		ShirtSize:     shirtSize,

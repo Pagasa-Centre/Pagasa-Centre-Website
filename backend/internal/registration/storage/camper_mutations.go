@@ -5,30 +5,8 @@ import (
 	"fmt"
 
 	"pagasacentre/backend/internal/registration/domain"
+	commondb "pagasacentre/backend/pkg/commonlibrary/db"
 )
-
-// CamperDetails is the full set of identity and stay fields an admin can rewrite
-// on an existing camper. Every field arrives on every edit and replaces what is
-// stored; there is no merging, so a rule can never be skipped by omitting a field.
-//
-// The full-week fields are only applied to full-week campers. A day visitor's
-// stay details stay with the day-pass editor so no field has two owners.
-type CamperDetails struct {
-	FirstName      string
-	LastName       string
-	Gender         string
-	Age            int
-	CellLeaderName string
-	IsCellLeader   bool
-
-	ShirtSize                  *string
-	DietaryRequirements        *string
-	AccommodationFirstChoice   *string
-	AccommodationSecondChoice  *string
-	AllocatedAccommodationCode *string
-	AllocatedUnitCode          *string
-	BilledStripePriceID        *string
-}
 
 // UpdateCamperDetailsMeta rewrites one camper's details. newBillingStatus, when
 // non-empty, reverts the group's billing_status and clears invoice fields after a
@@ -36,17 +14,17 @@ type CamperDetails struct {
 func (r *Repository) UpdateCamperDetailsMeta(
 	ctx context.Context,
 	groupID, camperID string,
-	d CamperDetails,
+	d domain.CamperDetails,
 	newBillingStatus string,
 	meta domain.ActionMeta,
 ) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	g, err := r.getGroupByIDForUpdate(ctx, tx, groupID)
 	if err != nil {
 		return err
 	}
@@ -119,13 +97,13 @@ func (r *Repository) AddCamperMeta(
 	newBillingStatus string,
 	meta domain.ActionMeta,
 ) (string, error) {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return "", err
 	}
 	defer tx.Rollback(ctx)
 
-	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	g, err := r.getGroupByIDForUpdate(ctx, tx, groupID)
 	if err != nil {
 		return "", err
 	}
@@ -214,13 +192,13 @@ func (r *Repository) SetMainContactMeta(
 	groupID, camperID string,
 	meta domain.ActionMeta,
 ) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	g, err := r.getGroupByIDForUpdate(ctx, tx, groupID)
 	if err != nil {
 		return err
 	}
@@ -255,13 +233,13 @@ func (r *Repository) WaiveCamperDepositMeta(
 	groupID, camperID string,
 	meta domain.ActionMeta,
 ) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	g, err := r.getGroupByIDForUpdate(ctx, tx, groupID)
 	if err != nil {
 		return err
 	}

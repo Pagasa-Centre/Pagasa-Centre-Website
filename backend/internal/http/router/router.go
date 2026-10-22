@@ -17,11 +17,10 @@ import (
 	regapi "pagasacentre/backend/internal/api/registration"
 	sermonapi "pagasacentre/backend/internal/api/sermon"
 	"pagasacentre/backend/internal/billing"
-	campstorage "pagasacentre/backend/internal/camp/storage"
+	"pagasacentre/backend/internal/camp"
 	"pagasacentre/backend/internal/middleware"
 	"pagasacentre/backend/internal/payment"
 	"pagasacentre/backend/internal/registration"
-	regstorage "pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/pkg/commonlibrary/render"
 )
 
@@ -44,8 +43,7 @@ type Config struct {
 	ConsentHandler       *consentapi.Handler
 	SermonHandler        *sermonapi.Handler
 
-	RegRepo  *regstorage.Repository
-	CampRepo *campstorage.Repository
+	CampSvc  *camp.Service
 	RegSvc   *registration.Service
 	BillSvc  *billing.Service
 	PaySvc   *payment.Service
@@ -93,7 +91,7 @@ func New(cfg Config) http.Handler {
 
 	r.Route("/camp-admin", func(r chi.Router) {
 		middleware.WithRequestTimeout(r)
-		campadminapi.Mount(r, cfg.AdminAuth, cfg.RegRepo, cfg.CampRepo, cfg.RegSvc, cfg.BillSvc, cfg.PaySvc, cfg.AdminRec)
+		campadminapi.Mount(r, cfg.AdminAuth, cfg.RegSvc, cfg.CampSvc, cfg.BillSvc, cfg.PaySvc, cfg.AdminRec)
 	})
 
 	return r

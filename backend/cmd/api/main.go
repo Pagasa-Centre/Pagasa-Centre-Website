@@ -16,6 +16,7 @@ import (
 	"pagasacentre/backend/internal/accommodation"
 	accomstorage "pagasacentre/backend/internal/accommodation/storage"
 	"pagasacentre/backend/internal/adminlog"
+	adminstorage "pagasacentre/backend/internal/adminlog/storage"
 	accomapi "pagasacentre/backend/internal/api/accommodation"
 	campapi "pagasacentre/backend/internal/api/camp"
 	consentapi "pagasacentre/backend/internal/api/consent"
@@ -102,6 +103,7 @@ func main() {
 	campRepo := campstorage.NewRepository(pool)
 	campSvc := camp.NewService(campRepo)
 	regRepo := regstorage.NewRepository(pool)
+	txRunner := commondb.NewTxRunner(pool)
 
 	applyStripePriceOverrides(ctx, regRepo, cfg)
 
@@ -149,6 +151,7 @@ func main() {
 
 	regSvc := registration.NewService(
 		regRepo,
+		txRunner,
 		campPriceAdapter{repo: campRepo},
 		stripeCli,
 		payment.NewPriceCatalog(),
@@ -163,7 +166,7 @@ func main() {
 		},
 	)
 
-	paySvc := payment.NewService(pool, regRepo, mailer, sheetSync, cfg.PublicBaseURL)
+	paySvc := payment.NewService(txRunner, regRepo, mailer, sheetSync, cfg.PublicBaseURL)
 
 	depositPence := 5000
 	if p, err := campRepo.GetPrice(ctx, "deposit"); err == nil && p.AmountPence > 0 {
@@ -256,7 +259,7 @@ func main() {
 	log.Printf("build: running commit %s", commit)
 
 	adminHub := adminlog.NewHub()
-	adminRec := adminlog.NewRecorder(pool, adminHub)
+	adminRec := adminlog.NewRecorder(adminstorage.NewRepository(pool), adminHub)
 
 	// 6. One HTTP handler. Routes are registered in the router, not here. main
 	// only hands the router the dependencies it needs.
@@ -271,8 +274,7 @@ func main() {
 		PaymentHandler:       paymentapi.NewHandler(paySvc, billSvc, stripeCli),
 		ConsentHandler:       consentapi.NewHandler(),
 		SermonHandler:        sermonapi.NewHandler(sermonSvc),
-		RegRepo:              regRepo,
-		CampRepo:             campRepo,
+		CampSvc:              campSvc,
 		RegSvc:               regSvc,
 		BillSvc:              billSvc,
 		PaySvc:               paySvc,

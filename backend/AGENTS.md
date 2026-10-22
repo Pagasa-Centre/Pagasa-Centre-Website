@@ -56,7 +56,7 @@ Existing domains: `camp`, `accommodation`, `registration`, `consent` (api only),
 
 4. **Config:** keep using `internal/config.Load()`. Do not switch to viper unless asked.
 
-5. **Services depend on interfaces they own, not on concrete repositories.** Each service declares the narrow interface it needs in its own package (see `sermonRepo` in `internal/sermon/service.go`); `storage.Repository` satisfies it implicitly and stays exported so `cmd/api/main.go` can construct it. The same applies to cross-domain access (e.g. `billing` and `payment` reading registration data). Services must not import `pgx`/`pgxpool`, hold a pool, or pass `pgx.Tx` — when several writes must be atomic, depend on a service-owned transaction interface (e.g. `WithTx(ctx, func(ctx context.Context) error) error`) implemented in storage. `registration`, `billing` and `payment` still take `*storage.Repository` and pgx transactions: migrate them when you touch them, and never add a new concrete-repository dependency to a service.
+5. **Services depend on interfaces they own, not on concrete repositories.** Each service declares the narrow interface it needs in its own package (see `sermonRepo` in `internal/sermon/service.go`); `storage.Repository` satisfies it implicitly and stays exported so `cmd/api/main.go` can construct it. The same applies to cross-domain access (e.g. `billing` and `payment` reading registration data). Services must not import `pgx`/`pgxpool`, hold a pool, or pass `pgx.Tx`. Handlers call services only — never `internal/*/storage`. When several writes must be atomic, inject `commondb.TxRunner` and run work inside `WithTx(ctx, func(ctx context.Context) error) error`; storage reads the transaction from `ctx` via `commondb.Conn` / `commondb.Begin` (nested `Begin` uses savepoints). **`WithTx` returns `fn`'s error unchanged** (sentinels and `*apperr.Error` keep their identity). **Never** reuse a `WithTx` context from another goroutine or after `fn` returns; side effects after commit (email, sheets, SSE) use the outer `ctx`. `internal/archtest` (`TestOnlyStorageTouchesPgx`) enforces that only `*/storage` and `internal/testhelper` import pgx or storage packages.
 
 6. **No flat feature packages.** Do not put handlers, services, repos, and domain types in one `internal/foo/` package. Do not reintroduce `Mount()` per feature — add routes in `internal/http/router/router.go`.
 
@@ -138,23 +138,27 @@ Optional: if one route needs different wording, branch with `errors.Is(err, regi
 ## Service pattern
 
 ```go
-type groupRepo interface {
+type txRunner interface {
 	WithTx(ctx context.Context, fn func(ctx context.Context) error) error
-	InsertGroup(ctx context.Context, req domain.SubmitRequest, total int, currency string) (string, error)
+}
+
+type groupRepo interface {
+	InsertGroup(ctx context.Context, req domain.SubmitRequest, total int, currency string, isFree, paidInFull bool) (string, error)
 	InsertCamper(ctx context.Context, groupID string, c domain.CamperDTO) error
 }
 
 type Service struct {
 	repo groupRepo
+	tx   txRunner
 }
 
 func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain.SubmitResponse, error) {
 	if err := Validate(req); err != nil {
 		return nil, err
 	}
-	// business logic …
-	err := s.repo.WithTx(ctx, func(ctx context.Context) error {
-		groupID, err := s.repo.InsertGroup(ctx, req, total, currency)
+	var resp *domain.SubmitResponse
+	err := s.tx.WithTx(ctx, func(ctx context.Context) error {
+		groupID, err := s.repo.InsertGroup(ctx, req, total, currency, false, false)
 		if err != nil {
 			return err
 		}
@@ -163,23 +167,28 @@ func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain
 				return err
 			}
 		}
+		resp = &domain.SubmitResponse{GroupID: groupID}
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("submit registration: %w", err)
+		return nil, err
 	}
 	return resp, nil
 }
 ```
 
-The service decides what must be atomic; storage implements `WithTx` by carrying the transaction in `ctx`, so no pgx type appears in the service.
+The service decides what must be atomic; `commondb.TxRunner` carries the transaction in `ctx` for storage, so no pgx type appears in the service.
 
 ## Storage pattern
 
 ```go
+func (r *Repository) db(ctx context.Context) commondb.Querier {
+	return commondb.Conn(ctx, r.pool)
+}
+
 func (r *Repository) FindGroupByID(ctx context.Context, groupID string) (*domain.Group, error) {
 	const q = `SELECT ` + groupSelectCols + ` FROM registration_groups WHERE id = $1`
-	g, err := scanGroup(r.pool.QueryRow(ctx, q, groupID))
+	g, err := scanGroup(r.db(ctx).QueryRow(ctx, q, groupID))
 	// handle pgx.ErrNoRows → (nil, nil) where appropriate
 	return &g, err
 }
@@ -193,7 +202,7 @@ func (r *Repository) FindGroupByID(ctx context.Context, groupID string) (*domain
 | Decode request body | `pagasacentre/backend/pkg/commonlibrary/request` |
 | Domain errors | `pagasacentre/backend/pkg/commonlibrary/apperr` |
 | API errors (handlers only) | `pagasacentre/backend/pkg/commonlibrary/errors` |
-| DB pool / migrations | `pagasacentre/backend/pkg/commonlibrary/db` |
+| DB pool / migrations / `TxRunner` | `pagasacentre/backend/pkg/commonlibrary/db` |
 | CORS, timeouts | `pagasacentre/backend/internal/middleware` |
 | Admin session | `pagasacentre/backend/internal/middleware` (`AuthConfig`, `RequireAdmin`) |
 

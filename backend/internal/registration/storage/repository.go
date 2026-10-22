@@ -9,6 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	commondb "pagasacentre/backend/pkg/commonlibrary/db"
+
 	"pagasacentre/backend/internal/registration/domain"
 )
 
@@ -64,19 +66,19 @@ func scanCamper(row pgx.Row) (domain.Camper, error) {
 	return c, err
 }
 
-// Pool exposes the underlying pool for callers that need to manage their own
-// transactions (e.g. the payment webhook service which spans repositories).
-func (r *Repository) Pool() *pgxpool.Pool { return r.pool }
+func (r *Repository) db(ctx context.Context) commondb.Querier {
+	return commondb.Conn(ctx, r.pool)
+}
 
-// InsertGroup inserts a registration_groups row inside tx and returns its UUID.
-func (r *Repository) InsertGroup(ctx context.Context, tx pgx.Tx, req domain.SubmitRequest, totalPence int, currency string, isFree, paidInFull bool) (string, error) {
+// InsertGroup inserts a registration_groups row and returns its UUID.
+func (r *Repository) InsertGroup(ctx context.Context, req domain.SubmitRequest, totalPence int, currency string, isFree, paidInFull bool) (string, error) {
 	const q = `
 		INSERT INTO registration_groups (
 			contact_first_name, contact_last_name, contact_email, contact_phone,
 			total_amount_pence, currency, is_free, paid_in_full_at_registration
 		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`
 	var id string
-	err := tx.QueryRow(ctx, q,
+	err := r.db(ctx).QueryRow(ctx, q,
 		req.Contact.FirstName, req.Contact.LastName, req.Contact.Email, req.Contact.Phone,
 		totalPence, currency, isFree, paidInFull,
 	).Scan(&id)
@@ -87,7 +89,7 @@ func (r *Repository) InsertGroup(ctx context.Context, tx pgx.Tx, req domain.Subm
 }
 
 // InsertCamper inserts a registrations row inside tx.
-func (r *Repository) InsertCamper(ctx context.Context, tx pgx.Tx, groupID string, c domain.CamperDTO) error {
+func (r *Repository) InsertCamper(ctx context.Context, groupID string, c domain.CamperDTO) error {
 	const q = `
 		INSERT INTO registrations (
 			group_id, is_main_contact, first_name, last_name, gender, age,
@@ -127,7 +129,7 @@ func (r *Repository) InsertCamper(ctx context.Context, tx pgx.Tx, groupID string
 		needsCatering = c.Attendance.NeedsCatering
 	}
 
-	_, err := tx.Exec(ctx, q,
+	_, err := r.db(ctx).Exec(ctx, q,
 		groupID, c.IsMainContact, c.FirstName, c.LastName, c.Gender, c.Age,
 		c.CellLeaderName, c.IsCellLeader, c.Attendance.Type,
 		shirtSize, dietary, needsCoach,
@@ -141,8 +143,8 @@ func (r *Repository) InsertCamper(ctx context.Context, tx pgx.Tx, groupID string
 }
 
 // SetStripeSession records the Stripe Checkout session id on the group.
-func (r *Repository) SetStripeSession(ctx context.Context, tx pgx.Tx, groupID, sessionID string) error {
-	_, err := tx.Exec(ctx,
+func (r *Repository) SetStripeSession(ctx context.Context, groupID, sessionID string) error {
+	_, err := r.db(ctx).Exec(ctx,
 		`UPDATE registration_groups SET stripe_session_id = $1 WHERE id = $2`,
 		sessionID, groupID)
 	if err != nil {
@@ -152,12 +154,12 @@ func (r *Repository) SetStripeSession(ctx context.Context, tx pgx.Tx, groupID, s
 }
 
 // GetGroupBySession reads a group by stripe_session_id and locks it FOR UPDATE.
-func (r *Repository) GetGroupBySession(ctx context.Context, tx pgx.Tx, sessionID string) (*domain.Group, error) {
+func (r *Repository) GetGroupBySession(ctx context.Context, sessionID string) (*domain.Group, error) {
 	const q = `SELECT ` + groupSelectCols + `
 		  FROM registration_groups
 		 WHERE stripe_session_id = $1
 		   FOR UPDATE`
-	g, err := scanGroup(tx.QueryRow(ctx, q, sessionID))
+	g, err := scanGroup(r.db(ctx).QueryRow(ctx, q, sessionID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -174,7 +176,7 @@ func (r *Repository) FindGroupBySessionID(ctx context.Context, sessionID string)
 	const q = `SELECT ` + groupSelectCols + `
 		  FROM registration_groups
 		 WHERE stripe_session_id = $1`
-	g, err := scanGroup(r.pool.QueryRow(ctx, q, sessionID))
+	g, err := scanGroup(r.db(ctx).QueryRow(ctx, q, sessionID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -191,7 +193,7 @@ func (r *Repository) FindGroupByID(ctx context.Context, groupID string) (*domain
 	const q = `SELECT ` + groupSelectCols + `
 		  FROM registration_groups
 		 WHERE id = $1`
-	g, err := scanGroup(r.pool.QueryRow(ctx, q, groupID))
+	g, err := scanGroup(r.db(ctx).QueryRow(ctx, q, groupID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -204,8 +206,8 @@ func (r *Repository) FindGroupByID(ctx context.Context, groupID string) (*domain
 // MarkPaid transitions the group to 'paid' and stamps paid_at + payment intent.
 // paymentIntentID may be empty (used by the £0 day-pass-only Submit path where
 // no Stripe session was ever created).
-func (r *Repository) MarkPaid(ctx context.Context, tx pgx.Tx, groupID, paymentIntentID string) error {
-	_, err := tx.Exec(ctx,
+func (r *Repository) MarkPaid(ctx context.Context, groupID, paymentIntentID string) error {
+	_, err := r.db(ctx).Exec(ctx,
 		`UPDATE registration_groups
 		    SET payment_status = 'paid',
 		        stripe_payment_intent_id = COALESCE($1, stripe_payment_intent_id),
@@ -220,8 +222,8 @@ func (r *Repository) MarkPaid(ctx context.Context, tx pgx.Tx, groupID, paymentIn
 
 // MarkPaidInFull transitions a prepaid registration group to fully settled:
 // payment paid plus billing balance_paid.
-func (r *Repository) MarkPaidInFull(ctx context.Context, tx pgx.Tx, groupID, paymentIntentID string, coachIncluded bool) error {
-	_, err := tx.Exec(ctx,
+func (r *Repository) MarkPaidInFull(ctx context.Context, groupID, paymentIntentID string, coachIncluded bool) error {
+	_, err := r.db(ctx).Exec(ctx,
 		`UPDATE registration_groups
 		    SET payment_status = 'paid',
 		        stripe_payment_intent_id = COALESCE($1, stripe_payment_intent_id),
@@ -239,7 +241,7 @@ func (r *Repository) MarkPaidInFull(ctx context.Context, tx pgx.Tx, groupID, pay
 
 // MarkStatus changes payment_status (used by admin + cancelled webhook).
 func (r *Repository) MarkStatus(ctx context.Context, groupID, status string) error {
-	tag, err := r.pool.Exec(ctx,
+	tag, err := r.db(ctx).Exec(ctx,
 		`UPDATE registration_groups SET payment_status = $1 WHERE id = $2`,
 		status, groupID)
 	if err != nil {
@@ -255,7 +257,7 @@ func (r *Repository) MarkStatus(ctx context.Context, groupID, status string) err
 // Used by the admin dashboard when, e.g., someone mistyped their email at
 // registration. Does not touch payment or billing state.
 func (r *Repository) UpdateContact(ctx context.Context, groupID, firstName, lastName, email, phone string) error {
-	tag, err := r.pool.Exec(ctx,
+	tag, err := r.db(ctx).Exec(ctx,
 		`UPDATE registration_groups
 		    SET contact_first_name = $1,
 		        contact_last_name  = $2,
@@ -272,17 +274,6 @@ func (r *Repository) UpdateContact(ctx context.Context, groupID, firstName, last
 	return nil
 }
 
-// MarkStatusInTx is MarkStatus but inside an existing transaction.
-func (r *Repository) MarkStatusInTx(ctx context.Context, tx pgx.Tx, groupID, status string) error {
-	_, err := tx.Exec(ctx,
-		`UPDATE registration_groups SET payment_status = $1 WHERE id = $2`,
-		status, groupID)
-	if err != nil {
-		return fmt.Errorf("update payment_status: %w", err)
-	}
-	return nil
-}
-
 // List returns groups (newest first), optionally filtered by status.
 func (r *Repository) List(ctx context.Context, f domain.ListFilter) ([]domain.Group, error) {
 	args := []any{}
@@ -293,7 +284,7 @@ func (r *Repository) List(ctx context.Context, f domain.ListFilter) ([]domain.Gr
 	}
 	q += ` ORDER BY created_at DESC`
 
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.db(ctx).Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list groups: %w", err)
 	}
@@ -328,7 +319,7 @@ func (r *Repository) campersByGroupIDs(ctx context.Context, groupIDs []string) (
 		  FROM registrations
 		 WHERE group_id = ANY($1)
 		 ORDER BY group_id, is_main_contact DESC, created_at`
-	rows, err := r.pool.Query(ctx, q, groupIDs)
+	rows, err := r.db(ctx).Query(ctx, q, groupIDs)
 	if err != nil {
 		return nil, fmt.Errorf("campers by group: %w", err)
 	}

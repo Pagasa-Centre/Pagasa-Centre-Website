@@ -73,7 +73,7 @@ func listEvents(rec *adminlog.Recorder) http.HandlerFunc {
 		}
 		events, err := rec.List(r.Context(), limit, before)
 		if err != nil {
-			commonerrors.WriteError(w, commonerrors.Internal(err.Error()))
+			commonerrors.WriteError(w, err)
 			return
 		}
 		if events == nil {

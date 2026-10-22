@@ -7,33 +7,29 @@ import (
 	"log"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/registration/domain"
-	"pagasacentre/backend/pkg/commonlibrary/apperr"
-	"pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/sheets"
+	"pagasacentre/backend/pkg/commonlibrary/apperr"
 )
 
 // Service handles Stripe webhook events. As of v2 it is a thin layer that
 // transitions a registration_group to 'paid' and fires the confirmation email.
 // Race-loser refund logic was deleted along with accommodation capacity caps.
 type Service struct {
-	pool          *pgxpool.Pool
-	regRepo       *storage.Repository
+	tx            txRunner
+	regRepo       regRepo
 	mailer        email.Mailer
 	sheets        sheets.Sync
 	publicBaseURL string
 }
 
-func NewService(pool *pgxpool.Pool, regRepo *storage.Repository, mailer email.Mailer, sheetSync sheets.Sync, publicBaseURL string) *Service {
+func NewService(tx txRunner, regRepo regRepo, mailer email.Mailer, sheetSync sheets.Sync, publicBaseURL string) *Service {
 	if sheetSync == nil {
 		sheetSync = sheets.NewNoopSync()
 	}
 	return &Service{
-		pool:          pool,
+		tx:            tx,
 		regRepo:       regRepo,
 		mailer:        mailer,
 		sheets:        sheetSync,
@@ -52,51 +48,40 @@ type CheckoutCompleted struct {
 // deposit confirmation email. Idempotent: replays after the first successful
 // run are no-ops (email is not re-sent on the same group).
 func (s *Service) HandleCheckoutCompleted(ctx context.Context, evt CheckoutCompleted) error {
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback(ctx)
-		}
-	}()
-
-	group, err := s.regRepo.GetGroupBySession(ctx, tx, evt.SessionID)
-	if err != nil {
-		return err
-	}
-	if group == nil {
-		return fmt.Errorf("no registration group for session %s", evt.SessionID)
-	}
-	if group.PaymentStatus != domain.PaymentPending {
-		return nil // already processed — webhook replays are expected
-	}
-
-	if group.PaidInFullAtRegistration {
-		coachIncluded, err := s.groupHasCoachEligible(ctx, group.ID)
+	var group *domain.Group
+	processed := false
+	err := s.tx.WithTx(ctx, func(txCtx context.Context) error {
+		g, err := s.regRepo.GetGroupBySession(txCtx, evt.SessionID)
 		if err != nil {
 			return err
 		}
-		if err := s.regRepo.MarkPaidInFull(ctx, tx, group.ID, evt.PaymentIntentID, coachIncluded); err != nil {
+		if g == nil {
+			return fmt.Errorf("no registration group for session %s", evt.SessionID)
+		}
+		if g.PaymentStatus != domain.PaymentPending {
+			return nil
+		}
+		if g.PaidInFullAtRegistration {
+			coachIncluded, err := s.groupHasCoachEligible(txCtx, g.ID)
+			if err != nil {
+				return err
+			}
+			if err := s.regRepo.MarkPaidInFull(txCtx, g.ID, evt.PaymentIntentID, coachIncluded); err != nil {
+				return err
+			}
+		} else if err := s.regRepo.MarkPaid(txCtx, g.ID, evt.PaymentIntentID); err != nil {
 			return err
 		}
-	} else if err := s.regRepo.MarkPaid(ctx, tx, group.ID, evt.PaymentIntentID); err != nil {
+		group = g
+		processed = true
+		return nil
+	})
+	if err != nil || !processed || group == nil {
 		return err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return err
-	}
-	committed = true
-
-	// MarkPaid set payment_status='paid' and paid_at=now() in the DB. Mirror
-	// that into the in-memory group so sendConfirmationEmail + syncToSheet
-	// see consistent data without an extra round-trip.
 	now := time.Now().UTC()
 	group.PaymentStatus = domain.PaymentPaid
 	group.PaidAt = &now
-
 	s.sendConfirmationEmail(ctx, group)
 	s.syncToSheet(ctx, group)
 	return nil
@@ -162,23 +147,16 @@ func rowsFromGroup(g *domain.Group, campers []domain.Camper) []sheets.Row {
 // HandleCheckoutExpired marks a group as cancelled when the Stripe session
 // expires without payment.
 func (s *Service) HandleCheckoutExpired(ctx context.Context, sessionID string) error {
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	group, err := s.regRepo.GetGroupBySession(ctx, tx, sessionID)
-	if err != nil {
-		return err
-	}
-	if group == nil || group.PaymentStatus != domain.PaymentPending {
-		return nil
-	}
-	if err := s.regRepo.MarkStatusInTx(ctx, tx, group.ID, domain.PaymentCancelled); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	return s.tx.WithTx(ctx, func(txCtx context.Context) error {
+		group, err := s.regRepo.GetGroupBySession(txCtx, sessionID)
+		if err != nil {
+			return err
+		}
+		if group == nil || group.PaymentStatus != domain.PaymentPending {
+			return nil
+		}
+		return s.regRepo.MarkStatus(txCtx, group.ID, domain.PaymentCancelled)
+	})
 }
 
 // sendConfirmationEmail dispatches the deposit confirmation. Failure is

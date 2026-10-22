@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"pagasacentre/backend/internal/registration/domain"
+	commondb "pagasacentre/backend/pkg/commonlibrary/db"
 )
 
 // checkVersion returns domain.ErrVersionConflict if meta expects a version that no longer matches.
@@ -48,7 +49,7 @@ func stampExec(ctx context.Context, q pgx.Tx, groupID string, meta domain.Action
 	return nil
 }
 
-func setCamperAllocationsTx(ctx context.Context, tx pgx.Tx, groupID string, allocs []CamperAllocation) error {
+func setCamperAllocationsTx(ctx context.Context, tx pgx.Tx, groupID string, allocs []domain.CamperAllocation) error {
 	for _, a := range allocs {
 		var unitCode any
 		if strings.TrimSpace(a.AllocatedUnitCode) != "" {
@@ -72,14 +73,14 @@ func setCamperAllocationsTx(ctx context.Context, tx pgx.Tx, groupID string, allo
 }
 
 // AllocateGroup saves placements and sets billing_status=allocated atomically.
-func (r *Repository) AllocateGroup(ctx context.Context, groupID string, allocs []CamperAllocation, meta domain.ActionMeta) error {
-	tx, err := r.pool.Begin(ctx)
+func (r *Repository) AllocateGroup(ctx context.Context, groupID string, allocs []domain.CamperAllocation, meta domain.ActionMeta) error {
+	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	g, err := r.getGroupByIDForUpdate(ctx, tx, groupID)
 	if err != nil {
 		return err
 	}
@@ -100,13 +101,13 @@ func (r *Repository) AllocateGroup(ctx context.Context, groupID string, allocs [
 
 // UnallocateGroup clears placements and returns billing_status to none.
 func (r *Repository) UnallocateGroup(ctx context.Context, groupID string, meta domain.ActionMeta) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	g, err := r.getGroupByIDForUpdate(ctx, tx, groupID)
 	if err != nil {
 		return err
 	}
@@ -133,13 +134,13 @@ func (r *Repository) UnallocateGroup(ctx context.Context, groupID string, meta d
 
 // ConfirmFreeMeta marks a church-sponsored group as fully confirmed (no invoice).
 func (r *Repository) ConfirmFreeMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	g, err := r.getGroupByIDForUpdate(ctx, tx, groupID)
 	if err != nil {
 		return err
 	}
@@ -165,13 +166,13 @@ func (r *Repository) ConfirmFreeMeta(ctx context.Context, groupID string, meta d
 // attribution. coachIncluded records whether the coach fee was folded into this
 // balance invoice, so we never also send a separate coach invoice for the group.
 func (r *Repository) SetInvoiceDetailsMeta(ctx context.Context, groupID, invoiceID string, dueAt time.Time, coachIncluded bool, meta domain.ActionMeta) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	g, err := r.getGroupByIDForUpdate(ctx, tx, groupID)
 	if err != nil {
 		return err
 	}
@@ -191,13 +192,13 @@ func (r *Repository) SetInvoiceDetailsMeta(ctx context.Context, groupID, invoice
 // SetCoachInvoiceMeta records a separate coach invoice id/due without touching
 // billing_status (coach is tracked in parallel to the balance lifecycle).
 func (r *Repository) SetCoachInvoiceMeta(ctx context.Context, groupID, coachInvoiceID string, dueAt time.Time, meta domain.ActionMeta) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	g, err := r.getGroupByIDForUpdate(ctx, tx, groupID)
 	if err != nil {
 		return err
 	}
@@ -222,13 +223,13 @@ func (r *Repository) MarkCoachFeePaidMeta(ctx context.Context, groupID string, m
 
 // WaiveCoachFeeMeta marks the coach fee waived and clears any separate coach invoice fields.
 func (r *Repository) WaiveCoachFeeMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	g, err := r.getGroupByIDForUpdate(ctx, tx, groupID)
 	if err != nil {
 		return err
 	}
@@ -254,13 +255,13 @@ func (r *Repository) UnwaiveCoachFeeMeta(ctx context.Context, groupID string, me
 
 // ClearInvoiceAndReleaseMeta voids invoice state, releases allocation, stamps attribution.
 func (r *Repository) ClearInvoiceAndReleaseMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	g, err := r.getGroupByIDForUpdate(ctx, tx, groupID)
 	if err != nil {
 		return err
 	}
@@ -290,13 +291,13 @@ func (r *Repository) ClearInvoiceAndReleaseMeta(ctx context.Context, groupID str
 // non-empty, reverts the group's billing_status and clears invoice fields
 // (used after voiding a now-stale invoice).
 func (r *Repository) DeleteCamperMeta(ctx context.Context, groupID, camperID, newBillingStatus string, meta domain.ActionMeta) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	g, err := r.getGroupByIDForUpdate(ctx, tx, groupID)
 	if err != nil {
 		return err
 	}
@@ -326,32 +327,24 @@ func (r *Repository) DeleteCamperMeta(ctx context.Context, groupID, camperID, ne
 	return tx.Commit(ctx)
 }
 
-// DayPassFields holds day-visitor details applied during a full-week conversion.
-type DayPassFields struct {
-	Days           []string
-	TshirtOption   string
-	ShirtSize      *string
-	NeedsCatering  bool
-	Dietary        *string
-}
-
+// domain.DayPassFields holds day-visitor details applied during a full-week conversion.
 // ConvertCamperToDayPassMeta rewrites one camper as a day-visitor, clearing
 // accommodation/coach/allocation and recording any deposit credit applied in Stripe.
 func (r *Repository) ConvertCamperToDayPassMeta(
 	ctx context.Context,
 	groupID, camperID string,
-	dp DayPassFields,
+	dp domain.DayPassFields,
 	depositCreditPence int,
 	newBillingStatus string,
 	meta domain.ActionMeta,
 ) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	g, err := r.getGroupByIDForUpdate(ctx, tx, groupID)
 	if err != nil {
 		return err
 	}
@@ -409,13 +402,13 @@ func (r *Repository) UpdateDayPassCamperMeta(
 	shirtSize, dietary *string,
 	meta domain.ActionMeta,
 ) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	g, err := r.getGroupByIDForUpdate(ctx, tx, groupID)
 	if err != nil {
 		return err
 	}
@@ -454,13 +447,13 @@ func (r *Repository) UpdateCamperCoachMeta(
 	clearCoachInvoice bool,
 	meta domain.ActionMeta,
 ) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	g, err := r.getGroupByIDForUpdate(ctx, tx, groupID)
 	if err != nil {
 		return err
 	}
@@ -494,13 +487,13 @@ func (r *Repository) UpdateCamperCoachMeta(
 // via FK. Version is checked before delete so stale dashboards cannot remove a
 // concurrently modified group.
 func (r *Repository) DeleteGroupMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	g, err := r.getGroupByIDForUpdate(ctx, tx, groupID)
 	if err != nil {
 		return err
 	}
@@ -532,14 +525,14 @@ func (r *Repository) DeleteGroupMeta(ctx context.Context, groupID string, meta d
 // a camper to a day visitor also zero what is owed, but no money arrives, so
 // neither may write the paid column.
 func (r *Repository) MarkBalancePaidMeta(ctx context.Context, groupID string, meta domain.ActionMeta) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
 	if meta.EnforceVersion() {
-		g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+		g, err := r.getGroupByIDForUpdate(ctx, tx, groupID)
 		if err != nil {
 			return err
 		}
@@ -563,13 +556,13 @@ func (r *Repository) MarkBalancePaidMeta(ctx context.Context, groupID string, me
 
 // ExtendInvoiceDueAtMeta updates due date with optional version check.
 func (r *Repository) ExtendInvoiceDueAtMeta(ctx context.Context, groupID string, dueAt time.Time, meta domain.ActionMeta) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+	g, err := r.getGroupByIDForUpdate(ctx, tx, groupID)
 	if err != nil {
 		return err
 	}
@@ -590,13 +583,13 @@ func (r *Repository) ExtendInvoiceDueAtMeta(ctx context.Context, groupID string,
 }
 
 func (r *Repository) stampGroupPool(ctx context.Context, groupID string, meta domain.ActionMeta, extraSQL string, extraArgs ...any) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 	if meta.EnforceVersion() {
-		g, err := r.GetGroupByIDForUpdate(ctx, tx, groupID)
+		g, err := r.getGroupByIDForUpdate(ctx, tx, groupID)
 		if err != nil {
 			return err
 		}

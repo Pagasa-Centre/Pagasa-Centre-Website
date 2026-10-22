@@ -12,12 +12,12 @@ import (
 	"pagasacentre/backend/internal/admin"
 	"pagasacentre/backend/internal/adminlog"
 	"pagasacentre/backend/internal/billing"
-	campstorage "pagasacentre/backend/internal/camp/storage"
+	campdomain "pagasacentre/backend/internal/camp/domain"
+	"pagasacentre/backend/internal/camp"
 	"pagasacentre/backend/internal/middleware"
 	"pagasacentre/backend/internal/registration"
 	"pagasacentre/backend/internal/registration/domain"
-	regstorage "pagasacentre/backend/internal/registration/storage"
-	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
+		commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 	"pagasacentre/backend/pkg/commonlibrary/render"
 	"pagasacentre/backend/pkg/commonlibrary/request"
 )
@@ -28,14 +28,33 @@ type contactService interface {
 	UpdateGroupContact(ctx context.Context, groupID, firstName, lastName, email, phone string, resendConfirmation bool) error
 }
 
+type groupFinder interface {
+	FindGroup(ctx context.Context, groupID string) (*domain.Group, error)
+	CampersForGroup(ctx context.Context, groupID string) ([]domain.Camper, error)
+}
+
+type registrationLister interface {
+	ListGroupsWithCampers(ctx context.Context, f domain.ListFilterBilling) ([]domain.Group, map[string][]domain.Camper, error)
+}
+
+type paymentStatusSetter interface {
+	SetPaymentStatus(ctx context.Context, groupID, status string) error
+}
+
+type campConfigService interface {
+	GetConfig(ctx context.Context) (campdomain.Config, error)
+	SetRegistrationsOpen(ctx context.Context, open bool) error
+	SetRegistrationPaymentMode(ctx context.Context, mode string) error
+	UpdatePrice(ctx context.Context, code string, amountPence int) error
+}
+
 // Mount wires admin routes onto r. Public login routes are outside the auth
 // middleware; everything else requires a valid session cookie.
 func Mount(
 	r chi.Router,
 	auth middleware.AuthConfig,
-	regRepo *regstorage.Repository,
-	campRepo *campstorage.Repository,
 	regSvc *registration.Service,
+	campSvc *camp.Service,
 	billSvc *billing.Service,
 	contactSvc contactService,
 	rec *adminlog.Recorder,
@@ -49,49 +68,49 @@ func Mount(
 			return middleware.RequireAdmin(auth, next)
 		})
 
-		r.Get("/registrations", listRegistrationsJSON(regRepo))
-		r.Get("/registrations.csv", listRegistrationsCSV(regRepo))
-		r.Patch("/registrations/{groupID}", patchRegistration(regRepo))
+		r.Get("/registrations", listRegistrationsJSON(regSvc))
+		r.Get("/registrations.csv", listRegistrationsCSV(regSvc))
+		r.Patch("/registrations/{groupID}", patchRegistration(regSvc))
 		r.Patch("/registrations/{groupID}/contact", patchContact(contactSvc, rec))
-		r.Put("/prices/{code}", putPrice(campRepo, rec))
+		r.Put("/prices/{code}", putPrice(campSvc, rec))
 
-		r.Get("/camp-config", getCampConfig(campRepo))
-		r.Put("/registrations-open", putRegistrationsOpen(campRepo, rec))
-		r.Put("/registration-payment-mode", putRegistrationPaymentMode(campRepo, regSvc, rec))
+		r.Get("/camp-config", getCampConfig(campSvc))
+		r.Put("/registrations-open", putRegistrationsOpen(campSvc, rec))
+		r.Put("/registration-payment-mode", putRegistrationPaymentMode(campSvc, regSvc, rec))
 
-		r.Get("/accommodations", listAccommodationTypes(regRepo))
-		r.Put("/accommodations/{code}/availability", putAccommodationAvailability(regRepo, rec))
-		r.Get("/accommodation-units", listAccommodationUnits(regRepo))
+		r.Get("/accommodations", listAccommodationTypes(regSvc))
+		r.Put("/accommodations/{code}/availability", putAccommodationAvailability(regSvc, rec))
+		r.Get("/accommodation-units", listAccommodationUnits(regSvc))
 		r.Get("/events", listEvents(rec))
-		r.Put("/registrations/{groupID}/allocation", putAllocation(billSvc, rec, regRepo))
-		r.Post("/registrations/{groupID}/unallocate", postUnallocate(billSvc, rec, regRepo))
-		r.Post("/registrations/{groupID}/invoice", postInvoice(billSvc, rec, regRepo))
-		r.Post("/registrations/invoice-bulk", postInvoiceBulk(billSvc, rec, regRepo))
-		r.Post("/registrations/{groupID}/coach-invoice", postCoachInvoice(billSvc, rec, regRepo))
-		r.Post("/registrations/coach-invoice-bulk", postCoachInvoiceBulk(billSvc, rec, regRepo))
-		r.Post("/registrations/{groupID}/coach-invoice/waive", postWaiveCoachFee(billSvc, rec, regRepo))
-		r.Post("/registrations/{groupID}/coach-invoice/unwaive", postUnwaiveCoachFee(billSvc, rec, regRepo))
-		r.Post("/registrations/{groupID}/mark-paid", postMarkPaid(billSvc, rec, regRepo))
-		r.Post("/registrations/{groupID}/release", postRelease(billSvc, rec, regRepo, false))
-		r.Post("/registrations/{groupID}/cancel", postRelease(billSvc, rec, regRepo, true))
+		r.Put("/registrations/{groupID}/allocation", putAllocation(billSvc, rec, regSvc))
+		r.Post("/registrations/{groupID}/unallocate", postUnallocate(billSvc, rec, regSvc))
+		r.Post("/registrations/{groupID}/invoice", postInvoice(billSvc, rec, regSvc))
+		r.Post("/registrations/invoice-bulk", postInvoiceBulk(billSvc, rec, regSvc))
+		r.Post("/registrations/{groupID}/coach-invoice", postCoachInvoice(billSvc, rec, regSvc))
+		r.Post("/registrations/coach-invoice-bulk", postCoachInvoiceBulk(billSvc, rec, regSvc))
+		r.Post("/registrations/{groupID}/coach-invoice/waive", postWaiveCoachFee(billSvc, rec, regSvc))
+		r.Post("/registrations/{groupID}/coach-invoice/unwaive", postUnwaiveCoachFee(billSvc, rec, regSvc))
+		r.Post("/registrations/{groupID}/mark-paid", postMarkPaid(billSvc, rec, regSvc))
+		r.Post("/registrations/{groupID}/release", postRelease(billSvc, rec, regSvc, false))
+		r.Post("/registrations/{groupID}/cancel", postRelease(billSvc, rec, regSvc, true))
 		r.Post("/registrations/{groupID}/delete", deleteRegistration(billSvc, rec))
-		r.Post("/registrations/{groupID}/campers/{camperID}/delete", deleteCamper(billSvc, rec, regRepo))
-		r.Post("/registrations/{groupID}/campers/{camperID}/convert-day-visitor", postConvertDayVisitor(billSvc, rec, regRepo))
+		r.Post("/registrations/{groupID}/campers/{camperID}/delete", deleteCamper(billSvc, rec, regSvc))
+		r.Post("/registrations/{groupID}/campers/{camperID}/convert-day-visitor", postConvertDayVisitor(billSvc, rec, regSvc))
 		r.Patch("/registrations/{groupID}/campers/{camperID}/day-pass", patchDayPassCamper(billSvc, rec))
 		r.Patch("/registrations/{groupID}/campers/{camperID}/coach", patchCamperCoach(billSvc, rec))
 		r.Patch("/registrations/{groupID}/campers/{camperID}", patchCamper(billSvc, rec))
 		r.Post("/registrations/{groupID}/campers", postAddCamper(billSvc, rec))
 		r.Post("/registrations/{groupID}/campers/{camperID}/make-main-contact", postMakeMainContact(billSvc, rec))
 		r.Post("/registrations/{groupID}/campers/{camperID}/waive-deposit", postWaiveCamperDeposit(billSvc, rec))
-		r.Post("/registrations/{groupID}/invoice/resend", postResendInvoice(billSvc, rec, regRepo))
+		r.Post("/registrations/{groupID}/invoice/resend", postResendInvoice(billSvc, rec, regSvc))
 		r.Post("/registrations/sheet-resync-all", postResyncAllSheets(billSvc, rec))
-		r.Patch("/registrations/{groupID}/invoice-due", patchInvoiceDue(billSvc, rec, regRepo))
+		r.Patch("/registrations/{groupID}/invoice-due", patchInvoiceDue(billSvc, rec, regSvc))
 		r.Post("/billing/sweep", postBillingSweep(billSvc, rec))
 
 		r.Post("/free-codes", postGenerateFreeCode(auth, regSvc, rec))
 		r.Get("/free-codes", getFreeCodes(regSvc))
 		r.Post("/free-codes/{id}/revoke", postRevokeFreeCode(regSvc, rec))
-		r.Post("/registrations/{groupID}/confirm-free", postConfirmFree(billSvc, rec, regRepo))
+		r.Post("/registrations/{groupID}/confirm-free", postConfirmFree(billSvc, rec, regSvc))
 	})
 }
 
@@ -100,34 +119,21 @@ type groupView struct {
 	Campers []domain.Camper `json:"campers"`
 }
 
-func listRegistrationsJSON(repo *regstorage.Repository) http.HandlerFunc {
+func listRegistrationsJSON(svc registrationLister) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		f := domain.ListFilterBilling{
 			PaymentStatus: r.URL.Query().Get("status"),
 			BillingStatus: r.URL.Query().Get("billing_status"),
 		}
-		groups, err := repo.ListWithBilling(ctx, f)
+		groups, byGroup, err := svc.ListGroupsWithCampers(ctx, f)
 		if err != nil {
-			commonerrors.WriteError(w, commonerrors.Internal(err.Error()))
+			commonerrors.WriteError(w, err)
 			return
 		}
 		if len(groups) == 0 {
 			render.Json(w, http.StatusOK, map[string]any{"groups": []groupView{}})
 			return
-		}
-		ids := make([]string, len(groups))
-		for i, g := range groups {
-			ids[i] = g.ID
-		}
-		campers, err := repo.CampersForGroups(ctx, ids)
-		if err != nil {
-			commonerrors.WriteError(w, commonerrors.Internal(err.Error()))
-			return
-		}
-		byGroup := map[string][]domain.Camper{}
-		for _, c := range campers {
-			byGroup[c.GroupID] = append(byGroup[c.GroupID], c)
 		}
 		views := make([]groupView, len(groups))
 		for i, g := range groups {
@@ -137,47 +143,29 @@ func listRegistrationsJSON(repo *regstorage.Repository) http.HandlerFunc {
 	}
 }
 
-func listRegistrationsCSV(repo *regstorage.Repository) http.HandlerFunc {
+func listRegistrationsCSV(svc registrationLister) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		groups, err := repo.ListWithBilling(ctx, domain.ListFilterBilling{
+		groups, byGroup, err := svc.ListGroupsWithCampers(ctx, domain.ListFilterBilling{
 			PaymentStatus: r.URL.Query().Get("status"),
 			BillingStatus: r.URL.Query().Get("billing_status"),
 		})
 		if err != nil {
-			commonerrors.WriteError(w, commonerrors.Internal(err.Error()))
+			commonerrors.WriteError(w, err)
 			return
-		}
-		ids := make([]string, len(groups))
-		for i, g := range groups {
-			ids[i] = g.ID
-		}
-		campers, err := repo.CampersForGroups(ctx, ids)
-		if err != nil {
-			commonerrors.WriteError(w, commonerrors.Internal(err.Error()))
-			return
-		}
-		byGroup := map[string][]domain.Camper{}
-		for _, c := range campers {
-			byGroup[c.GroupID] = append(byGroup[c.GroupID], c)
 		}
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 		filename := "registrations-" + time.Now().UTC().Format("20060102-150405") + ".csv"
 		w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 		if err := admin.WriteCSV(w, groups, byGroup); err != nil {
-			commonerrors.WriteError(w, commonerrors.Internal(err.Error()))
+			commonerrors.WriteError(w, err)
 		}
 	}
 }
 
-func patchRegistration(repo *regstorage.Repository) http.HandlerFunc {
+func patchRegistration(svc paymentStatusSetter) http.HandlerFunc {
 	type body struct {
 		PaymentStatus string `json:"payment_status"`
-	}
-	allowed := map[string]struct{}{
-		domain.PaymentPending: {}, domain.PaymentPaid: {},
-		domain.PaymentFailed: {}, domain.PaymentFailedCapacity: {},
-		domain.PaymentRefunded: {}, domain.PaymentCancelled: {},
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		var b body
@@ -185,12 +173,8 @@ func patchRegistration(repo *regstorage.Repository) http.HandlerFunc {
 			commonerrors.WriteError(w, err)
 			return
 		}
-		if _, ok := allowed[b.PaymentStatus]; !ok {
-			commonerrors.WriteError(w, commonerrors.BadRequest("invalid payment_status", nil))
-			return
-		}
-		if err := repo.MarkStatus(r.Context(), chi.URLParam(r, "groupID"), b.PaymentStatus); err != nil {
-			commonerrors.WriteError(w, commonerrors.Internal(err.Error()))
+		if err := svc.SetPaymentStatus(r.Context(), chi.URLParam(r, "groupID"), b.PaymentStatus); err != nil {
+			commonerrors.WriteError(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -253,18 +237,18 @@ func patchContact(svc contactService, rec *adminlog.Recorder) http.HandlerFunc {
 	}
 }
 
-func getCampConfig(repo *campstorage.Repository) http.HandlerFunc {
+func getCampConfig(svc campConfigService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		cfg, err := repo.GetConfig(r.Context())
+		cfg, err := svc.GetConfig(r.Context())
 		if err != nil {
-			commonerrors.WriteError(w, commonerrors.Internal(err.Error()))
+			commonerrors.WriteError(w, err)
 			return
 		}
 		render.Json(w, http.StatusOK, cfg)
 	}
 }
 
-func putRegistrationsOpen(repo *campstorage.Repository, rec *adminlog.Recorder) http.HandlerFunc {
+func putRegistrationsOpen(svc campConfigService, rec *adminlog.Recorder) http.HandlerFunc {
 	type body struct {
 		Open *bool `json:"open"`
 	}
@@ -278,8 +262,8 @@ func putRegistrationsOpen(repo *campstorage.Repository, rec *adminlog.Recorder) 
 			commonerrors.WriteError(w, commonerrors.BadRequest("missing 'open' boolean", nil))
 			return
 		}
-		if err := repo.SetRegistrationsOpen(r.Context(), *b.Open); err != nil {
-			commonerrors.WriteError(w, commonerrors.Internal(err.Error()))
+		if err := svc.SetRegistrationsOpen(r.Context(), *b.Open); err != nil {
+			commonerrors.WriteError(w, err)
 			return
 		}
 		state := "closed"
@@ -292,7 +276,7 @@ func putRegistrationsOpen(repo *campstorage.Repository, rec *adminlog.Recorder) 
 	}
 }
 
-func putRegistrationPaymentMode(campRepo *campstorage.Repository, regSvc *registration.Service, rec *adminlog.Recorder) http.HandlerFunc {
+func putRegistrationPaymentMode(campSvc campConfigService, regSvc *registration.Service, rec *adminlog.Recorder) http.HandlerFunc {
 	type body struct {
 		Mode *string `json:"mode"`
 	}
@@ -317,8 +301,8 @@ func putRegistrationPaymentMode(campRepo *campstorage.Repository, regSvc *regist
 				return
 			}
 		}
-		if err := campRepo.SetRegistrationPaymentMode(r.Context(), mode); err != nil {
-			commonerrors.WriteError(w, commonerrors.Internal(err.Error()))
+		if err := campSvc.SetRegistrationPaymentMode(r.Context(), mode); err != nil {
+			commonerrors.WriteError(w, err)
 			return
 		}
 		label := "deposit mode"
@@ -332,7 +316,7 @@ func putRegistrationPaymentMode(campRepo *campstorage.Repository, regSvc *regist
 	}
 }
 
-func putPrice(repo *campstorage.Repository, rec *adminlog.Recorder) http.HandlerFunc {
+func putPrice(svc campConfigService, rec *adminlog.Recorder) http.HandlerFunc {
 	type body struct {
 		AmountPence int `json:"amount_pence"`
 	}
@@ -346,8 +330,8 @@ func putPrice(repo *campstorage.Repository, rec *adminlog.Recorder) http.Handler
 			commonerrors.WriteError(w, commonerrors.BadRequest("amount_pence must be >= 0", nil))
 			return
 		}
-		if err := repo.UpdatePrice(r.Context(), chi.URLParam(r, "code"), b.AmountPence); err != nil {
-			commonerrors.WriteError(w, commonerrors.Internal(err.Error()))
+		if err := svc.UpdatePrice(r.Context(), chi.URLParam(r, "code"), b.AmountPence); err != nil {
+			commonerrors.WriteError(w, err)
 			return
 		}
 		code := chi.URLParam(r, "code")

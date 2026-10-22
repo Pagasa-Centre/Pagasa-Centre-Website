@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"pagasacentre/backend/internal/registration/domain"
+	commondb "pagasacentre/backend/pkg/commonlibrary/db"
 )
 
 // ListWithBilling is List with optional billing_status filter.
@@ -29,7 +30,7 @@ func (r *Repository) ListWithBilling(ctx context.Context, f domain.ListFilterBil
 	}
 	q += ` ORDER BY created_at DESC`
 
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.db(ctx).Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list groups: %w", err)
 	}
@@ -46,8 +47,8 @@ func (r *Repository) ListWithBilling(ctx context.Context, f domain.ListFilterBil
 	return out, rows.Err()
 }
 
-// GetGroupByIDForUpdate locks a group row for billing mutations.
-func (r *Repository) GetGroupByIDForUpdate(ctx context.Context, tx pgx.Tx, groupID string) (*domain.Group, error) {
+// getGroupByIDForUpdate locks a group row for billing mutations.
+func (r *Repository) getGroupByIDForUpdate(ctx context.Context, tx pgx.Tx, groupID string) (*domain.Group, error) {
 	const q = `SELECT ` + groupSelectCols + `
 		  FROM registration_groups
 		 WHERE id = $1
@@ -67,7 +68,7 @@ func (r *Repository) FindGroupByStripeInvoiceID(ctx context.Context, invoiceID s
 	const q = `SELECT ` + groupSelectCols + `
 		  FROM registration_groups
 		 WHERE stripe_invoice_id = $1`
-	g, err := scanGroup(r.pool.QueryRow(ctx, q, invoiceID))
+	g, err := scanGroup(r.db(ctx).QueryRow(ctx, q, invoiceID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -82,7 +83,7 @@ func (r *Repository) FindGroupByStripeCoachInvoiceID(ctx context.Context, invoic
 	const q = `SELECT ` + groupSelectCols + `
 		  FROM registration_groups
 		 WHERE stripe_coach_invoice_id = $1`
-	g, err := scanGroup(r.pool.QueryRow(ctx, q, invoiceID))
+	g, err := scanGroup(r.db(ctx).QueryRow(ctx, q, invoiceID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -92,22 +93,14 @@ func (r *Repository) FindGroupByStripeCoachInvoiceID(ctx context.Context, invoic
 	return &g, nil
 }
 
-// CamperAllocation is one camper's White Team placement.
-type CamperAllocation struct {
-	CamperID                   string
-	AllocatedAccommodationCode string
-	AllocatedUnitCode          string
-	BilledStripePriceID        string
-}
-
 // SetCamperAllocations updates allocation fields for campers in a group.
-func (r *Repository) SetCamperAllocations(ctx context.Context, groupID string, allocs []CamperAllocation) error {
+func (r *Repository) SetCamperAllocations(ctx context.Context, groupID string, allocs []domain.CamperAllocation) error {
 	for _, a := range allocs {
 		var unitCode any
 		if strings.TrimSpace(a.AllocatedUnitCode) != "" {
 			unitCode = strings.TrimSpace(a.AllocatedUnitCode)
 		}
-		tag, err := r.pool.Exec(ctx,
+		tag, err := r.db(ctx).Exec(ctx,
 			`UPDATE registrations
 			    SET allocated_accommodation_code = $1,
 			        allocated_unit_code = $2,
@@ -126,7 +119,7 @@ func (r *Repository) SetCamperAllocations(ctx context.Context, groupID string, a
 
 // ClearCamperAllocations wipes allocation fields for all campers in a group.
 func (r *Repository) ClearCamperAllocations(ctx context.Context, groupID string) error {
-	_, err := r.pool.Exec(ctx,
+	_, err := r.db(ctx).Exec(ctx,
 		`UPDATE registrations
 		    SET allocated_accommodation_code = NULL,
 		        allocated_unit_code = NULL,
@@ -140,7 +133,7 @@ func (r *Repository) ClearCamperAllocations(ctx context.Context, groupID string)
 
 // SetBillingStatus updates billing_status on a group.
 func (r *Repository) SetBillingStatus(ctx context.Context, groupID, status string) error {
-	tag, err := r.pool.Exec(ctx,
+	tag, err := r.db(ctx).Exec(ctx,
 		`UPDATE registration_groups SET billing_status = $1 WHERE id = $2`,
 		status, groupID)
 	if err != nil {
@@ -154,7 +147,7 @@ func (r *Repository) SetBillingStatus(ctx context.Context, groupID, status strin
 
 // SetStripeCustomerID stores the Stripe Customer id for balance invoicing.
 func (r *Repository) SetStripeCustomerID(ctx context.Context, groupID, customerID string) error {
-	_, err := r.pool.Exec(ctx,
+	_, err := r.db(ctx).Exec(ctx,
 		`UPDATE registration_groups SET stripe_customer_id = $1 WHERE id = $2`,
 		customerID, groupID)
 	if err != nil {
@@ -165,7 +158,7 @@ func (r *Repository) SetStripeCustomerID(ctx context.Context, groupID, customerI
 
 // SetInvoiceDetails records invoice id, due date, and moves to invoiced.
 func (r *Repository) SetInvoiceDetails(ctx context.Context, groupID, invoiceID string, dueAt time.Time) error {
-	_, err := r.pool.Exec(ctx,
+	_, err := r.db(ctx).Exec(ctx,
 		`UPDATE registration_groups
 		    SET stripe_invoice_id = $1,
 		        invoice_due_at = $2,
@@ -180,7 +173,7 @@ func (r *Repository) SetInvoiceDetails(ctx context.Context, groupID, invoiceID s
 
 // MarkBalancePaid sets billing_status and balance_paid_at.
 func (r *Repository) MarkBalancePaid(ctx context.Context, groupID string) error {
-	_, err := r.pool.Exec(ctx,
+	_, err := r.db(ctx).Exec(ctx,
 		`UPDATE registration_groups
 		    SET billing_status = 'balance_paid',
 		        balance_paid_at = $1
@@ -194,7 +187,7 @@ func (r *Repository) MarkBalancePaid(ctx context.Context, groupID string) error 
 
 // ClearInvoiceAndRelease clears invoice fields, sets released, clears allocations.
 func (r *Repository) ClearInvoiceAndRelease(ctx context.Context, groupID string) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := commondb.Begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
@@ -228,7 +221,7 @@ func (r *Repository) ListOverdueInvoiced(ctx context.Context, now time.Time) ([]
 		 WHERE billing_status = 'invoiced'
 		   AND invoice_due_at IS NOT NULL
 		   AND invoice_due_at < $1`
-	rows, err := r.pool.Query(ctx, q, now.UTC())
+	rows, err := r.db(ctx).Query(ctx, q, now.UTC())
 	if err != nil {
 		return nil, fmt.Errorf("list overdue invoiced: %w", err)
 	}
@@ -251,7 +244,7 @@ func (r *Repository) GetAccommodationType(ctx context.Context, code string) (*do
 	var t domain.AccommodationType
 	var capacity *int
 	var priceID *string
-	err := r.pool.QueryRow(ctx, q, code).Scan(&t.Code, &t.DisplayName, &capacity, &priceID, &t.AvailableForRegistration)
+	err := r.db(ctx).QueryRow(ctx, q, code).Scan(&t.Code, &t.DisplayName, &capacity, &priceID, &t.AvailableForRegistration)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -266,7 +259,7 @@ func (r *Repository) GetAccommodationType(ctx context.Context, code string) (*do
 // ListAccommodationTypes returns all tiers with capacity and Stripe Price ids.
 func (r *Repository) ListAccommodationTypes(ctx context.Context) ([]domain.AccommodationType, error) {
 	const q = `SELECT code, display_name, capacity, stripe_price_id, available_for_registration FROM accommodation_types ORDER BY sort_order, code`
-	rows, err := r.pool.Query(ctx, q)
+	rows, err := r.db(ctx).Query(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list accommodation types: %w", err)
 	}
@@ -290,7 +283,7 @@ func (r *Repository) ListAccommodationTypes(ctx context.Context) ([]domain.Accom
 // AccommodationAvailability returns a map of code -> available_for_registration.
 func (r *Repository) AccommodationAvailability(ctx context.Context) (map[string]bool, error) {
 	const q = `SELECT code, available_for_registration FROM accommodation_types`
-	rows, err := r.pool.Query(ctx, q)
+	rows, err := r.db(ctx).Query(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("accommodation availability: %w", err)
 	}
@@ -310,7 +303,7 @@ func (r *Repository) AccommodationAvailability(ctx context.Context) (map[string]
 
 // SetAccommodationAvailableForRegistration toggles a tier's public availability.
 func (r *Repository) SetAccommodationAvailableForRegistration(ctx context.Context, code string, available bool) error {
-	tag, err := r.pool.Exec(ctx,
+	tag, err := r.db(ctx).Exec(ctx,
 		`UPDATE accommodation_types SET available_for_registration = $1 WHERE code = $2`,
 		available, code)
 	if err != nil {
@@ -327,7 +320,7 @@ func (r *Repository) ListAccommodationUnits(ctx context.Context) ([]domain.Accom
 	const q = `SELECT code, accommodation_code, display_name, capacity, sort_order
 		  FROM accommodation_units
 		 ORDER BY accommodation_code, sort_order, code`
-	rows, err := r.pool.Query(ctx, q)
+	rows, err := r.db(ctx).Query(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list accommodation units: %w", err)
 	}
@@ -349,7 +342,7 @@ func (r *Repository) GetAccommodationUnit(ctx context.Context, code string) (*do
 	const q = `SELECT code, accommodation_code, display_name, capacity, sort_order
 		  FROM accommodation_units WHERE code = $1`
 	var u domain.AccommodationUnit
-	err := r.pool.QueryRow(ctx, q, code).Scan(
+	err := r.db(ctx).QueryRow(ctx, q, code).Scan(
 		&u.Code, &u.AccommodationCode, &u.DisplayName, &u.Capacity, &u.SortOrder)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -362,7 +355,7 @@ func (r *Repository) GetAccommodationUnit(ctx context.Context, code string) (*do
 
 // UpdateAccommodationStripePrice sets stripe_price_id for a tier (admin/setup).
 func (r *Repository) UpdateAccommodationStripePrice(ctx context.Context, code, priceID string) error {
-	tag, err := r.pool.Exec(ctx,
+	tag, err := r.db(ctx).Exec(ctx,
 		`UPDATE accommodation_types SET stripe_price_id = $1 WHERE code = $2`,
 		priceID, code)
 	if err != nil {
@@ -376,7 +369,7 @@ func (r *Repository) UpdateAccommodationStripePrice(ctx context.Context, code, p
 
 // ExtendInvoiceDueAt pushes the due date (admin action).
 func (r *Repository) ExtendInvoiceDueAt(ctx context.Context, groupID string, dueAt time.Time) error {
-	tag, err := r.pool.Exec(ctx,
+	tag, err := r.db(ctx).Exec(ctx,
 		`UPDATE registration_groups SET invoice_due_at = $1 WHERE id = $2 AND billing_status = 'invoiced'`,
 		dueAt.UTC(), groupID)
 	if err != nil {

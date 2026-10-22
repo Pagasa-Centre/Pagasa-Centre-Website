@@ -11,8 +11,7 @@ import (
 	"pagasacentre/backend/internal/middleware"
 	"pagasacentre/backend/internal/registration"
 	"pagasacentre/backend/internal/registration/domain"
-	regstorage "pagasacentre/backend/internal/registration/storage"
-	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
+		commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 	"pagasacentre/backend/pkg/commonlibrary/render"
 	"pagasacentre/backend/pkg/commonlibrary/request"
 )
@@ -79,7 +78,7 @@ func postRevokeFreeCode(svc *registration.Service, rec *adminlog.Recorder) http.
 	}
 }
 
-func postConfirmFree(billSvc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+func postConfirmFree(billSvc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
@@ -89,7 +88,7 @@ func postConfirmFree(billSvc *billing.Service, rec *adminlog.Recorder, regRepo *
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
+		g, _ := regSvc.FindGroup(r.Context(), groupID)
 		gid := groupID
 		admin.Audit(rec, r, adminlog.ActionFreeConfirmed, &gid,
 			"Confirmed sponsorship for "+admin.GroupSummary(g), nil)

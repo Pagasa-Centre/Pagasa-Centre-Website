@@ -6,13 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"pagasacentre/backend/internal/email"
 	"pagasacentre/backend/internal/payment"
 	"pagasacentre/backend/internal/registration/domain"
 	"pagasacentre/backend/internal/registration/storage"
 	"pagasacentre/backend/internal/testhelper"
+	commondb "pagasacentre/backend/pkg/commonlibrary/db"
 )
 
 type recordingMailer struct {
@@ -73,11 +72,6 @@ func (m *recordingMailer) callCount() int {
 // session id. Returns the group id.
 func seedPendingGroup(t *testing.T, ctx context.Context, repo *storage.Repository, sessID, emailAddr string) string {
 	t.Helper()
-	tx, err := repo.Pool().BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
 	req := domain.SubmitRequest{
 		Contact: domain.ContactDTO{
 			FirstName: "Web", LastName: "Hook", Email: emailAddr, Phone: "+44 0",
@@ -93,17 +87,14 @@ func seedPendingGroup(t *testing.T, ctx context.Context, repo *storage.Repositor
 			},
 		}},
 	}
-	gid, err := repo.InsertGroup(ctx, tx, req, 5000, "GBP", false, false)
+	gid, err := repo.InsertGroup(ctx, req, 5000, "GBP", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.InsertCamper(ctx, tx, gid, req.Campers[0]); err != nil {
+	if err := repo.InsertCamper(ctx, gid, req.Campers[0]); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.SetStripeSession(ctx, tx, gid, sessID); err != nil {
-		t.Fatal(err)
-	}
-	if err := tx.Commit(ctx); err != nil {
+	if err := repo.SetStripeSession(ctx, gid, sessID); err != nil {
 		t.Fatal(err)
 	}
 	return gid
@@ -111,11 +102,6 @@ func seedPendingGroup(t *testing.T, ctx context.Context, repo *storage.Repositor
 
 func seedPendingPrepaidGroup(t *testing.T, ctx context.Context, repo *storage.Repository, sessID, emailAddr string, withCoach bool) string {
 	t.Helper()
-	tx, err := repo.Pool().BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
 	needsCoach := withCoach
 	req := domain.SubmitRequest{
 		Contact: domain.ContactDTO{
@@ -133,17 +119,14 @@ func seedPendingPrepaidGroup(t *testing.T, ctx context.Context, repo *storage.Re
 			},
 		}},
 	}
-	gid, err := repo.InsertGroup(ctx, tx, req, 70000, "GBP", false, true)
+	gid, err := repo.InsertGroup(ctx, req, 70000, "GBP", false, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.InsertCamper(ctx, tx, gid, req.Campers[0]); err != nil {
+	if err := repo.InsertCamper(ctx, gid, req.Campers[0]); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.SetStripeSession(ctx, tx, gid, sessID); err != nil {
-		t.Fatal(err)
-	}
-	if err := tx.Commit(ctx); err != nil {
+	if err := repo.SetStripeSession(ctx, gid, sessID); err != nil {
 		t.Fatal(err)
 	}
 	return gid
@@ -156,7 +139,7 @@ func TestHandleCheckoutCompleted_MarksPaidAndSendsEmail(t *testing.T) {
 
 	_ = seedPendingGroup(t, ctx, repo, "sess_happy", "happy@example.com")
 	mailer := &recordingMailer{}
-	svc := payment.NewService(pool, repo, mailer, nil, "http://localhost:8080")
+	svc := payment.NewService(commondb.NewTxRunner(pool), repo, mailer, nil, "http://localhost:8080")
 
 	if err := svc.HandleCheckoutCompleted(ctx, payment.CheckoutCompleted{
 		SessionID:       "sess_happy",
@@ -188,7 +171,7 @@ func TestHandleCheckoutCompleted_Idempotent(t *testing.T) {
 
 	_ = seedPendingGroup(t, ctx, repo, "sess_idem", "idem@example.com")
 	mailer := &recordingMailer{}
-	svc := payment.NewService(pool, repo, mailer, nil, "http://localhost:8080")
+	svc := payment.NewService(commondb.NewTxRunner(pool), repo, mailer, nil, "http://localhost:8080")
 
 	for i := 0; i < 3; i++ {
 		if err := svc.HandleCheckoutCompleted(ctx, payment.CheckoutCompleted{
@@ -210,7 +193,7 @@ func TestHandleCheckoutCompleted_prepaidSetsBalancePaid(t *testing.T) {
 
 	_ = seedPendingPrepaidGroup(t, ctx, repo, "sess_prepaid", "prepaid@example.com", true)
 	mailer := &recordingMailer{}
-	svc := payment.NewService(pool, repo, mailer, nil, "http://localhost:8080")
+	svc := payment.NewService(commondb.NewTxRunner(pool), repo, mailer, nil, "http://localhost:8080")
 
 	if err := svc.HandleCheckoutCompleted(ctx, payment.CheckoutCompleted{
 		SessionID:       "sess_prepaid",
@@ -253,7 +236,7 @@ func TestHandleCheckoutCompleted_prepaidIdempotent(t *testing.T) {
 
 	_ = seedPendingPrepaidGroup(t, ctx, repo, "sess_prepaid_idem", "prepaid-idem@example.com", false)
 	mailer := &recordingMailer{}
-	svc := payment.NewService(pool, repo, mailer, nil, "http://localhost:8080")
+	svc := payment.NewService(commondb.NewTxRunner(pool), repo, mailer, nil, "http://localhost:8080")
 
 	for i := 0; i < 3; i++ {
 		if err := svc.HandleCheckoutCompleted(ctx, payment.CheckoutCompleted{

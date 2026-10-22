@@ -10,21 +10,16 @@ import (
 	"pagasacentre/backend/internal/registration/domain"
 )
 
-var (
-	ErrFreeCodeInvalid      = errors.New("free code invalid")
-	ErrFreeCodeNotRevocable = errors.New("free code not revocable")
-)
-
 // ReserveFreeCode locks an unused, non-revoked code row for redemption inside tx.
-func (r *Repository) ReserveFreeCode(ctx context.Context, tx pgx.Tx, code string) (string, error) {
+func (r *Repository) ReserveFreeCode(ctx context.Context, code string) (string, error) {
 	const q = `
 		SELECT id FROM free_codes
 		 WHERE code = $1 AND used_at IS NULL AND revoked_at IS NULL
 		 FOR UPDATE`
 	var id string
-	err := tx.QueryRow(ctx, q, code).Scan(&id)
+	err := r.db(ctx).QueryRow(ctx, q, code).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrFreeCodeInvalid
+		return "", domain.ErrFreeCodeInvalid
 	}
 	if err != nil {
 		return "", fmt.Errorf("reserve free code: %w", err)
@@ -33,15 +28,15 @@ func (r *Repository) ReserveFreeCode(ctx context.Context, tx pgx.Tx, code string
 }
 
 // MarkFreeCodeUsed records redemption on a reserved code row.
-func (r *Repository) MarkFreeCodeUsed(ctx context.Context, tx pgx.Tx, codeID, groupID string) error {
-	tag, err := tx.Exec(ctx,
+func (r *Repository) MarkFreeCodeUsed(ctx context.Context, codeID, groupID string) error {
+	tag, err := r.db(ctx).Exec(ctx,
 		`UPDATE free_codes SET used_at = now(), used_by_group_id = $2 WHERE id = $1`,
 		codeID, groupID)
 	if err != nil {
 		return fmt.Errorf("mark free code used: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrFreeCodeInvalid
+		return domain.ErrFreeCodeInvalid
 	}
 	return nil
 }
@@ -52,7 +47,7 @@ func (r *Repository) GenerateFreeCode(ctx context.Context, code, createdBy, note
 	if note != "" {
 		noteVal = note
 	}
-	_, err := r.pool.Exec(ctx,
+	_, err := r.db(ctx).Exec(ctx,
 		`INSERT INTO free_codes (code, created_by, note) VALUES ($1, $2, $3)`,
 		code, createdBy, noteVal)
 	if err != nil {
@@ -67,7 +62,7 @@ func (r *Repository) ListFreeCodes(ctx context.Context) ([]domain.FreeCode, erro
 		SELECT id, code, created_at, created_by, note, used_at, used_by_group_id, revoked_at
 		  FROM free_codes
 		 ORDER BY created_at DESC`
-	rows, err := r.pool.Query(ctx, q)
+	rows, err := r.db(ctx).Query(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list free codes: %w", err)
 	}
@@ -88,7 +83,7 @@ func (r *Repository) ListFreeCodes(ctx context.Context) ([]domain.FreeCode, erro
 
 // RevokeFreeCode soft-disables an unused code.
 func (r *Repository) RevokeFreeCode(ctx context.Context, id string) error {
-	tag, err := r.pool.Exec(ctx,
+	tag, err := r.db(ctx).Exec(ctx,
 		`UPDATE free_codes SET revoked_at = now()
 		  WHERE id = $1 AND used_at IS NULL AND revoked_at IS NULL`,
 		id)
@@ -96,7 +91,7 @@ func (r *Repository) RevokeFreeCode(ctx context.Context, id string) error {
 		return fmt.Errorf("revoke free code: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrFreeCodeNotRevocable
+		return domain.ErrFreeCodeNotRevocable
 	}
 	return nil
 }

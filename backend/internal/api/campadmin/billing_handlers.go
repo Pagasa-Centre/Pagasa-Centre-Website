@@ -14,13 +14,12 @@ import (
 	"pagasacentre/backend/internal/adminlog"
 	"pagasacentre/backend/internal/billing"
 	"pagasacentre/backend/internal/registration/domain"
-	regstorage "pagasacentre/backend/internal/registration/storage"
-	commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
+		commonerrors "pagasacentre/backend/pkg/commonlibrary/errors"
 	"pagasacentre/backend/pkg/commonlibrary/render"
 	"pagasacentre/backend/pkg/commonlibrary/request"
 )
 
-func putAllocation(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+func putAllocation(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.AllocateRequest
 		if err := request.Decode(r, &body); err != nil {
@@ -34,10 +33,10 @@ func putAllocation(svc *billing.Service, rec *adminlog.Recorder, regRepo *regsto
 		// allocation ("none") from an edit of an existing allocation
 		// ("allocated"). This makes the activity log show who did the initial
 		// placement vs. who later changed it.
-		prior, _ := regRepo.FindGroupByID(r.Context(), groupID)
+		prior, _ := regSvc.FindGroup(r.Context(), groupID)
 		isEdit := prior != nil && prior.BillingStatus == domain.BillingAllocated
 		if !isEdit && prior != nil && prior.PaidInFullAtRegistration {
-			campers, _ := regRepo.CampersForGroup(r.Context(), groupID)
+			campers, _ := regSvc.CampersForGroup(r.Context(), groupID)
 			for _, c := range campers {
 				if c.AttendanceType == domain.AttendanceFullWeek && c.AllocatedAccommodationCode != nil && strings.TrimSpace(*c.AllocatedAccommodationCode) != "" {
 					isEdit = true
@@ -50,7 +49,7 @@ func putAllocation(svc *billing.Service, rec *adminlog.Recorder, regRepo *regsto
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
+		g, _ := regSvc.FindGroup(r.Context(), groupID)
 		gid := groupID
 		if isEdit {
 			admin.Audit(rec, r, adminlog.ActionAllocationEdited, &gid,
@@ -63,7 +62,7 @@ func putAllocation(svc *billing.Service, rec *adminlog.Recorder, regRepo *regsto
 	}
 }
 
-func postInvoice(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+func postInvoice(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
@@ -73,7 +72,7 @@ func postInvoice(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstora
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
+		g, _ := regSvc.FindGroup(r.Context(), groupID)
 		gid := groupID
 		admin.Audit(rec, r, adminlog.ActionInvoiceSent, &gid,
 			"Sent balance invoice to "+admin.GroupSummary(g), nil)
@@ -81,7 +80,7 @@ func postInvoice(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstora
 	}
 }
 
-func postInvoiceBulk(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+func postInvoiceBulk(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.BulkInvoiceRequest
 		if err := request.Decode(r, &body); err != nil {
@@ -94,7 +93,7 @@ func postInvoiceBulk(svc *billing.Service, rec *adminlog.Recorder, regRepo *regs
 			if _, failed := errs[id]; failed {
 				continue
 			}
-			g, _ := regRepo.FindGroupByID(r.Context(), id)
+			g, _ := regSvc.FindGroup(r.Context(), id)
 			gid := id
 			admin.Audit(rec, r, adminlog.ActionInvoiceSent, &gid,
 				"Sent balance invoice to "+admin.GroupSummary(g), nil)
@@ -107,7 +106,7 @@ func postInvoiceBulk(svc *billing.Service, rec *adminlog.Recorder, regRepo *regs
 	}
 }
 
-func postCoachInvoice(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+func postCoachInvoice(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
@@ -117,7 +116,7 @@ func postCoachInvoice(svc *billing.Service, rec *adminlog.Recorder, regRepo *reg
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
+		g, _ := regSvc.FindGroup(r.Context(), groupID)
 		gid := groupID
 		admin.Audit(rec, r, adminlog.ActionCoachInvoiceSent, &gid,
 			"Sent coach invoice to "+admin.GroupSummary(g), nil)
@@ -125,7 +124,7 @@ func postCoachInvoice(svc *billing.Service, rec *adminlog.Recorder, regRepo *reg
 	}
 }
 
-func postCoachInvoiceBulk(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+func postCoachInvoiceBulk(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.BulkInvoiceRequest
 		if err := request.Decode(r, &body); err != nil {
@@ -138,7 +137,7 @@ func postCoachInvoiceBulk(svc *billing.Service, rec *adminlog.Recorder, regRepo 
 			if _, failed := errs[id]; failed {
 				continue
 			}
-			g, _ := regRepo.FindGroupByID(r.Context(), id)
+			g, _ := regSvc.FindGroup(r.Context(), id)
 			gid := id
 			admin.Audit(rec, r, adminlog.ActionCoachInvoiceSent, &gid,
 				"Sent coach invoice to "+admin.GroupSummary(g), nil)
@@ -151,7 +150,7 @@ func postCoachInvoiceBulk(svc *billing.Service, rec *adminlog.Recorder, regRepo 
 	}
 }
 
-func postWaiveCoachFee(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+func postWaiveCoachFee(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
@@ -161,7 +160,7 @@ func postWaiveCoachFee(svc *billing.Service, rec *adminlog.Recorder, regRepo *re
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
+		g, _ := regSvc.FindGroup(r.Context(), groupID)
 		gid := groupID
 		admin.Audit(rec, r, adminlog.ActionCoachFeeWaived, &gid,
 			"Waived coach fee for "+admin.GroupSummary(g), nil)
@@ -169,7 +168,7 @@ func postWaiveCoachFee(svc *billing.Service, rec *adminlog.Recorder, regRepo *re
 	}
 }
 
-func postUnwaiveCoachFee(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+func postUnwaiveCoachFee(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
@@ -179,7 +178,7 @@ func postUnwaiveCoachFee(svc *billing.Service, rec *adminlog.Recorder, regRepo *
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
+		g, _ := regSvc.FindGroup(r.Context(), groupID)
 		gid := groupID
 		admin.Audit(rec, r, adminlog.ActionCoachFeeUnwaived, &gid,
 			"Restored coach fee for "+admin.GroupSummary(g), nil)
@@ -187,7 +186,7 @@ func postUnwaiveCoachFee(svc *billing.Service, rec *adminlog.Recorder, regRepo *
 	}
 }
 
-func postUnallocate(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+func postUnallocate(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
@@ -197,7 +196,7 @@ func postUnallocate(svc *billing.Service, rec *adminlog.Recorder, regRepo *regst
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
+		g, _ := regSvc.FindGroup(r.Context(), groupID)
 		gid := groupID
 		admin.Audit(rec, r, adminlog.ActionUnallocate, &gid,
 			"Reset allocation for "+admin.GroupSummary(g), nil)
@@ -205,7 +204,7 @@ func postUnallocate(svc *billing.Service, rec *adminlog.Recorder, regRepo *regst
 	}
 }
 
-func postRelease(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository, cancelled bool) http.HandlerFunc {
+func postRelease(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder, cancelled bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
@@ -220,14 +219,14 @@ func postRelease(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstora
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
+		g, _ := regSvc.FindGroup(r.Context(), groupID)
 		gid := groupID
 		admin.Audit(rec, r, action, &gid, verb+" allocation for "+admin.GroupSummary(g), nil)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func postMarkPaid(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+func postMarkPaid(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
@@ -238,7 +237,7 @@ func postMarkPaid(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstor
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
+		g, _ := regSvc.FindGroup(r.Context(), groupID)
 		gid := groupID
 		admin.Audit(rec, r, adminlog.ActionBalancePaid, &gid,
 			"Marked balance paid outside Stripe for "+admin.GroupSummary(g), nil)
@@ -246,7 +245,7 @@ func postMarkPaid(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstor
 	}
 }
 
-func deleteCamper(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+func deleteCamper(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
@@ -258,7 +257,7 @@ func deleteCamper(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstor
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
+		g, _ := regSvc.FindGroup(r.Context(), groupID)
 		gid := groupID
 		summary := "Removed " + sum.CamperName + " from " + admin.GroupSummary(g)
 		if sum.InvoiceVoided {
@@ -269,7 +268,7 @@ func deleteCamper(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstor
 	}
 }
 
-func postConvertDayVisitor(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+func postConvertDayVisitor(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.ConvertToDayVisitorRequest
 		if err := request.Decode(r, &body); err != nil {
@@ -489,7 +488,7 @@ func formatDeleteAuditSummary(sum billing.DeleteSummary) string {
 	return text
 }
 
-func postResendInvoice(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+func postResendInvoice(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.VersionedBody
 		_ = request.Decode(r, &body)
@@ -499,7 +498,7 @@ func postResendInvoice(svc *billing.Service, rec *adminlog.Recorder, regRepo *re
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
+		g, _ := regSvc.FindGroup(r.Context(), groupID)
 		gid := groupID
 		admin.Audit(rec, r, adminlog.ActionInvoiceResent, &gid,
 			"Re-sent invoice reminder to "+admin.GroupSummary(g), nil)
@@ -527,7 +526,7 @@ func postResyncAllSheets(svc *billing.Service, rec *adminlog.Recorder) http.Hand
 	}
 }
 
-func patchInvoiceDue(svc *billing.Service, rec *adminlog.Recorder, regRepo *regstorage.Repository) http.HandlerFunc {
+func patchInvoiceDue(svc *billing.Service, rec *adminlog.Recorder, regSvc groupFinder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body billing.ExtendDueRequest
 		if err := request.Decode(r, &body); err != nil {
@@ -545,7 +544,7 @@ func patchInvoiceDue(svc *billing.Service, rec *adminlog.Recorder, regRepo *regs
 			commonerrors.WriteError(w, err)
 			return
 		}
-		g, _ := regRepo.FindGroupByID(r.Context(), groupID)
+		g, _ := regSvc.FindGroup(r.Context(), groupID)
 		gid := groupID
 		admin.Audit(rec, r, adminlog.ActionExtendDue, &gid,
 			"Extended invoice due date for "+admin.GroupSummary(g), nil)
@@ -557,7 +556,7 @@ func postBillingSweep(svc *billing.Service, rec *adminlog.Recorder) http.Handler
 	return func(w http.ResponseWriter, r *http.Request) {
 		n, err := svc.SweepOverdue(r.Context())
 		if err != nil {
-			commonerrors.WriteError(w, commonerrors.Internal(err.Error()))
+			commonerrors.WriteError(w, err)
 			return
 		}
 		admin.Audit(rec, r, adminlog.ActionSweep, nil,
@@ -570,7 +569,7 @@ func listAccommodationTypes(repo accommodationLister) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		types, err := repo.ListAccommodationTypes(r.Context())
 		if err != nil {
-			commonerrors.WriteError(w, commonerrors.Internal(err.Error()))
+			commonerrors.WriteError(w, err)
 			return
 		}
 		render.Json(w, http.StatusOK, map[string]any{"accommodations": types})
@@ -581,7 +580,7 @@ func listAccommodationUnits(repo unitsLister) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		units, err := repo.ListAccommodationUnits(r.Context())
 		if err != nil {
-			commonerrors.WriteError(w, commonerrors.Internal(err.Error()))
+			commonerrors.WriteError(w, err)
 			return
 		}
 		render.Json(w, http.StatusOK, map[string]any{"units": units})
@@ -591,7 +590,11 @@ func listAccommodationUnits(repo unitsLister) http.HandlerFunc {
 // putAccommodationAvailability toggles whether a tier is offered on the public
 // registration form. Disabling greys the tile out and rejects submissions that
 // pick it; admin allocation to the tier is unaffected.
-func putAccommodationAvailability(regRepo *regstorage.Repository, rec *adminlog.Recorder) http.HandlerFunc {
+type availabilitySetter interface {
+	SetAccommodationAvailability(ctx context.Context, code string, available bool) error
+}
+
+func putAccommodationAvailability(regSvc availabilitySetter, rec *adminlog.Recorder) http.HandlerFunc {
 	type body struct {
 		Available *bool `json:"available"`
 	}
@@ -606,8 +609,8 @@ func putAccommodationAvailability(regRepo *regstorage.Repository, rec *adminlog.
 			return
 		}
 		code := chi.URLParam(r, "code")
-		if err := regRepo.SetAccommodationAvailableForRegistration(r.Context(), code, *b.Available); err != nil {
-			commonerrors.WriteError(w, commonerrors.Internal(err.Error()))
+		if err := regSvc.SetAccommodationAvailability(r.Context(), code, *b.Available); err != nil {
+			commonerrors.WriteError(w, err)
 			return
 		}
 		state := "hid"
