@@ -14,7 +14,7 @@ Storage  (internal/{domain}/storage/) pgx SQL, returns domain models
 Postgres
 ```
 
-**Dependency rule:** handlers import services; services import storage/domain. Storage must not import handlers or API DTOs. Register new routes in [`internal/http/router/router.go`](internal/http/router/router.go). Wire dependencies in [`cmd/api/main.go`](cmd/api/main.go) only.
+**Dependency rule:** handlers import services; services import domain and reach storage only through interfaces they declare (guardrail 5). Storage must not import handlers or API DTOs. Register new routes in [`internal/http/router/router.go`](internal/http/router/router.go). Wire dependencies in [`cmd/api/main.go`](cmd/api/main.go) only.
 
 ## Directory layout
 
@@ -56,7 +56,7 @@ Existing domains: `camp`, `accommodation`, `registration`, `consent` (api only),
 
 4. **Config:** keep using `internal/config.Load()`. Do not switch to viper unless asked.
 
-5. **Repository types stay exported** (`storage.Repository`). Services that need cross-domain DB access (e.g. `billing`, `payment` using registration storage) take `*regstorage.Repository` — do not hide repos behind new interfaces unless refactoring is explicitly requested.
+5. **Services depend on interfaces they own, not on concrete repositories.** Each service declares the narrow interface it needs in its own package (see `sermonRepo` in `internal/sermon/service.go`); `storage.Repository` satisfies it implicitly and stays exported so `cmd/api/main.go` can construct it. The same applies to cross-domain access (e.g. `billing` and `payment` reading registration data). Services must not import `pgx`/`pgxpool`, hold a pool, or pass `pgx.Tx` — when several writes must be atomic, depend on a service-owned transaction interface (e.g. `WithTx(ctx, func(ctx context.Context) error) error`) implemented in storage. `registration`, `billing` and `payment` still take `*storage.Repository` and pgx transactions: migrate them when you touch them, and never add a new concrete-repository dependency to a service.
 
 6. **No flat feature packages.** Do not put handlers, services, repos, and domain types in one `internal/foo/` package. Do not reintroduce `Mount()` per feature — add routes in `internal/http/router/router.go`.
 
@@ -132,19 +132,41 @@ Map service errors to HTTP status via `errors.StatusFor` or explicit `APIError` 
 ## Service pattern
 
 ```go
+type groupRepo interface {
+	WithTx(ctx context.Context, fn func(ctx context.Context) error) error
+	InsertGroup(ctx context.Context, req domain.SubmitRequest, total int, currency string) (string, error)
+	InsertCamper(ctx context.Context, groupID string, c domain.CamperDTO) error
+}
+
+type Service struct {
+	repo groupRepo
+}
+
 func (s *Service) Submit(ctx context.Context, req domain.SubmitRequest) (*domain.SubmitResponse, error) {
 	if err := Validate(req); err != nil {
 		return nil, err
 	}
 	// business logic …
-	if err := s.repo.InsertGroup(ctx, tx, req, total, currency); err != nil {
+	err := s.repo.WithTx(ctx, func(ctx context.Context) error {
+		groupID, err := s.repo.InsertGroup(ctx, req, total, currency)
+		if err != nil {
+			return err
+		}
+		for _, c := range req.Campers {
+			if err := s.repo.InsertCamper(ctx, groupID, c); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, commonerrors.Internal(err.Error())
 	}
 	return resp, nil
 }
 ```
 
-Keep transactions in the service when multiple storage calls must be atomic.
+The service decides what must be atomic; storage implements `WithTx` by carrying the transaction in `ctx`, so no pgx type appears in the service.
 
 ## Storage pattern
 
